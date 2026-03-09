@@ -1,11 +1,11 @@
 {
-  "name": "aia-code",
+  "name": "@bamptee/aia-code",
   "version": "0.1.0",
   "description": "AI Architecture Assistant - orchestrate AI-assisted development workflows via CLI tools (Claude, Codex, Gemini)",
   "type": "module",
   "license": "MIT",
   "bin": {
-    "aia": "./bin/aia.js"
+    "aia": "bin/aia.js"
   },
   "files": [
     "bin",
@@ -27,7 +27,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jrdev/aia-code.git"
+    "url": "git+https://github.com/bamptee/aia-code.git"
   },
   "scripts": {
     "start": "node bin/aia.js"

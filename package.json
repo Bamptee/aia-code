@@ -1,10 +1,33 @@
 {
-  "name": "aia",
+  "name": "aia-code",
   "version": "0.1.0",
-  "description": "AI Architecture Assistant - orchestrate AI-assisted development workflows",
+  "description": "AI Architecture Assistant - orchestrate AI-assisted development workflows via CLI tools (Claude, Codex, Gemini)",
   "type": "module",
+  "license": "MIT",
   "bin": {
     "aia": "./bin/aia.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "keywords": [
+    "ai",
+    "cli",
+    "architecture",
+    "claude",
+    "codex",
+    "gemini",
+    "orchestrator",
+    "development",
+    "workflow"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jrdev/aia-code.git"
   },
   "scripts": {
     "start": "node bin/aia.js"

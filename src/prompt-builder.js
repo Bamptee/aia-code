@@ -1,0 +1,103 @@
+import path from 'node:path';
+import fs from 'fs-extra';
+import yaml from 'yaml';
+import { AIA_DIR, FEATURE_STEPS } from './constants.js';
+import { loadConfig } from './models.js';
+import { loadKnowledge } from './knowledge-loader.js';
+
+async function readIfExists(filePath) {
+  if (await fs.pathExists(filePath)) {
+    return (await fs.readFile(filePath, 'utf-8')).trim();
+  }
+  return '';
+}
+
+async function loadContextFiles(config, root) {
+  const files = config.context_files ?? [];
+  const sections = [];
+
+  for (const file of files) {
+    const content = await readIfExists(path.join(root, AIA_DIR, file));
+    if (content) {
+      sections.push(content);
+    }
+  }
+
+  return sections.join('\n\n');
+}
+
+async function loadFeatureFiles(feature, step, root) {
+  const stepIndex = FEATURE_STEPS.indexOf(step);
+  if (stepIndex === -1) {
+    throw new Error(`Unknown step "${step}".`);
+  }
+
+  const featureDir = path.join(root, AIA_DIR, 'features', feature);
+  if (!(await fs.pathExists(featureDir))) {
+    throw new Error(`Feature "${feature}" not found.`);
+  }
+
+  const priorSteps = FEATURE_STEPS.slice(0, stepIndex);
+  const sections = [];
+
+  for (const s of priorSteps) {
+    const content = await readIfExists(path.join(featureDir, `${s}.md`));
+    if (content) {
+      sections.push(content);
+    }
+  }
+
+  return sections.join('\n\n');
+}
+
+async function resolveKnowledgeCategories(feature, config, root) {
+  const statusPath = path.join(root, AIA_DIR, 'features', feature, 'status.yaml');
+  const raw = await readIfExists(statusPath);
+
+  if (raw) {
+    const status = yaml.parse(raw);
+    if (status?.knowledge?.length) {
+      return status.knowledge;
+    }
+  }
+
+  return config.knowledge_default ?? [];
+}
+
+async function loadPromptTemplate(step, root) {
+  const templatePath = path.join(root, AIA_DIR, 'prompts', `${step}.md`);
+  const content = await readIfExists(templatePath);
+  if (!content) {
+    throw new Error(`Prompt template not found: prompts/${step}.md`);
+  }
+  return content;
+}
+
+export async function buildPrompt(feature, step, root = process.cwd()) {
+  const config = await loadConfig(root);
+
+  const [context, knowledgeCategories, featureContent, task] = await Promise.all([
+    loadContextFiles(config, root),
+    resolveKnowledgeCategories(feature, config, root),
+    loadFeatureFiles(feature, step, root),
+    loadPromptTemplate(step, root),
+  ]);
+
+  const knowledge = await loadKnowledge(knowledgeCategories, root);
+
+  const parts = [];
+
+  parts.push('=== CONTEXT ===\n');
+  parts.push(context || '(no context files)');
+
+  parts.push('\n\n=== KNOWLEDGE ===\n');
+  parts.push(knowledge || '(no knowledge)');
+
+  parts.push('\n\n=== FEATURE ===\n');
+  parts.push(featureContent || '(no prior steps)');
+
+  parts.push('\n\n=== TASK ===\n');
+  parts.push(task);
+
+  return parts.join('\n');
+}

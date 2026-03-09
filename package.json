@@ -1,0 +1,19 @@
+{
+  "name": "aia",
+  "version": "0.1.0",
+  "description": "AI Architecture Assistant - orchestrate AI-assisted development workflows",
+  "type": "module",
+  "bin": {
+    "aia": "./bin/aia.js"
+  },
+  "scripts": {
+    "start": "node bin/aia.js"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.7",
+    "fs-extra": "^11.2.0",
+    "yaml": "^2.7.0"
+  }
+}

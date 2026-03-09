@@ -1,0 +1,16 @@
+import chalk from 'chalk';
+import { runStep } from '../services/runner.js';
+
+export function registerRunCommand(program) {
+  program
+    .command('run <step> <feature>')
+    .description('Execute a step for a feature using the configured AI model')
+    .action(async (step, feature) => {
+      try {
+        await runStep(step, feature);
+      } catch (err) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+}

@@ -12,7 +12,35 @@ export async function loadConfig(root = process.cwd()) {
   }
 
   const raw = await fs.readFile(configPath, 'utf-8');
-  return yaml.parse(raw);
+  const config = yaml.parse(raw);
+
+  validateConfig(config, configPath);
+
+  return config;
+}
+
+function validateConfig(config, configPath) {
+  if (!config || typeof config !== 'object') {
+    throw new Error(`Invalid config: ${configPath} must be a YAML object.`);
+  }
+
+  if (!config.models || typeof config.models !== 'object') {
+    throw new Error(`Invalid config: "models" section is required in ${configPath}.`);
+  }
+
+  for (const [step, models] of Object.entries(config.models)) {
+    if (!Array.isArray(models)) {
+      throw new Error(`Invalid config: models.${step} must be an array.`);
+    }
+    for (const entry of models) {
+      if (!entry.model || typeof entry.model !== 'string') {
+        throw new Error(`Invalid config: each entry in models.${step} must have a "model" string.`);
+      }
+      if (typeof entry.weight !== 'number' || entry.weight <= 0) {
+        throw new Error(`Invalid config: each entry in models.${step} must have a positive "weight".`);
+      }
+    }
+  }
 }
 
 export function selectByWeight(models) {

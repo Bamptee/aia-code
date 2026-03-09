@@ -3,6 +3,8 @@ import { registerInitCommand } from './commands/init.js';
 import { registerFeatureCommand } from './commands/feature.js';
 import { registerRunCommand } from './commands/run.js';
 import { registerRepoCommand } from './commands/repo.js';
+import { registerStatusCommand } from './commands/status.js';
+import { registerResetCommand } from './commands/reset.js';
 
 export function createCli() {
   const program = new Command();
@@ -16,6 +18,8 @@ export function createCli() {
   registerFeatureCommand(program);
   registerRunCommand(program);
   registerRepoCommand(program);
+  registerStatusCommand(program);
+  registerResetCommand(program);
 
   return program;
 }

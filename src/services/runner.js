@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import chalk from 'chalk';
-import { AIA_DIR, FEATURE_STEPS } from '../constants.js';
+import { AIA_DIR, FEATURE_STEPS, STEP_STATUS } from '../constants.js';
 import { resolveModel } from '../models.js';
 import { buildPrompt } from '../prompt-builder.js';
 import { callModel } from './model-call.js';
@@ -15,11 +15,13 @@ export async function runStep(step, feature, root = process.cwd()) {
 
   const status = await loadStatus(feature, root);
 
-  if (status.steps[step] === 'done') {
-    throw new Error(`Step "${step}" already done for feature "${feature}". Delete the output to re-run.`);
+  if (status.steps[step] === STEP_STATUS.DONE) {
+    throw new Error(
+      `Step "${step}" already done for feature "${feature}". Use "aia reset ${step} ${feature}" to re-run.`,
+    );
   }
 
-  await updateStepStatus(feature, step, 'in-progress', root);
+  await updateStepStatus(feature, step, STEP_STATUS.IN_PROGRESS, root);
 
   try {
     const model = await resolveModel(step, root);
@@ -32,13 +34,13 @@ export async function runStep(step, feature, root = process.cwd()) {
     const outputPath = path.join(root, AIA_DIR, 'features', feature, `${step}.md`);
     await fs.writeFile(outputPath, output, 'utf-8');
 
-    await updateStepStatus(feature, step, 'done', root);
+    await updateStepStatus(feature, step, STEP_STATUS.DONE, root);
     await logExecution({ feature, step, model, duration }, root);
 
     console.log(chalk.green(`Step "${step}" completed for feature "${feature}".`));
     return output;
   } catch (err) {
-    await updateStepStatus(feature, step, 'error', root);
+    await updateStepStatus(feature, step, STEP_STATUS.ERROR, root);
     throw err;
   }
 }

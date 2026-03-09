@@ -4,13 +4,7 @@ import yaml from 'yaml';
 import { AIA_DIR, FEATURE_STEPS } from './constants.js';
 import { loadConfig } from './models.js';
 import { loadKnowledge } from './knowledge-loader.js';
-
-async function readIfExists(filePath) {
-  if (await fs.pathExists(filePath)) {
-    return (await fs.readFile(filePath, 'utf-8')).trim();
-  }
-  return '';
-}
+import { readIfExists } from './utils.js';
 
 async function loadContextFiles(config, root) {
   const files = config.context_files ?? [];

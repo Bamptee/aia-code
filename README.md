@@ -2,15 +2,26 @@
 
 CLI tool that orchestrates AI-assisted development workflows using a `.aia` folder convention.
 
-AIA structures your feature development into steps (brief, spec, tech-spec, etc.), builds rich prompts from project context and knowledge files, and sends them to configurable AI models (OpenAI, Anthropic, Gemini) with weighted random selection.
+AIA structures your feature development into steps (brief, spec, tech-spec, etc.), builds rich prompts from project context and knowledge files, and delegates execution to AI CLI tools (Claude Code, Codex CLI, Gemini CLI) with weighted random model selection.
 
 ## Quick start
 
 ```bash
 npm install
-cp .env.example .env   # add your API keys
 node bin/aia.js init
 ```
+
+## Prerequisites
+
+AIA delegates to AI CLI tools. Install the ones you need:
+
+| Provider | CLI | Install |
+|----------|-----|---------|
+| Anthropic | `claude` (Claude Code) | `npm install -g @anthropic-ai/claude-code` |
+| OpenAI | `codex` (Codex CLI) | `npm install -g @openai/codex` |
+| Google | `gemini` (Gemini CLI) | `npm install -g @anthropic-ai/gemini-cli` |
+
+Each CLI manages its own authentication. Run `claude`, `codex`, or `gemini` once to log in before using AIA.
 
 ## Commands
 
@@ -19,13 +30,13 @@ node bin/aia.js init
 | `aia init` | Create `.aia/` folder structure and default config |
 | `aia feature <name>` | Create a new feature workspace |
 | `aia run <step> <feature>` | Execute a step for a feature using AI |
+| `aia status <feature>` | Show the current status of a feature |
+| `aia reset <step> <feature>` | Reset a step to pending so it can be re-run |
 | `aia repo scan` | Scan codebase and generate `repo-map.json` |
 
 ## Integrate into an existing project
 
 ### 1. Install
-
-Copy or symlink the `aia-code` folder into your project, or install globally:
 
 ```bash
 cd your-project
@@ -61,19 +72,7 @@ your-project/
     logs/
 ```
 
-### 3. Configure API keys
-
-Create a `.env` at your project root:
-
-```env
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GEMINI_API_KEY=AI...
-```
-
-Add `.env` to your `.gitignore`.
-
-### 4. Write context files
+### 3. Write context files
 
 These files describe your project to the AI. They are injected into every prompt.
 
@@ -99,7 +98,7 @@ context_files:
   - context/architecture.md
 ```
 
-### 5. Write knowledge files
+### 4. Write knowledge files
 
 Knowledge files contain reusable technical guidelines, organized by category.
 
@@ -122,7 +121,7 @@ knowledge_default:
 
 Each feature can override this via its `status.yaml` `knowledge` field.
 
-### 6. Write prompt templates
+### 5. Write prompt templates
 
 One template per step, stored in `.aia/prompts/`:
 
@@ -150,56 +149,65 @@ Required templates (one per step you want to run):
 .aia/prompts/review.md
 ```
 
-### 7. Configure models
+### 6. Configure models
 
 In `config.yaml`, assign models to steps with probability weights:
 
 ```yaml
 models:
   brief:
-    - model: claude-3-7-sonnet
+    - model: claude-sonnet-4-6
       weight: 1
 
   questions:
-    - model: claude-3-7-sonnet
+    - model: claude-sonnet-4-6
       weight: 0.5
-    - model: gpt-4.1
+    - model: o3
       weight: 0.5
 
   tech-spec:
     - model: gpt-4.1
       weight: 0.6
-    - model: gemini-1.5-pro
+    - model: gemini-2.5-pro
       weight: 0.4
 ```
 
 Weights don't need to sum to 1 -- they are normalized at runtime.
 
-Supported model prefixes:
+Supported model prefixes and the CLI used:
 
-| Prefix | Provider |
-|--------|----------|
-| `gpt-*`, `o*` | OpenAI |
-| `claude-*` | Anthropic |
-| `gemini-*` | Gemini |
+| Prefix | CLI | Examples |
+|--------|-----|----------|
+| `claude-*` | `claude -p --model` | `claude-sonnet-4-6`, `claude-3-7-sonnet` |
+| `gpt-*`, `o[0-9]*` | `codex exec` | `gpt-4.1`, `o3`, `o4-mini` |
+| `gemini-*` | `gemini` | `gemini-2.5-pro`, `gemini-2.5-flash` |
 
-### 8. Create a feature and run steps
+### 7. Create a feature and run steps
 
 ```bash
 npx aia feature session-replay
 npx aia run brief session-replay
+npx aia status session-replay
 npx aia run tech-spec session-replay
 ```
 
 Each run:
 1. Loads context files + knowledge + prior step outputs
 2. Selects a model based on weights
-3. Streams the response from the AI
-4. Saves the output to `.aia/features/<name>/<step>.md`
-5. Updates `status.yaml` (marks step `done`, advances `current_step`)
-6. Logs execution to `.aia/logs/execution.log`
+3. Sends the assembled prompt to the CLI tool via stdin
+4. Streams the response to stdout in real-time
+5. Saves the output to `.aia/features/<name>/<step>.md`
+6. Updates `status.yaml` (marks step `done`, advances `current_step`)
+7. Logs execution to `.aia/logs/execution.log`
 
-### 9. Scan your repo
+To re-run a step:
+
+```bash
+npx aia reset tech-spec session-replay
+npx aia run tech-spec session-replay
+```
+
+### 8. Scan your repo
 
 ```bash
 npx aia repo scan
@@ -211,29 +219,33 @@ Generates `.aia/repo-map.json` -- a categorized index of your source files (serv
 
 ```
 bin/
-  aia.js                  # CLI entrypoint, loads dotenv
+  aia.js                  # CLI entrypoint
 src/
   cli.js                  # Commander program, registers commands
   constants.js            # Shared constants (dirs, steps, scan config)
-  models.js               # Config loader, weighted model selection
+  models.js               # Config loader + validation, weighted model selection
   logger.js               # Execution log writer
   knowledge-loader.js     # Recursive markdown loader by category
   prompt-builder.js       # Assembles full prompt from all sources
+  utils.js                # Shared filesystem helpers
   commands/
     init.js               # aia init
     feature.js            # aia feature <name>
     run.js                # aia run <step> <feature>
+    status.js             # aia status <feature>
+    reset.js              # aia reset <step> <feature>
     repo.js               # aia repo scan
   providers/
     registry.js           # Model name -> provider routing
-    openai.js             # OpenAI streaming provider
-    anthropic.js          # Anthropic streaming provider
-    gemini.js             # Gemini streaming provider
+    cli-runner.js         # Shared CLI spawn logic (stdout streaming, timeout, error handling)
+    openai.js             # codex exec
+    anthropic.js          # claude -p
+    gemini.js             # gemini
   services/
     scaffold.js           # .aia/ folder creation
     config.js             # Default config generation
     feature.js            # Feature workspace creation + validation
-    status.js             # status.yaml read/write
+    status.js             # status.yaml read/write/reset
     runner.js             # Step execution orchestrator
     model-call.js         # Provider dispatch
     repo-scan.js          # Codebase scanner + categorizer
@@ -282,14 +294,15 @@ When you run a step, the prompt is built from four sections:
 (content of prompts/<step>.md)
 ```
 
+The full prompt is piped to the CLI tool via stdin, so there are no argument length limits.
+
 ## Dependencies
 
-Only five runtime dependencies:
+Only four runtime dependencies:
 
 - `commander` -- CLI framework
 - `yaml` -- YAML parse/stringify
-- `dotenv` -- .env loading
 - `fs-extra` -- filesystem utilities
 - `chalk` -- terminal colors
 
-API calls use Node.js built-in `fetch`.
+AI calls use `child_process.spawn` to delegate to installed CLI tools.

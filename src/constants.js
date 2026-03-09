@@ -34,3 +34,10 @@ export const FEATURE_STEPS = [
   'dev-plan',
   'review',
 ];
+
+export const STEP_STATUS = {
+  PENDING: 'pending',
+  IN_PROGRESS: 'in-progress',
+  DONE: 'done',
+  ERROR: 'error',
+};

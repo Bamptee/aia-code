@@ -38,7 +38,7 @@ export async function updateStepStatus(feature, step, value, root = process.cwd(
 
   const stepIndex = FEATURE_STEPS.indexOf(step);
   const nextStep = FEATURE_STEPS[stepIndex + 1] ?? null;
-  if (value === STEP_STATUS.DONE && nextStep) {
+  if (value === STEP_STATUS.DONE) {
     status.current_step = nextStep;
   }
 

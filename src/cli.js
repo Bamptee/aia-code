@@ -5,6 +5,7 @@ import { registerRunCommand } from './commands/run.js';
 import { registerRepoCommand } from './commands/repo.js';
 import { registerStatusCommand } from './commands/status.js';
 import { registerResetCommand } from './commands/reset.js';
+import { registerNextCommand } from './commands/next.js';
 
 export function createCli() {
   const program = new Command();
@@ -17,6 +18,7 @@ export function createCli() {
   registerInitCommand(program);
   registerFeatureCommand(program);
   registerRunCommand(program);
+  registerNextCommand(program);
   registerRepoCommand(program);
   registerStatusCommand(program);
   registerResetCommand(program);

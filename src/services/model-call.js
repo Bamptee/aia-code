@@ -1,9 +1,11 @@
 import chalk from 'chalk';
-import { getProvider } from '../providers/registry.js';
+import { resolveModelAlias } from '../providers/registry.js';
 
 export async function callModel(model, prompt) {
-  console.log(chalk.yellow(`[AI] Calling ${model}...`));
+  const resolved = resolveModelAlias(model);
+  const displayName = resolved.model ?? `${model} (CLI default)`;
 
-  const provider = getProvider(model);
-  return provider.generate(prompt, model);
+  console.log(chalk.yellow(`[AI] Calling ${displayName}...`));
+
+  return resolved.provider.generate(prompt, resolved.model);
 }

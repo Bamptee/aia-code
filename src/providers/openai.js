@@ -1,9 +1,11 @@
 import { runCli } from './cli-runner.js';
 
 export async function generate(prompt, model) {
-  return runCli('codex', [
-    'exec',
-    '-c', `model="${model}"`,
-    '-',
-  ], { stdin: prompt });
+  const args = ['exec'];
+  if (model) {
+    args.push('-c', `model="${model}"`);
+  }
+  args.push('-');
+
+  return runCli('codex', args, { stdin: prompt });
 }

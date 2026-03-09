@@ -6,13 +6,12 @@ import { AIA_DIR } from '../constants.js';
 const DEFAULT_CONFIG = {
   models: {
     questions: [
-      { model: 'claude-3-7-sonnet', weight: 0.4 },
-      { model: 'gpt-4.1', weight: 0.4 },
-      { model: 'copilot', weight: 0.2 },
+      { model: 'claude-default', weight: 0.5 },
+      { model: 'openai-default', weight: 0.5 },
     ],
     'tech-spec': [
-      { model: 'gpt-4.1', weight: 0.5 },
-      { model: 'copilot', weight: 0.5 },
+      { model: 'claude-default', weight: 0.5 },
+      { model: 'openai-default', weight: 0.5 },
     ],
   },
   knowledge_default: ['backend'],

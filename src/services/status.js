@@ -63,8 +63,5 @@ export async function resetStep(feature, step, root = process.cwd()) {
   const content = yaml.stringify(status);
   await fs.writeFile(statusPath(feature, root), content, 'utf-8');
 
-  const outputPath = path.join(root, AIA_DIR, 'features', feature, `${step}.md`);
-  if (await fs.pathExists(outputPath)) {
-    await fs.writeFile(outputPath, '', 'utf-8');
-  }
+  // Keep the existing output — it will be fed back as context on re-run
 }

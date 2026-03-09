@@ -44,9 +44,14 @@ async function loadFeatureFiles(feature, step, root) {
   return sections.join('\n\n');
 }
 
+async function loadPreviousOutput(feature, step, root) {
+  const filePath = path.join(root, AIA_DIR, 'features', feature, `${step}.md`);
+  return readIfExists(filePath);
+}
+
 async function resolveKnowledgeCategories(feature, config, root) {
-  const statusPath = path.join(root, AIA_DIR, 'features', feature, 'status.yaml');
-  const raw = await readIfExists(statusPath);
+  const statusFile = path.join(root, AIA_DIR, 'features', feature, 'status.yaml');
+  const raw = await readIfExists(statusFile);
 
   if (raw) {
     const status = yaml.parse(raw);
@@ -67,19 +72,26 @@ async function loadPromptTemplate(step, root) {
   return content;
 }
 
-export async function buildPrompt(feature, step, root = process.cwd()) {
+export async function buildPrompt(feature, step, { description, root = process.cwd() } = {}) {
   const config = await loadConfig(root);
 
-  const [context, knowledgeCategories, featureContent, task] = await Promise.all([
+  const [context, knowledgeCategories, featureContent, previousOutput, task] = await Promise.all([
     loadContextFiles(config, root),
     resolveKnowledgeCategories(feature, config, root),
     loadFeatureFiles(feature, step, root),
+    loadPreviousOutput(feature, step, root),
     loadPromptTemplate(step, root),
   ]);
 
   const knowledge = await loadKnowledge(knowledgeCategories, root);
 
   const parts = [];
+
+  if (description) {
+    parts.push('=== DESCRIPTION ===\n');
+    parts.push(description);
+    parts.push('');
+  }
 
   parts.push('=== CONTEXT ===\n');
   parts.push(context || '(no context files)');
@@ -89,6 +101,12 @@ export async function buildPrompt(feature, step, root = process.cwd()) {
 
   parts.push('\n\n=== FEATURE ===\n');
   parts.push(featureContent || '(no prior steps)');
+
+  if (previousOutput) {
+    parts.push('\n\n=== PREVIOUS OUTPUT ===\n');
+    parts.push(previousOutput);
+    parts.push('\n\nThe above is a previous version of this step. Rewrite it incorporating any new information, answers to questions, and improvements.');
+  }
 
   parts.push('\n\n=== TASK ===\n');
   parts.push(task);

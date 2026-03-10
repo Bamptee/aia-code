@@ -4,6 +4,7 @@ import yaml from 'yaml';
 import { AIA_DIR } from '../constants.js';
 
 const DEFAULT_CONFIG = {
+  projectName: 'My Project',
   models: {
     brief: [
       { model: 'claude-default', weight: 1 },

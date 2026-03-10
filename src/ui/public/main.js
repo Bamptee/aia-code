@@ -101,10 +101,20 @@ function parseRoute(hash) {
 function App() {
   const hash = useHashRoute();
   const { page, name } = parseRoute(hash);
+  const [projectName, setProjectName] = React.useState('');
+
+  React.useEffect(() => {
+    api.get('/config').then(data => {
+      if (data.parsed?.projectName) setProjectName(data.parsed.projectName);
+    }).catch(() => {});
+  }, []);
 
   return React.createElement('div', { className: 'min-h-screen' },
     React.createElement('nav', { className: 'border-b border-aia-border px-6 py-3 flex items-center gap-6' },
       React.createElement('a', { href: '#/', className: 'text-aia-accent font-bold text-lg hover:text-sky-300' }, 'AIA'),
+      projectName && React.createElement('span', {
+        className: 'bg-violet-500/20 text-violet-300 border border-violet-500/30 px-2 py-0.5 rounded text-xs font-medium',
+      }, projectName),
       React.createElement('a', { href: '#/', className: 'text-slate-400 hover:text-slate-200 text-sm' }, 'Features'),
       React.createElement('a', { href: '#/config', className: 'text-slate-400 hover:text-slate-200 text-sm' }, 'Config'),
     ),

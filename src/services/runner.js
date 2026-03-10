@@ -1,14 +1,14 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import chalk from 'chalk';
-import { AIA_DIR, FEATURE_STEPS, STEP_STATUS } from '../constants.js';
+import { AIA_DIR, FEATURE_STEPS, APPLY_STEPS, STEP_STATUS } from '../constants.js';
 import { resolveModel } from '../models.js';
 import { buildPrompt } from '../prompt-builder.js';
 import { callModel } from './model-call.js';
 import { loadStatus, updateStepStatus } from './status.js';
 import { logExecution } from '../logger.js';
 
-export async function runStep(step, feature, { description, root = process.cwd() } = {}) {
+export async function runStep(step, feature, { description, verbose = false, apply = false, root = process.cwd() } = {}) {
   if (!FEATURE_STEPS.includes(step)) {
     throw new Error(`Unknown step "${step}". Valid steps: ${FEATURE_STEPS.join(', ')}`);
   }
@@ -23,12 +23,14 @@ export async function runStep(step, feature, { description, root = process.cwd()
 
   await updateStepStatus(feature, step, STEP_STATUS.IN_PROGRESS, root);
 
+  const shouldApply = apply || APPLY_STEPS.has(step);
+
   try {
     const model = await resolveModel(step, root);
     const prompt = await buildPrompt(feature, step, { description, root });
 
     const start = performance.now();
-    const output = await callModel(model, prompt);
+    const output = await callModel(model, prompt, { verbose, apply: shouldApply });
     const duration = performance.now() - start;
 
     const outputPath = path.join(root, AIA_DIR, 'features', feature, `${step}.md`);

@@ -32,8 +32,13 @@ export const FEATURE_STEPS = [
   'tech-spec',
   'challenge',
   'dev-plan',
+  'implement',
   'review',
 ];
+
+export const APPLY_STEPS = new Set([
+  'implement',
+]);
 
 export const STEP_STATUS = {
   PENDING: 'pending',

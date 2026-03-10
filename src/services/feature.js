@@ -5,13 +5,7 @@ import { AIA_DIR, FEATURE_STEPS } from '../constants.js';
 
 const FEATURE_FILES = [
   'status.yaml',
-  'brief.md',
-  'ba-spec.md',
-  'questions.md',
-  'tech-spec.md',
-  'challenge.md',
-  'dev-plan.md',
-  'review.md',
+  ...FEATURE_STEPS.map((s) => `${s}.md`),
 ];
 
 const FEATURE_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

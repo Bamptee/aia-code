@@ -2,13 +2,15 @@
 
 CLI tool that orchestrates AI-assisted development workflows using a `.aia` folder convention.
 
-AIA structures your feature development into steps (brief, spec, tech-spec, etc.), builds rich prompts from project context and knowledge files, and delegates execution to AI CLI tools (Claude Code, Codex CLI, Gemini CLI) with weighted random model selection.
+AIA structures your feature development into steps (brief, spec, tech-spec, dev-plan, implement, etc.), builds rich prompts from project context and knowledge files, and delegates execution to AI CLI tools (Claude Code, Codex CLI, Gemini CLI) with weighted random model selection.
 
 ## Quick start
 
 ```bash
-npm install
-node bin/aia.js init
+npm install -g @bamptee/aia-code
+aia init
+aia feature session-replay
+aia next session-replay "Record and replay user sessions for debugging"
 ```
 
 ## Prerequisites
@@ -19,7 +21,7 @@ AIA delegates to AI CLI tools. Install the ones you need:
 |----------|-----|---------|
 | Anthropic | `claude` (Claude Code) | `npm install -g @anthropic-ai/claude-code` |
 | OpenAI | `codex` (Codex CLI) | `npm install -g @openai/codex` |
-| Google | `gemini` (Gemini CLI) | `npm install -g @anthropic-ai/gemini-cli` |
+| Google | `gemini` (Gemini CLI) | `npm install -g @google/gemini-cli` |
 
 Each CLI manages its own authentication. Run `claude`, `codex`, or `gemini` once to log in before using AIA.
 
@@ -29,34 +31,40 @@ Each CLI manages its own authentication. Run `claude`, `codex`, or `gemini` once
 |---------|-------------|
 | `aia init` | Create `.aia/` folder structure and default config |
 | `aia feature <name>` | Create a new feature workspace |
-| `aia run <step> <feature>` | Execute a step for a feature using AI |
+| `aia run <step> <feature> [description]` | Execute a step for a feature |
+| `aia next <feature> [description]` | Run the next pending step automatically |
 | `aia status <feature>` | Show the current status of a feature |
 | `aia reset <step> <feature>` | Reset a step to pending so it can be re-run |
 | `aia repo scan` | Scan codebase and generate `repo-map.json` |
+
+### Options for `run` and `next`
+
+| Flag | Description |
+|------|-------------|
+| `-v, --verbose` | Show CLI logs in real-time (thinking, tool use, file reads) |
+| `-a, --apply` | Let the AI edit and create files in the project (agent mode) |
+
+The `implement` step forces `--apply` automatically.
 
 ## Integrate into an existing project
 
 ### 1. Install
 
 ```bash
-cd your-project
-npm install /path/to/aia-code
+npm install -g @bamptee/aia-code
 ```
 
-Or add it as a dev dependency in your `package.json`:
+Or as a dev dependency:
 
-```json
-{
-  "devDependencies": {
-    "aia": "file:../aia-code"
-  }
-}
+```bash
+cd your-project
+npm install --save-dev @bamptee/aia-code
 ```
 
 ### 2. Initialize
 
 ```bash
-npx aia init
+aia init
 ```
 
 This creates:
@@ -132,9 +140,10 @@ Include: problem statement, target users, success metrics.
 ```
 
 ```markdown
-<!-- .aia/prompts/tech-spec.md -->
-Write a technical specification.
-Include: data models, API endpoints, architecture decisions, trade-offs.
+<!-- .aia/prompts/implement.md -->
+Implement the feature following the dev-plan.
+Create all necessary files (controllers, services, models, routes, tests).
+Follow the project conventions from the context and knowledge files.
 ```
 
 Required templates (one per step you want to run):
@@ -146,6 +155,7 @@ Required templates (one per step you want to run):
 .aia/prompts/tech-spec.md
 .aia/prompts/challenge.md
 .aia/prompts/dev-plan.md
+.aia/prompts/implement.md
 .aia/prompts/review.md
 ```
 
@@ -156,13 +166,13 @@ In `config.yaml`, assign models to steps with probability weights:
 ```yaml
 models:
   brief:
-    - model: claude-sonnet-4-6
+    - model: claude-default
       weight: 1
 
   questions:
-    - model: claude-sonnet-4-6
+    - model: claude-default
       weight: 0.5
-    - model: o3
+    - model: openai-default
       weight: 0.5
 
   tech-spec:
@@ -170,50 +180,175 @@ models:
       weight: 0.6
     - model: gemini-2.5-pro
       weight: 0.4
+
+  implement:
+    - model: claude-default
+      weight: 1
 ```
 
 Weights don't need to sum to 1 -- they are normalized at runtime.
 
-Supported model prefixes and the CLI used:
+#### Model aliases
+
+Use aliases to delegate to the CLI's default model:
+
+| Alias | CLI used |
+|-------|----------|
+| `claude-default` | `claude` (uses whatever model is configured in Claude Code) |
+| `openai-default` | `codex` (uses whatever model is configured in Codex CLI) |
+| `codex-default` | `codex` (same as above) |
+| `gemini-default` | `gemini` (uses whatever model is configured in Gemini CLI) |
+
+#### Specific models
 
 | Prefix | CLI | Examples |
 |--------|-----|----------|
-| `claude-*` | `claude -p --model` | `claude-sonnet-4-6`, `claude-3-7-sonnet` |
+| `claude-*` | `claude -p --model` | `claude-sonnet-4-6`, `claude-opus-4-6` |
 | `gpt-*`, `o[0-9]*` | `codex exec` | `gpt-4.1`, `o3`, `o4-mini` |
 | `gemini-*` | `gemini` | `gemini-2.5-pro`, `gemini-2.5-flash` |
 
-### 7. Create a feature and run steps
+### 7. Run the feature pipeline
+
+#### Step by step
 
 ```bash
-npx aia feature session-replay
-npx aia run brief session-replay
-npx aia status session-replay
-npx aia run tech-spec session-replay
+aia feature session-replay
+aia run brief session-replay "Record and replay user sessions"
+aia status session-replay
+aia run ba-spec session-replay
+aia run tech-spec session-replay
 ```
 
-Each run:
-1. Loads context files + knowledge + prior step outputs
-2. Selects a model based on weights
-3. Sends the assembled prompt to the CLI tool via stdin
-4. Streams the response to stdout in real-time
-5. Saves the output to `.aia/features/<name>/<step>.md`
-6. Updates `status.yaml` (marks step `done`, advances `current_step`)
-7. Logs execution to `.aia/logs/execution.log`
+#### Using `next` (recommended)
 
-To re-run a step:
+`next` automatically picks the next pending step:
 
 ```bash
-npx aia reset tech-spec session-replay
-npx aia run tech-spec session-replay
+aia feature session-replay
+aia next session-replay "Record and replay user sessions"   # -> brief
+aia next session-replay                                      # -> ba-spec
+aia next session-replay                                      # -> questions
+aia next session-replay                                      # -> tech-spec
+aia next session-replay                                      # -> challenge
+aia next session-replay                                      # -> dev-plan
+aia next session-replay                                      # -> implement (auto --apply)
+aia next session-replay                                      # -> review
 ```
 
-### 8. Scan your repo
+#### Description parameter
+
+Pass a short description in quotes to give context to the AI. Especially useful for the `brief` step:
 
 ```bash
-npx aia repo scan
+aia run brief session-replay "Record DOM + network requests, replay for debugging"
+aia next session-replay "Capture DOM snapshots, max 30 min sessions"
+```
+
+#### Re-running a step
+
+When you re-run a step, the previous output is fed back as context so the AI can improve it:
+
+```bash
+aia reset tech-spec session-replay
+aia run tech-spec session-replay "Add WebSocket support and rate limiting"
+```
+
+### 8. Print mode vs Agent mode
+
+By default, AIA runs in **print mode** -- the AI generates text (specs, plans, reviews) saved to `.md` files.
+
+With `--apply`, AIA runs in **agent mode** -- the AI can edit and create files in your project, just like running `claude` or `codex` directly.
+
+```bash
+# Print mode (default) -- generates a document
+aia run tech-spec session-replay
+
+# Agent mode -- AI writes code in your project
+aia run dev-plan session-replay --apply
+
+# Verbose -- see thinking, tool calls, file operations in real-time
+aia run dev-plan session-replay -av
+```
+
+The `implement` step always runs in agent mode automatically.
+
+| Mode | Timeout | What the AI can do |
+|------|---------|-------------------|
+| Print (default) | 3 min idle | Generate text only |
+| Agent (`--apply`) | 10 min idle | Edit files, run commands, create code |
+
+Idle timeout resets every time the CLI produces output, so long-running steps that stream continuously won't time out.
+
+### 9. Scan your repo
+
+```bash
+aia repo scan
 ```
 
 Generates `.aia/repo-map.json` -- a categorized index of your source files (services, models, routes, controllers, middleware, utils, config). Useful as additional context for prompts.
+
+## Feature workflow
+
+Each feature follows a fixed pipeline of 8 steps:
+
+```
+brief -> ba-spec -> questions -> tech-spec -> challenge -> dev-plan -> implement -> review
+```
+
+| Step | Purpose | Mode |
+|------|---------|------|
+| `brief` | Product brief from a short description | print |
+| `ba-spec` | Business analysis specification | print |
+| `questions` | Questions to clarify requirements | print |
+| `tech-spec` | Technical specification (models, APIs, architecture) | print |
+| `challenge` | Challenge the spec, find gaps and risks | print |
+| `dev-plan` | Step-by-step implementation plan | print |
+| `implement` | Write the actual code | **agent (auto)** |
+| `review` | Code review of the implementation | print |
+
+`status.yaml` tracks progress:
+
+```yaml
+feature: session-replay
+current_step: implement
+steps:
+  brief: done
+  ba-spec: done
+  questions: done
+  tech-spec: done
+  challenge: done
+  dev-plan: done
+  implement: pending
+  review: pending
+knowledge:
+  - backend
+```
+
+## Prompt assembly
+
+When you run a step, the prompt is built from up to 6 sections:
+
+```
+=== DESCRIPTION ===
+(optional -- short description passed via CLI argument)
+
+=== CONTEXT ===
+(content of context files from config.yaml)
+
+=== KNOWLEDGE ===
+(all .md files from the knowledge categories)
+
+=== FEATURE ===
+(outputs of all prior steps for this feature)
+
+=== PREVIOUS OUTPUT ===
+(if re-running -- previous version of this step, for the AI to improve)
+
+=== TASK ===
+(content of prompts/<step>.md)
+```
+
+The full prompt is piped to the CLI tool via stdin, so there are no argument length limits.
 
 ## Project structure
 
@@ -232,12 +367,13 @@ src/
     init.js               # aia init
     feature.js            # aia feature <name>
     run.js                # aia run <step> <feature>
+    next.js               # aia next <feature>
     status.js             # aia status <feature>
     reset.js              # aia reset <step> <feature>
     repo.js               # aia repo scan
   providers/
-    registry.js           # Model name -> provider routing
-    cli-runner.js         # Shared CLI spawn logic (stdout streaming, timeout, error handling)
+    registry.js           # Model name + aliases -> provider routing
+    cli-runner.js         # Shared CLI spawn (streaming, idle timeout, verbose)
     openai.js             # codex exec
     anthropic.js          # claude -p
     gemini.js             # gemini
@@ -251,51 +387,6 @@ src/
     repo-scan.js          # Codebase scanner + categorizer
 ```
 
-## Feature workflow
-
-Each feature follows a fixed pipeline:
-
-```
-brief -> ba-spec -> questions -> tech-spec -> challenge -> dev-plan -> review
-```
-
-`status.yaml` tracks progress:
-
-```yaml
-feature: session-replay
-current_step: tech-spec
-steps:
-  brief: done
-  ba-spec: done
-  questions: pending
-  tech-spec: pending
-  challenge: pending
-  dev-plan: pending
-  review: pending
-knowledge:
-  - backend
-```
-
-## Prompt assembly
-
-When you run a step, the prompt is built from four sections:
-
-```
-=== CONTEXT ===
-(content of context files from config.yaml)
-
-=== KNOWLEDGE ===
-(all .md files from the knowledge categories)
-
-=== FEATURE ===
-(outputs of all prior steps for this feature)
-
-=== TASK ===
-(content of prompts/<step>.md)
-```
-
-The full prompt is piped to the CLI tool via stdin, so there are no argument length limits.
-
 ## Dependencies
 
 Only four runtime dependencies:
@@ -305,4 +396,4 @@ Only four runtime dependencies:
 - `fs-extra` -- filesystem utilities
 - `chalk` -- terminal colors
 
-AI calls use `child_process.spawn` to delegate to installed CLI tools.
+AI calls use `child_process.spawn` to delegate to installed CLI tools. No API keys needed -- each CLI manages its own authentication.

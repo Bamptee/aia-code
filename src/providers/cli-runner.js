@@ -1,8 +1,13 @@
 import { spawn } from 'node:child_process';
+import chalk from 'chalk';
 
-const DEFAULT_TIMEOUT_MS = 300_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 180_000;
+const AGENT_IDLE_TIMEOUT_MS = 600_000;
 
-export function runCli(command, args, { stdin: stdinData, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, idleTimeoutMs } = {}) {
+  if (!idleTimeoutMs) {
+    idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -11,37 +16,56 @@ export function runCli(command, args, { stdin: stdinData, timeoutMs = DEFAULT_TI
 
     const chunks = [];
     let stderr = '';
+    let settled = false;
+
+    function resetTimer() {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        child.kill('SIGTERM');
+        finish(new Error(`CLI idle timeout (no output for ${idleTimeoutMs / 1000}s): ${command} ${args.join(' ')}`));
+      }, idleTimeoutMs);
+    }
+
+    function finish(err, result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve(result);
+    }
+
+    let timer;
+    resetTimer();
 
     child.stdout.on('data', (data) => {
       const text = data.toString();
       process.stdout.write(text);
       chunks.push(text);
+      resetTimer();
     });
 
     child.stderr.on('data', (data) => {
-      stderr += data.toString();
+      const text = data.toString();
+      stderr += text;
+      if (verbose) {
+        process.stderr.write(chalk.gray(text));
+      }
+      resetTimer();
     });
 
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`CLI timed out after ${timeoutMs / 1000}s: ${command} ${args.join(' ')}`));
-    }, timeoutMs);
-
     child.on('error', (err) => {
-      clearTimeout(timer);
       if (err.code === 'ENOENT') {
-        reject(new Error(`CLI not found: "${command}". Make sure it is installed and in your PATH.`));
+        finish(new Error(`CLI not found: "${command}". Make sure it is installed and in your PATH.`));
       } else {
-        reject(err);
+        finish(err);
       }
     });
 
     child.on('close', (code) => {
-      clearTimeout(timer);
       if (code !== 0) {
-        reject(new Error(`${command} exited with code ${code}:\n${stderr.trim()}`));
+        finish(new Error(`${command} exited with code ${code}:\n${stderr.trim()}`));
       } else {
-        resolve(chunks.join(''));
+        finish(null, chunks.join(''));
       }
     });
 

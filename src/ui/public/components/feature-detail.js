@@ -1,5 +1,5 @@
 import React from 'react';
-import { api } from '/main.js';
+import { api, streamPost } from '/main.js';
 
 const STATUS_CLASSES = {
   done: 'step-done',
@@ -65,23 +65,103 @@ function FileEditor({ name, filename, onSaved }) {
   );
 }
 
+function QuickRunButton({ name, onDone }) {
+  const [running, setRunning] = React.useState(false);
+  const [description, setDescription] = React.useState('');
+  const [expanded, setExpanded] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const [logs, setLogs] = React.useState([]);
+
+  async function run() {
+    setRunning(true);
+    setErr(null);
+    setLogs([]);
+
+    const res = await streamPost(`/features/${name}/quick`, { description }, {
+      onLog: (text) => setLogs(prev => [...prev, text]),
+      onStatus: (data) => setLogs(prev => [...prev, `[${data.status}] ${data.mode || ''}\n`]),
+    });
+
+    if (res.ok) {
+      if (onDone) onDone();
+    } else {
+      setErr(res.error);
+    }
+    setRunning(false);
+  }
+
+  if (!expanded) {
+    return React.createElement('button', {
+      onClick: () => setExpanded(true),
+      className: 'bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-3 py-1.5 text-xs hover:bg-amber-500/30',
+    }, 'Quick Ticket (dev-plan \u2192 implement \u2192 review)');
+  }
+
+  return React.createElement('div', { className: 'bg-slate-900 border border-amber-500/30 rounded p-4 space-y-3' },
+    React.createElement('h4', { className: 'text-sm font-semibold text-amber-400' }, 'Quick Ticket'),
+    React.createElement('p', { className: 'text-xs text-slate-500' }, 'Skips early steps, runs dev-plan \u2192 implement \u2192 review'),
+    React.createElement('input', {
+      type: 'text',
+      value: description,
+      onChange: e => setDescription(e.target.value),
+      placeholder: 'Optional description...',
+      disabled: running,
+      className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-amber-400 focus:outline-none',
+    }),
+    React.createElement('div', { className: 'flex gap-2' },
+      React.createElement('button', {
+        onClick: run,
+        disabled: running,
+        className: 'bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-4 py-1.5 text-sm hover:bg-amber-500/30 disabled:opacity-40',
+      }, running ? 'Running...' : 'Run Quick'),
+      React.createElement('button', {
+        onClick: () => setExpanded(false),
+        disabled: running,
+        className: 'text-slate-500 hover:text-slate-300 text-xs',
+      }, 'Cancel'),
+    ),
+    React.createElement(LogViewer, { logs }),
+    err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
+  );
+}
+
+function LogViewer({ logs }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [logs]);
+
+  if (!logs.length) return null;
+  return React.createElement('pre', {
+    ref,
+    className: 'bg-black/50 border border-aia-border rounded p-3 text-xs text-slate-400 overflow-auto max-h-64 whitespace-pre-wrap',
+  }, logs.join(''));
+}
+
 function RunPanel({ name, step, onDone }) {
   const [description, setDescription] = React.useState('');
   const [apply, setApply] = React.useState(false);
   const [running, setRunning] = React.useState(false);
   const [result, setResult] = React.useState(null);
-  const [error, setError] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  const [logs, setLogs] = React.useState([]);
 
   async function run() {
     setRunning(true);
     setResult(null);
-    setError(null);
-    try {
-      const data = await api.post(`/features/${name}/run/${step}`, { description, apply });
+    setErr(null);
+    setLogs([]);
+
+    const res = await streamPost(`/features/${name}/run/${step}`, { description, apply }, {
+      onLog: (text) => setLogs(prev => [...prev, text]),
+      onStatus: (data) => setLogs(prev => [...prev, `[${data.status}] ${data.step || ''}\n`]),
+    });
+
+    if (res.ok) {
       setResult('Step completed.');
       if (onDone) onDone();
-    } catch (e) {
-      setError(e.message);
+    } else {
+      setErr(res.error);
     }
     setRunning(false);
   }
@@ -91,7 +171,7 @@ function RunPanel({ name, step, onDone }) {
       await api.post(`/features/${name}/reset/${step}`);
       if (onDone) onDone();
     } catch (e) {
-      setError(e.message);
+      setErr(e.message);
     }
   }
 
@@ -102,6 +182,7 @@ function RunPanel({ name, step, onDone }) {
       value: description,
       onChange: e => setDescription(e.target.value),
       placeholder: 'Optional description...',
+      disabled: running,
       className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-aia-accent focus:outline-none',
     }),
     React.createElement('div', { className: 'flex items-center gap-4' },
@@ -110,6 +191,7 @@ function RunPanel({ name, step, onDone }) {
           type: 'checkbox',
           checked: apply,
           onChange: e => setApply(e.target.checked),
+          disabled: running,
           className: 'rounded',
         }),
         'Agent mode (--apply)'
@@ -125,9 +207,9 @@ function RunPanel({ name, step, onDone }) {
         className: 'text-slate-500 hover:text-slate-300 text-xs',
       }, 'Reset'),
     ),
-    running && React.createElement('p', { className: 'text-amber-400 text-xs animate-pulse' }, 'Step is running... This may take a few minutes.'),
+    React.createElement(LogViewer, { logs }),
     result && React.createElement('p', { className: 'text-emerald-400 text-xs' }, result),
-    error && React.createElement('p', { className: 'text-red-400 text-xs' }, error),
+    err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
   );
 }
 
@@ -159,6 +241,9 @@ export function FeatureDetail({ name }) {
       React.createElement('h1', { className: 'text-xl font-bold text-slate-100' }, name),
       feature.current_step && React.createElement('span', { className: 'text-xs bg-aia-accent/20 text-aia-accent px-2 py-0.5 rounded' }, feature.current_step),
     ),
+
+    // Quick run
+    React.createElement(QuickRunButton, { name, onDone: load }),
 
     // Pipeline
     React.createElement('div', { className: 'flex flex-wrap gap-2' },

@@ -1,5 +1,5 @@
 import React from 'react';
-import { api } from '/main.js';
+import { api, streamPost } from '/main.js';
 
 const STATUS_CLASSES = {
   done: 'step-done',
@@ -79,6 +79,94 @@ function NewFeatureForm({ onCreated }) {
   );
 }
 
+function LogViewer({ logs }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [logs]);
+
+  if (!logs.length) return null;
+  return React.createElement('pre', {
+    ref,
+    className: 'bg-black/50 border border-aia-border rounded p-3 text-xs text-slate-400 overflow-auto max-h-48 whitespace-pre-wrap',
+  }, logs.join(''));
+}
+
+function QuickTicketForm({ onDone }) {
+  const [name, setName] = React.useState('');
+  const [description, setDescription] = React.useState('');
+  const [apply, setApply] = React.useState(false);
+  const [running, setRunning] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [logs, setLogs] = React.useState([]);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErr('');
+    setRunning(true);
+    setLogs([]);
+
+    const res = await streamPost('/quick', { name, description, apply }, {
+      onLog: (text) => setLogs(prev => [...prev, text]),
+      onStatus: (data) => setLogs(prev => [...prev, `[${data.status}] ${data.name || ''}\n`]),
+    });
+
+    if (res.ok) {
+      setName('');
+      setDescription('');
+      setLogs([]);
+      onDone();
+    } else {
+      setErr(res.error);
+    }
+    setRunning(false);
+  }
+
+  return React.createElement('form', {
+    onSubmit: handleSubmit,
+    className: 'bg-aia-card border border-amber-500/30 rounded-lg p-4 space-y-3',
+  },
+    React.createElement('h3', { className: 'text-sm font-semibold text-amber-400' }, 'Quick Ticket'),
+    React.createElement('p', { className: 'text-xs text-slate-500' }, 'dev-plan \u2192 implement \u2192 review'),
+    React.createElement('div', { className: 'flex gap-2' },
+      React.createElement('input', {
+        type: 'text',
+        value: name,
+        onChange: e => setName(e.target.value),
+        placeholder: 'ticket-name',
+        disabled: running,
+        className: 'bg-slate-900 border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-amber-400 focus:outline-none flex-shrink-0',
+      }),
+      React.createElement('input', {
+        type: 'text',
+        value: description,
+        onChange: e => setDescription(e.target.value),
+        placeholder: 'Short description (optional)',
+        disabled: running,
+        className: 'bg-slate-900 border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-amber-400 focus:outline-none flex-1',
+      }),
+    ),
+    React.createElement('div', { className: 'flex items-center gap-4' },
+      React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer' },
+        React.createElement('input', {
+          type: 'checkbox',
+          checked: apply,
+          onChange: e => setApply(e.target.checked),
+          disabled: running,
+        }),
+        'Agent mode (--apply)'
+      ),
+      React.createElement('button', {
+        type: 'submit',
+        disabled: running || !name,
+        className: 'bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-4 py-1.5 text-sm hover:bg-amber-500/30 disabled:opacity-40',
+      }, running ? 'Running...' : 'Run Quick Ticket'),
+    ),
+    React.createElement(LogViewer, { logs }),
+    err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
+  );
+}
+
 export function Dashboard() {
   const [features, setFeatures] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -93,11 +181,15 @@ export function Dashboard() {
 
   React.useEffect(() => { load(); }, []);
 
-  return React.createElement('div', null,
-    React.createElement('div', { className: 'flex items-center justify-between mb-6' },
+  return React.createElement('div', { className: 'space-y-6' },
+    React.createElement('div', { className: 'flex items-center justify-between' },
       React.createElement('h1', { className: 'text-xl font-bold text-slate-100' }, 'Features'),
       React.createElement(NewFeatureForm, { onCreated: load }),
     ),
+
+    // Quick ticket
+    React.createElement(QuickTicketForm, { onDone: load }),
+
     loading
       ? React.createElement('p', { className: 'text-slate-500' }, 'Loading...')
       : features.length === 0

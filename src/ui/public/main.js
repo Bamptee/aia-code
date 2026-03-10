@@ -31,6 +31,53 @@ export const api = {
   },
 };
 
+// --- SSE stream helper ---
+// POST with SSE response. Calls onLog(text) for each log chunk, returns { ok, error }.
+export async function streamPost(path, body, { onLog, onStatus }) {
+  const res = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result = { ok: true };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // keep incomplete line
+
+    let eventType = null;
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        eventType = line.slice(7);
+      } else if (line.startsWith('data: ') && eventType) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (eventType === 'log' && onLog) {
+            onLog(data.text, data.type);
+          } else if (eventType === 'status' && onStatus) {
+            onStatus(data);
+          } else if (eventType === 'error') {
+            result = { ok: false, error: data.message };
+          } else if (eventType === 'done') {
+            result = { ok: true, ...data };
+          }
+        } catch {}
+        eventType = null;
+      }
+    }
+  }
+
+  return result;
+}
+
 // --- Simple hash router ---
 function useHashRoute() {
   const [route, setRoute] = React.useState(window.location.hash || '#/');

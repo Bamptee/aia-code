@@ -8,7 +8,7 @@ import { callModel } from './model-call.js';
 import { loadStatus, updateStepStatus } from './status.js';
 import { logExecution } from '../logger.js';
 
-export async function runStep(step, feature, { description, verbose = false, apply = false, root = process.cwd() } = {}) {
+export async function runStep(step, feature, { description, verbose = false, apply = false, root = process.cwd(), onData } = {}) {
   if (!FEATURE_STEPS.includes(step)) {
     throw new Error(`Unknown step "${step}". Valid steps: ${FEATURE_STEPS.join(', ')}`);
   }
@@ -30,7 +30,7 @@ export async function runStep(step, feature, { description, verbose = false, app
     const prompt = await buildPrompt(feature, step, { description, root });
 
     const start = performance.now();
-    const output = await callModel(model, prompt, { verbose, apply: shouldApply });
+    const output = await callModel(model, prompt, { verbose, apply: shouldApply, onData });
     const duration = performance.now() - start;
 
     const outputPath = path.join(root, AIA_DIR, 'features', feature, `${step}.md`);

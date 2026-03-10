@@ -1,6 +1,6 @@
 import { runCli } from './cli-runner.js';
 
-export async function generate(prompt, model, { verbose = false, apply = false } = {}) {
+export async function generate(prompt, model, { verbose = false, apply = false, onData } = {}) {
   const args = [];
   if (model) {
     args.push('-m', model);
@@ -10,5 +10,5 @@ export async function generate(prompt, model, { verbose = false, apply = false }
   }
   args.push('-');
 
-  return runCli('gemini', args, { stdin: prompt, verbose: verbose || apply, apply });
+  return runCli('gemini', args, { stdin: prompt, verbose: verbose || apply, apply, onData });
 }

@@ -4,7 +4,7 @@ import chalk from 'chalk';
 const DEFAULT_IDLE_TIMEOUT_MS = 180_000;
 const AGENT_IDLE_TIMEOUT_MS = 600_000;
 
-export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, idleTimeoutMs } = {}) {
+export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, idleTimeoutMs, onData } = {}) {
   if (!idleTimeoutMs) {
     idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
   }
@@ -41,6 +41,7 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
       const text = data.toString();
       process.stdout.write(text);
       chunks.push(text);
+      if (onData) onData({ type: 'stdout', text });
       resetTimer();
     });
 
@@ -50,6 +51,7 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
       if (verbose) {
         process.stderr.write(chalk.gray(text));
       }
+      if (onData) onData({ type: 'stderr', text });
       resetTimer();
     });
 

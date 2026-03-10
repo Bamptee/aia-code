@@ -4,7 +4,21 @@ import { AIA_DIR } from '../../constants.js';
 import { loadStatus, updateStepStatus, resetStep } from '../../services/status.js';
 import { createFeature, validateFeatureName } from '../../services/feature.js';
 import { runStep } from '../../services/runner.js';
+import { runQuick } from '../../services/quick.js';
 import { json, error } from '../router.js';
+
+function sseHeaders(res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+}
+
+function sseSend(res, event, data) {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
 
 export function registerFeatureRoutes(router) {
   // List all features
@@ -70,20 +84,77 @@ export function registerFeatureRoutes(router) {
     }
   });
 
-  // Run a step (blocking - returns when done)
+  // Run a step with SSE streaming
   router.post('/api/features/:name/run/:step', async (req, res, { params, root, parseBody }) => {
     const body = await parseBody();
+    sseHeaders(res);
+    sseSend(res, 'status', { step: params.step, status: 'started' });
+
+    const onData = ({ type, text }) => {
+      try { sseSend(res, 'log', { type, text }); } catch {}
+    };
+
     try {
       const output = await runStep(params.step, params.name, {
         description: body.description,
-        verbose: false,
+        verbose: true,
         apply: body.apply || false,
         root,
+        onData,
       });
-      json(res, { ok: true, output });
+      sseSend(res, 'done', { step: params.step, output: output.slice(0, 500) });
     } catch (err) {
-      error(res, err.message, 400);
+      sseSend(res, 'error', { message: err.message });
     }
+    res.end();
+  });
+
+  // Quick ticket with SSE streaming (dev-plan -> implement -> review)
+  router.post('/api/features/:name/quick', async (req, res, { params, root, parseBody }) => {
+    const body = await parseBody();
+    sseHeaders(res);
+    sseSend(res, 'status', { status: 'started', mode: 'quick' });
+
+    const onData = ({ type, text }) => {
+      try { sseSend(res, 'log', { type, text }); } catch {}
+    };
+
+    try {
+      await runQuick(params.name, {
+        description: body.description,
+        apply: body.apply || false,
+        root,
+        onData,
+      });
+      sseSend(res, 'done', { status: 'completed' });
+    } catch (err) {
+      sseSend(res, 'error', { message: err.message });
+    }
+    res.end();
+  });
+
+  // Quick ticket with SSE streaming (create + run)
+  router.post('/api/quick', async (req, res, { root, parseBody }) => {
+    const body = await parseBody();
+    sseHeaders(res);
+    sseSend(res, 'status', { status: 'started', mode: 'quick', name: body.name });
+
+    const onData = ({ type, text }) => {
+      try { sseSend(res, 'log', { type, text }); } catch {}
+    };
+
+    try {
+      await runQuick(body.name, {
+        description: body.description,
+        apply: body.apply || false,
+        root,
+        onData,
+      });
+      sseSend(res, 'done', { status: 'completed', name: body.name });
+    } catch (err) {
+      sseSend(res, 'error', { message: err.message });
+    }
+    res.end();
   });
 
   // Reset a step

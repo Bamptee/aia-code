@@ -1,6 +1,6 @@
 {
   "name": "@bamptee/aia-code",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "AI Architecture Assistant - orchestrate AI-assisted development workflows via CLI tools (Claude, Codex, Gemini)",
   "type": "module",
   "license": "MIT",

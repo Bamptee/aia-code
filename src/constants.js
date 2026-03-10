@@ -36,6 +36,8 @@ export const FEATURE_STEPS = [
   'review',
 ];
 
+export const QUICK_STEPS = ['dev-plan', 'implement', 'review'];
+
 export const APPLY_STEPS = new Set([
   'implement',
 ]);

@@ -35,9 +35,10 @@ Each CLI manages its own authentication. Run `claude`, `codex`, or `gemini` once
 | `aia next <feature> [description]` | Run the next pending step automatically |
 | `aia status <feature>` | Show the current status of a feature |
 | `aia reset <step> <feature>` | Reset a step to pending so it can be re-run |
+| `aia quick <name> [description]` | Quick story/ticket: dev-plan → implement → review only |
 | `aia repo scan` | Scan codebase and generate `repo-map.json` |
 
-### Options for `run` and `next`
+### Options for `run`, `next`, and `quick`
 
 | Flag | Description |
 |------|-------------|
@@ -219,6 +220,33 @@ aia run ba-spec session-replay
 aia run tech-spec session-replay
 ```
 
+#### Initial specs (`init.md`)
+
+When you create a feature, AIA generates an `init.md` file. Edit it to add your initial specs, requirements, and constraints -- this content is injected into **every step** as context:
+
+```bash
+aia feature session-replay
+# Edit .aia/features/session-replay/init.md with your specs
+aia next session-replay
+```
+
+```markdown
+<!-- .aia/features/session-replay/init.md -->
+# session-replay
+
+## Description
+Record and replay user sessions for debugging.
+
+## Existing specs
+- Capture DOM snapshots every 500ms
+- Record network requests and console logs
+- Max session duration: 30 minutes
+
+## Constraints
+- Must work with our existing React 18 + Express stack
+- Storage budget: max 5MB per session
+```
+
 #### Using `next` (recommended)
 
 `next` automatically picks the next pending step:
@@ -251,6 +279,26 @@ When you re-run a step, the previous output is fed back as context so the AI can
 ```bash
 aia reset tech-spec session-replay
 aia run tech-spec session-replay "Add WebSocket support and rate limiting"
+```
+
+#### Quick mode (stories & tickets)
+
+For small stories or tickets that don't need the full 8-step pipeline, use `aia quick`. It skips brief, ba-spec, questions, tech-spec, and challenge, and runs only **dev-plan → implement → review**:
+
+```bash
+# Create feature + run 3 steps in sequence
+aia quick fix-login-bug "Fix the login timeout issue on mobile"
+
+# Or create the feature first, edit init.md, then run
+aia feature fix-login-bug
+# Edit .aia/features/fix-login-bug/init.md with details
+aia quick fix-login-bug
+```
+
+The `init.md` file serves as the sole input context for the dev-plan step. Verbose and apply flags work the same way:
+
+```bash
+aia quick add-rate-limit "Add rate limiting to the /api/upload endpoint" -v
 ```
 
 ### 8. Print mode vs Agent mode
@@ -326,7 +374,7 @@ knowledge:
 
 ## Prompt assembly
 
-When you run a step, the prompt is built from up to 6 sections:
+When you run a step, the prompt is built from up to 7 sections:
 
 ```
 === DESCRIPTION ===
@@ -337,6 +385,9 @@ When you run a step, the prompt is built from up to 6 sections:
 
 === KNOWLEDGE ===
 (all .md files from the knowledge categories)
+
+=== INITIAL SPECS ===
+(content of init.md -- your initial specs and requirements)
 
 === FEATURE ===
 (outputs of all prior steps for this feature)
@@ -368,6 +419,7 @@ src/
     feature.js            # aia feature <name>
     run.js                # aia run <step> <feature>
     next.js               # aia next <feature>
+    quick.js              # aia quick <name> [description]
     status.js             # aia status <feature>
     reset.js              # aia reset <step> <feature>
     repo.js               # aia repo scan

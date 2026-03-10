@@ -93,25 +93,33 @@ export async function buildPrompt(feature, step, { description, root = process.c
 
   const parts = [];
 
+  parts.push('IMPORTANT: You are working on a feature development pipeline. Everything you need is provided below in this prompt. Do NOT attempt to read, search for, or reference any external files. Do NOT say files are missing. Work exclusively with the content given below.\n');
+
   if (description) {
     parts.push('=== DESCRIPTION ===\n');
     parts.push(description);
     parts.push('');
   }
 
-  parts.push('=== CONTEXT ===\n');
-  parts.push(context || '(no context files)');
+  if (context) {
+    parts.push('=== CONTEXT ===\n');
+    parts.push(context);
+  }
 
-  parts.push('\n\n=== KNOWLEDGE ===\n');
-  parts.push(knowledge || '(no knowledge)');
+  if (knowledge) {
+    parts.push('\n\n=== KNOWLEDGE ===\n');
+    parts.push(knowledge);
+  }
 
   if (initSpecs) {
     parts.push('\n\n=== INITIAL SPECS ===\n');
     parts.push(initSpecs);
   }
 
-  parts.push('\n\n=== FEATURE ===\n');
-  parts.push(featureContent || '(no prior steps)');
+  if (featureContent) {
+    parts.push('\n\n=== FEATURE ===\n');
+    parts.push(featureContent);
+  }
 
   if (previousOutput) {
     parts.push('\n\n=== PREVIOUS OUTPUT ===\n');

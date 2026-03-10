@@ -1,4 +1,10 @@
 import { Command } from 'commander';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
 import { registerInitCommand } from './commands/init.js';
 import { registerFeatureCommand } from './commands/feature.js';
 import { registerRunCommand } from './commands/run.js';
@@ -15,7 +21,7 @@ export function createCli() {
   program
     .name('aia')
     .description('AI Architecture Assistant')
-    .version('0.1.0');
+    .version(pkg.version);
 
   registerInitCommand(program);
   registerFeatureCommand(program);

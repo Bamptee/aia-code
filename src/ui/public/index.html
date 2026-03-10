@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIA - AI Architecture Assistant</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'aia-bg': '#0f172a',
+            'aia-card': '#1e293b',
+            'aia-border': '#334155',
+            'aia-accent': '#38bdf8',
+          }
+        }
+      }
+    }
+  </script>
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@19?dev",
+      "react-dom/client": "https://esm.sh/react-dom@19/client?dev",
+      "react/jsx-runtime": "https://esm.sh/react@19/jsx-runtime?dev"
+    }
+  }
+  </script>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace; }
+    .step-done { @apply bg-emerald-500/20 text-emerald-400 border-emerald-500/30; }
+    .step-pending { @apply bg-slate-700/50 text-slate-400 border-slate-600; }
+    .step-in-progress { @apply bg-amber-500/20 text-amber-400 border-amber-500/30; }
+    .step-error { @apply bg-red-500/20 text-red-400 border-red-500/30; }
+    textarea { tab-size: 2; }
+  </style>
+</head>
+<body class="bg-aia-bg text-slate-200 min-h-screen">
+  <div id="root"></div>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

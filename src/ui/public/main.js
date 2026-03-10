@@ -111,7 +111,10 @@ function App() {
 
   return React.createElement('div', { className: 'min-h-screen' },
     React.createElement('nav', { className: 'border-b border-aia-border px-6 py-3 flex items-center gap-6' },
-      React.createElement('a', { href: '#/', className: 'text-aia-accent font-bold text-lg hover:text-sky-300' }, 'AIA'),
+      React.createElement('a', { href: '#/', className: 'text-aia-accent font-bold text-lg hover:text-sky-300 flex items-center gap-1.5' },
+        'AIA',
+        React.createElement('span', { className: 'text-slate-500 font-light text-sm tracking-tight' }, '{code}'),
+      ),
       projectName && React.createElement('span', {
         className: 'bg-violet-500/20 text-violet-300 border border-violet-500/30 px-2 py-0.5 rounded text-xs font-medium',
       }, projectName),

@@ -44,6 +44,11 @@ async function loadFeatureFiles(feature, step, root) {
   return sections.join('\n\n');
 }
 
+async function loadInitSpecs(feature, root) {
+  const filePath = path.join(root, AIA_DIR, 'features', feature, 'init.md');
+  return readIfExists(filePath);
+}
+
 async function loadPreviousOutput(feature, step, root) {
   const filePath = path.join(root, AIA_DIR, 'features', feature, `${step}.md`);
   return readIfExists(filePath);
@@ -75,9 +80,10 @@ async function loadPromptTemplate(step, root) {
 export async function buildPrompt(feature, step, { description, root = process.cwd() } = {}) {
   const config = await loadConfig(root);
 
-  const [context, knowledgeCategories, featureContent, previousOutput, task] = await Promise.all([
+  const [context, knowledgeCategories, initSpecs, featureContent, previousOutput, task] = await Promise.all([
     loadContextFiles(config, root),
     resolveKnowledgeCategories(feature, config, root),
+    loadInitSpecs(feature, root),
     loadFeatureFiles(feature, step, root),
     loadPreviousOutput(feature, step, root),
     loadPromptTemplate(step, root),
@@ -98,6 +104,11 @@ export async function buildPrompt(feature, step, { description, root = process.c
 
   parts.push('\n\n=== KNOWLEDGE ===\n');
   parts.push(knowledge || '(no knowledge)');
+
+  if (initSpecs) {
+    parts.push('\n\n=== INITIAL SPECS ===\n');
+    parts.push(initSpecs);
+  }
 
   parts.push('\n\n=== FEATURE ===\n');
   parts.push(featureContent || '(no prior steps)');

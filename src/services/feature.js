@@ -5,6 +5,7 @@ import { AIA_DIR, FEATURE_STEPS } from '../constants.js';
 
 const FEATURE_FILES = [
   'status.yaml',
+  'init.md',
   ...FEATURE_STEPS.map((s) => `${s}.md`),
 ];
 
@@ -16,6 +17,23 @@ export function validateFeatureName(name) {
       `Invalid feature name "${name}". Use lowercase alphanumeric with hyphens (e.g. session-replay).`,
     );
   }
+}
+
+function buildInitMd(name) {
+  return `# ${name}
+
+<!-- Describe your feature here. This file is injected into every step as context. -->
+<!-- Add any initial specs, requirements, mockups, or notes you already have. -->
+
+## Description
+
+
+## Existing specs
+
+
+## Constraints
+
+`;
 }
 
 function buildStatusYaml(name) {
@@ -45,7 +63,9 @@ export async function createFeature(name, root = process.cwd()) {
 
   for (const file of FEATURE_FILES) {
     const filePath = path.join(featureDir, file);
-    const content = file === 'status.yaml' ? buildStatusYaml(name) : '';
+    let content = '';
+    if (file === 'status.yaml') content = buildStatusYaml(name);
+    else if (file === 'init.md') content = buildInitMd(name);
     await fs.writeFile(filePath, content, 'utf-8');
   }
 }

@@ -5,6 +5,13 @@ import { AIA_DIR } from '../constants.js';
 
 const DEFAULT_CONFIG = {
   models: {
+    brief: [
+      { model: 'claude-default', weight: 1 },
+    ],
+    'ba-spec': [
+      { model: 'claude-default', weight: 0.5 },
+      { model: 'openai-default', weight: 0.5 },
+    ],
     questions: [
       { model: 'claude-default', weight: 0.5 },
       { model: 'openai-default', weight: 0.5 },
@@ -12,6 +19,19 @@ const DEFAULT_CONFIG = {
     'tech-spec': [
       { model: 'claude-default', weight: 0.5 },
       { model: 'openai-default', weight: 0.5 },
+    ],
+    challenge: [
+      { model: 'openai-default', weight: 1 },
+    ],
+    'dev-plan': [
+      { model: 'claude-default', weight: 0.5 },
+      { model: 'openai-default', weight: 0.5 },
+    ],
+    implement: [
+      { model: 'claude-default', weight: 1 },
+    ],
+    review: [
+      { model: 'openai-default', weight: 1 },
     ],
   },
   knowledge_default: ['backend'],

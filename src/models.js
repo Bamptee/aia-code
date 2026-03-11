@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import yaml from 'yaml';
 import chalk from 'chalk';
 import { AIA_DIR } from './constants.js';
+import { loadGlobalConfig } from './services/config.js';
 
 export async function loadConfig(root = process.cwd()) {
   const configPath = path.join(root, AIA_DIR, 'config.yaml');
@@ -12,11 +13,27 @@ export async function loadConfig(root = process.cwd()) {
   }
 
   const raw = await fs.readFile(configPath, 'utf-8');
-  const config = yaml.parse(raw);
+  const projectConfig = yaml.parse(raw);
 
-  validateConfig(config, configPath);
+  validateConfig(projectConfig, configPath);
+
+  // Merge with global user config
+  const globalConfig = await loadGlobalConfig();
+  const config = { ...globalConfig, ...projectConfig };
 
   return config;
+}
+
+// Load only project config (without global merge)
+export async function loadProjectConfig(root = process.cwd()) {
+  const configPath = path.join(root, AIA_DIR, 'config.yaml');
+
+  if (!(await fs.pathExists(configPath))) {
+    throw new Error(`Config not found: ${configPath}`);
+  }
+
+  const raw = await fs.readFile(configPath, 'utf-8');
+  return yaml.parse(raw);
 }
 
 function validateConfig(config, configPath) {

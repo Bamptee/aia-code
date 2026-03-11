@@ -65,63 +65,36 @@ function FileEditor({ name, filename, onSaved }) {
   );
 }
 
-function QuickRunButton({ name, onDone }) {
-  const [running, setRunning] = React.useState(false);
-  const [description, setDescription] = React.useState('');
-  const [expanded, setExpanded] = React.useState(false);
-  const [err, setErr] = React.useState(null);
-  const [logs, setLogs] = React.useState([]);
+function FlowSelector({ name, currentFlow, onFlowChanged }) {
+  const [saving, setSaving] = React.useState(false);
 
-  async function run() {
-    setRunning(true);
-    setErr(null);
-    setLogs([]);
-
-    const res = await streamPost(`/features/${name}/quick`, { description }, {
-      onLog: (text) => setLogs(prev => [...prev, text]),
-      onStatus: (data) => setLogs(prev => [...prev, `[${data.status}] ${data.mode || ''}\n`]),
-    });
-
-    if (res.ok) {
-      if (onDone) onDone();
-    } else {
-      setErr(res.error);
+  const handleChange = async (newFlow) => {
+    if (newFlow === currentFlow) return;
+    setSaving(true);
+    try {
+      await api.patch(`/features/${name}/flow`, { flow: newFlow });
+      if (onFlowChanged) onFlowChanged(newFlow);
+    } catch (e) {
+      console.error('Failed to update flow:', e);
     }
-    setRunning(false);
-  }
+    setSaving(false);
+  };
 
-  if (!expanded) {
-    return React.createElement('button', {
-      onClick: () => setExpanded(true),
-      className: 'bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-3 py-1.5 text-xs hover:bg-amber-500/30',
-    }, 'Quick Ticket (dev-plan \u2192 implement \u2192 review)');
-  }
-
-  return React.createElement('div', { className: 'bg-slate-900 border border-amber-500/30 rounded p-4 space-y-3' },
-    React.createElement('h4', { className: 'text-sm font-semibold text-amber-400' }, 'Quick Ticket'),
-    React.createElement('p', { className: 'text-xs text-slate-500' }, 'Skips early steps, runs dev-plan \u2192 implement \u2192 review'),
-    React.createElement('input', {
-      type: 'text',
-      value: description,
-      onChange: e => setDescription(e.target.value),
-      placeholder: 'Optional description...',
-      disabled: running,
-      className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-amber-400 focus:outline-none',
-    }),
-    React.createElement('div', { className: 'flex gap-2' },
-      React.createElement('button', {
-        onClick: run,
-        disabled: running,
-        className: 'bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-4 py-1.5 text-sm hover:bg-amber-500/30 disabled:opacity-40',
-      }, running ? 'Running...' : 'Run Quick'),
-      React.createElement('button', {
-        onClick: () => setExpanded(false),
-        disabled: running,
-        className: 'text-slate-500 hover:text-slate-300 text-xs',
-      }, 'Cancel'),
+  return React.createElement('div', { className: 'flex items-center gap-2' },
+    React.createElement('span', { className: 'text-xs text-slate-500' }, 'Flow:'),
+    React.createElement('button', {
+      onClick: () => handleChange('quick'),
+      disabled: saving,
+      className: `px-3 py-1 text-xs rounded border transition-all ${currentFlow === 'quick' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-slate-800 text-slate-400 border-slate-600 hover:border-slate-500'}`,
+    }, 'Quick'),
+    React.createElement('button', {
+      onClick: () => handleChange('full'),
+      disabled: saving,
+      className: `px-3 py-1 text-xs rounded border transition-all ${currentFlow === 'full' ? 'bg-violet-500/20 text-violet-400 border-violet-500/30' : 'bg-slate-800 text-slate-400 border-slate-600 hover:border-slate-500'}`,
+    }, 'Full'),
+    React.createElement('span', { className: 'text-xs text-slate-600 ml-2' },
+      currentFlow === 'quick' ? '(dev-plan \u2192 implement \u2192 review)' : '(brief \u2192 ... \u2192 review)'
     ),
-    React.createElement(LogViewer, { logs }),
-    err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
   );
 }
 
@@ -132,6 +105,7 @@ function LogViewer({ logs }) {
   }, [logs]);
 
   if (!logs.length) return null;
+
   return React.createElement('pre', {
     ref,
     className: 'bg-black/50 border border-aia-border rounded p-3 text-xs text-slate-400 overflow-auto max-h-64 whitespace-pre-wrap',
@@ -153,6 +127,127 @@ function ModelSelect({ model, onChange, disabled }) {
   },
     React.createElement('option', { value: '' }, 'Model: auto (weighted)'),
     ...models.map(m => React.createElement('option', { key: m, value: m }, m)),
+  );
+}
+
+function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
+  const [description, setDescription] = React.useState('');
+  const [suggestion, setSuggestion] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [statusMsg, setStatusMsg] = React.useState('');
+  const [logs, setLogs] = React.useState([]);
+  const [err, setErr] = React.useState(null);
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    setErr(null);
+    setLogs([]);
+    setStatusMsg('Structuring your description...');
+
+    const res = await streamPost(`/features/${name}/init`, { description }, {
+      onLog: (text) => setLogs(prev => [...prev, text]),
+      onStatus: (data) => setStatusMsg(data.message || data.status),
+    });
+
+    if (res.ok) {
+      setSuggestion(res.suggestion);
+      setStatusMsg('');
+      if (onEnriched) onEnriched();
+    } else {
+      setErr(res.error || 'Failed to enrich description');
+    }
+    setLoading(false);
+  };
+
+  const handleFlowChoice = (flow) => {
+    onFlowSelected(flow);
+  };
+
+  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
+    React.createElement('h3', { className: 'text-sm font-semibold text-cyan-400' }, 'Describe your feature'),
+
+    // Textarea (hidden when loading or has suggestion)
+    !loading && !suggestion && React.createElement('textarea', {
+      value: description,
+      onChange: e => setDescription(e.target.value),
+      placeholder: 'Describe what you want to build...\n\nBe as detailed as needed. The AI will structure your description.',
+      rows: 8,
+      className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-aia-accent focus:outline-none resize-y max-h-96 overflow-auto',
+    }),
+
+    // Character count and buttons
+    !loading && !suggestion && React.createElement('div', { className: 'flex items-center justify-between' },
+      React.createElement('span', { className: 'text-xs text-slate-500' }, `${description.length} characters`),
+      React.createElement('div', { className: 'flex gap-2' },
+        React.createElement('button', {
+          onClick: onCancel,
+          className: 'text-slate-500 hover:text-slate-300 text-xs',
+        }, 'Cancel'),
+        React.createElement('button', {
+          onClick: handleSubmit,
+          disabled: !description.trim(),
+          className: 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-4 py-2 text-sm hover:bg-aia-accent/30 disabled:opacity-40',
+        }, 'Continue'),
+      ),
+    ),
+
+    // Loading state with logs
+    loading && React.createElement('div', { className: 'space-y-3' },
+      React.createElement('div', { className: 'flex items-center gap-2' },
+        React.createElement('div', { className: 'animate-spin w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full' }),
+        React.createElement('span', { className: 'text-sm text-cyan-400' }, statusMsg || 'Processing...'),
+      ),
+      logs.length > 0 && React.createElement(LogViewer, { logs }),
+    ),
+
+    // Error
+    err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
+
+    // Flow suggestion
+    suggestion && React.createElement('div', { className: 'space-y-3' },
+      React.createElement('div', { className: 'flex items-center gap-2' },
+        React.createElement('span', { className: 'text-emerald-400' }, '\u2713'),
+        React.createElement('span', { className: 'text-sm text-slate-300' }, 'Feature spec created in init.md'),
+      ),
+      React.createElement('p', { className: 'text-sm text-slate-400' },
+        `Suggested: ${suggestion === 'quick' ? 'Quick Flow (dev-plan \u2192 implement \u2192 review)' : 'Full Flow (8 steps)'}`
+      ),
+      React.createElement('div', { className: 'flex gap-2' },
+        React.createElement('button', {
+          onClick: () => handleFlowChoice('quick'),
+          className: `px-4 py-2 text-sm rounded border ${suggestion === 'quick' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-700 text-slate-300 border-slate-600'} hover:brightness-110`,
+        }, 'Quick Flow'),
+        React.createElement('button', {
+          onClick: () => handleFlowChoice('full'),
+          className: `px-4 py-2 text-sm rounded border ${suggestion === 'full' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-700 text-slate-300 border-slate-600'} hover:brightness-110`,
+        }, 'Full Flow'),
+      ),
+    ),
+  );
+}
+
+function StepGuidance({ step, feature }) {
+  const [guidance, setGuidance] = React.useState(null);
+
+  React.useEffect(() => {
+    api.get(`/features/${feature}/guidance/${step}`).then(setGuidance).catch(() => {});
+  }, [step, feature]);
+
+  if (!guidance) return null;
+
+  return React.createElement('div', { className: 'bg-emerald-500/10 border border-emerald-500/30 rounded p-4 mt-4' },
+    React.createElement('h4', { className: 'text-emerald-400 font-semibold text-sm mb-2' }, guidance.summary),
+    React.createElement('div', { className: 'text-slate-300 text-xs space-y-1' },
+      ...guidance.actions.map((action, i) =>
+        React.createElement('p', { key: i }, `\u2022 ${action.replace('<feature>', feature)}`)
+      ),
+    ),
+    guidance.next && React.createElement('p', { className: 'text-cyan-400 text-xs mt-2' },
+      `Next step: ${guidance.next}`
+    ),
+    guidance.tips.length > 0 && React.createElement('p', { className: 'text-amber-400 text-xs mt-2' },
+      `Tip: ${guidance.tips[0]}`
+    ),
   );
 }
 
@@ -198,19 +293,20 @@ function RunPanel({ name, step, stepStatus, onDone }) {
     // --- Run block (when step is not done) ---
     !isDone && React.createElement('div', { className: 'bg-slate-900 border border-aia-border rounded p-4 space-y-3' },
       React.createElement('h4', { className: 'text-sm font-semibold text-emerald-400' }, `Run: ${step}`),
-      React.createElement('input', {
-        type: 'text',
+      React.createElement('textarea', {
         value: description,
         onChange: e => setDescription(e.target.value),
-        placeholder: 'Optional description...',
+        placeholder: 'Optional description or additional context...',
         disabled: running,
-        className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-emerald-400 focus:outline-none',
+        rows: 3,
+        className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-emerald-400 focus:outline-none resize-y max-h-96 overflow-auto',
       }),
+      description.length > 0 && React.createElement('span', { className: 'text-xs text-slate-500' }, `${description.length} characters`),
       React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
         React.createElement(ModelSelect, { model, onChange: setModel, disabled: running }),
-        React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer' },
+        React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer', title: 'Allow AI to edit files in your project' },
           React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running, className: 'rounded' }),
-          'Agent mode (--apply)'
+          'Agent mode'
         ),
         React.createElement('button', {
           onClick: run, disabled: running,
@@ -233,13 +329,14 @@ function RunPanel({ name, step, stepStatus, onDone }) {
         placeholder: 'e.g. "Add error handling for edge cases", "Focus more on mobile", "Split into smaller functions"...',
         disabled: running,
         rows: 3,
-        className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-400 focus:outline-none resize-y',
+        className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-400 focus:outline-none resize-y max-h-96 overflow-auto',
       }),
+      instructions.length > 0 && React.createElement('span', { className: 'text-xs text-slate-500' }, `${instructions.length} characters`),
       React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
         React.createElement(ModelSelect, { model, onChange: setModel, disabled: running }),
-        React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer' },
+        React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer', title: 'Allow AI to edit files in your project' },
           React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running, className: 'rounded' }),
-          'Agent mode (--apply)'
+          'Agent mode'
         ),
         React.createElement('button', {
           onClick: iterate, disabled: running || !instructions.trim(),
@@ -250,6 +347,8 @@ function RunPanel({ name, step, stepStatus, onDone }) {
           className: 'text-slate-500 hover:text-slate-300 text-xs',
         }, 'Reset to pending'),
       ),
+      // Step guidance for completed steps
+      React.createElement(StepGuidance, { step, feature: name }),
     ),
 
     // --- Shared log viewer + results ---
@@ -264,16 +363,104 @@ export function FeatureDetail({ name }) {
   const [loading, setLoading] = React.useState(true);
   const [activeFile, setActiveFile] = React.useState('init.md');
   const [activeStep, setActiveStep] = React.useState(null);
+  const [showInitPanel, setShowInitPanel] = React.useState(false);
+  const [selectedFlow, setSelectedFlow] = React.useState(null);
+  const [fileVersion, setFileVersion] = React.useState(0);
 
-  async function load() {
+  async function load(checkInitPanel = true) {
     try {
       const data = await api.get(`/features/${name}`);
       setFeature(data);
+      const steps = data.steps || {};
+
+      // Load persisted flow from status
+      if (data.flow && !selectedFlow) {
+        setSelectedFlow(data.flow);
+      }
+
+      // Check if no steps have been started and init.md is empty (only on initial load)
+      if (checkInitPanel) {
+        const allPending = Object.values(steps).every(s => s === 'pending');
+        const persistedFlow = data.flow || selectedFlow;
+
+        if (allPending && !persistedFlow) {
+          // Check if init.md has content (enriched)
+          try {
+            const initFile = await api.get(`/features/${name}/files/init.md`);
+            const content = initFile.content || '';
+            // If init.md has been enriched (contains ## Summary which is added by the agent), don't show InitPanel
+            // The default template only has ## Description, ## Existing specs, ## Constraints
+            const isEnriched = content.includes('## Summary') || content.includes('## Problem');
+            if (!isEnriched) {
+              setShowInitPanel(true);
+            } else {
+              // Auto-select first pending step based on flow
+              const flow = persistedFlow || 'full';
+              const firstStep = flow === 'quick' ? 'dev-plan' : 'brief';
+              if (!activeStep) {
+                setActiveStep(firstStep);
+                setActiveFile(`${firstStep}.md`);
+              }
+            }
+          } catch {
+            setShowInitPanel(true);
+          }
+        } else if (!activeStep) {
+          // Auto-select current step or first pending based on flow
+          const flow = persistedFlow || 'full';
+          const currentStep = data.current_step;
+          if (currentStep) {
+            setActiveStep(currentStep);
+            setActiveFile(`${currentStep}.md`);
+          } else {
+            // Use flow to determine first step
+            const firstStep = flow === 'quick' ? 'dev-plan' : 'brief';
+            const stepStatus = steps[firstStep];
+            if (stepStatus === 'pending') {
+              setActiveStep(firstStep);
+              setActiveFile(`${firstStep}.md`);
+            } else {
+              const firstPending = Object.entries(steps).find(([_, status]) => status === 'pending');
+              if (firstPending) {
+                setActiveStep(firstPending[0]);
+                setActiveFile(`${firstPending[0]}.md`);
+              }
+            }
+          }
+        }
+      }
     } catch {}
     setLoading(false);
   }
 
-  React.useEffect(() => { load(); }, [name]);
+  React.useEffect(() => { load(true); }, [name]);
+
+  const handleFlowSelected = async (flow) => {
+    // Persist flow to status.yaml
+    try {
+      await api.patch(`/features/${name}/flow`, { flow });
+    } catch (e) {
+      console.error('Failed to save flow:', e);
+    }
+    setSelectedFlow(flow);
+    setShowInitPanel(false);
+    // Select the first step based on flow type
+    const firstStep = flow === 'quick' ? 'dev-plan' : 'brief';
+    setActiveStep(firstStep);
+    setActiveFile(`${firstStep}.md`);
+    // Refresh file viewer
+    setFileVersion(v => v + 1);
+    load(false); // Reload without checking init panel
+  };
+
+  const handleFlowChanged = (newFlow) => {
+    setSelectedFlow(newFlow);
+    // Select the first step based on new flow type
+    const firstStep = newFlow === 'quick' ? 'dev-plan' : 'brief';
+    setActiveStep(firstStep);
+    setActiveFile(`${firstStep}.md`);
+    load(false);
+  };
 
   if (loading) return React.createElement('p', { className: 'text-slate-500' }, 'Loading...');
   if (!feature) return React.createElement('p', { className: 'text-red-400' }, `Feature "${name}" not found.`);
@@ -288,8 +475,23 @@ export function FeatureDetail({ name }) {
       feature.current_step && React.createElement('span', { className: 'text-xs bg-aia-accent/20 text-aia-accent px-2 py-0.5 rounded' }, feature.current_step),
     ),
 
-    // Quick run
-    React.createElement(QuickRunButton, { name, onDone: load }),
+    // Init panel (when no steps started)
+    showInitPanel && React.createElement(InitPanel, {
+      name,
+      onFlowSelected: handleFlowSelected,
+      onCancel: () => setShowInitPanel(false),
+      onEnriched: () => {
+        setActiveFile('init.md');
+        setFileVersion(v => v + 1);
+      },
+    }),
+
+    // Flow selector (only show if not showing init panel)
+    !showInitPanel && React.createElement(FlowSelector, {
+      name,
+      currentFlow: selectedFlow || 'full',
+      onFlowChanged: handleFlowChanged,
+    }),
 
     // Pipeline
     React.createElement('div', { className: 'flex flex-wrap gap-2' },
@@ -305,7 +507,7 @@ export function FeatureDetail({ name }) {
     ),
 
     // Run / Iterate panel
-    activeStep && React.createElement(RunPanel, { name, step: activeStep, stepStatus: steps[activeStep], onDone: load }),
+    activeStep && React.createElement(RunPanel, { name, step: activeStep, stepStatus: steps[activeStep], onDone: () => { setFileVersion(v => v + 1); load(false); } }),
 
     // File tabs
     React.createElement('div', { className: 'flex gap-1 border-b border-aia-border' },
@@ -319,6 +521,6 @@ export function FeatureDetail({ name }) {
     ),
 
     // Editor
-    activeFile && React.createElement(FileEditor, { key: `${name}-${activeFile}`, name, filename: activeFile, onSaved: load }),
+    activeFile && React.createElement(FileEditor, { key: `${name}-${activeFile}-${fileVersion}`, name, filename: activeFile, onSaved: () => { setFileVersion(v => v + 1); load(false); } }),
   );
 }

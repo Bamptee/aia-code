@@ -63,6 +63,188 @@ function FileList({ title, files, selectedFile, onSelect }) {
   );
 }
 
+function UserPreferences() {
+  const [prefs, setPrefs] = React.useState({
+    user_name: '',
+    communication_language: 'English',
+  });
+  const [configPath, setConfigPath] = React.useState('');
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [dirty, setDirty] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+
+  React.useEffect(() => {
+    api.get('/user-config').then(data => {
+      const parsed = data.parsed || {};
+      setPrefs({
+        user_name: parsed.user_name || '',
+        communication_language: parsed.communication_language || 'English',
+      });
+      setConfigPath(data.path || '');
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const handleChange = (field, value) => {
+    setPrefs(p => ({ ...p, [field]: value }));
+    setDirty(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setMsg(null);
+    try {
+      await api.patch('/user-config', prefs);
+      setDirty(false);
+      setMsg({ type: 'ok', text: 'Saved.' });
+    } catch (e) {
+      setMsg({ type: 'err', text: e.message });
+    }
+    setSaving(false);
+  };
+
+  if (loading) return React.createElement('p', { className: 'text-slate-500 text-sm' }, 'Loading...');
+
+  const languages = ['English', 'French', 'Spanish', 'German', 'Portuguese', 'Italian', 'Dutch', 'Russian', 'Chinese', 'Japanese', 'Korean'];
+
+  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
+    React.createElement('div', { className: 'flex items-center justify-between' },
+      React.createElement('h3', { className: 'text-sm font-semibold text-cyan-400' }, 'User Preferences'),
+      React.createElement('div', { className: 'flex gap-2 items-center' },
+        dirty && React.createElement('span', { className: 'text-xs text-amber-400' }, 'unsaved'),
+        msg && React.createElement('span', { className: `text-xs ${msg.type === 'ok' ? 'text-emerald-400' : 'text-red-400'}` }, msg.text),
+        React.createElement('button', {
+          onClick: save,
+          disabled: saving || !dirty,
+          className: 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-3 py-1 text-xs hover:bg-aia-accent/30 disabled:opacity-40',
+        }, saving ? '...' : 'Save'),
+      ),
+    ),
+
+    React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
+      // User name
+      React.createElement('div', { className: 'space-y-1' },
+        React.createElement('label', { className: 'text-xs text-slate-400' }, 'Your Name'),
+        React.createElement('input', {
+          type: 'text',
+          value: prefs.user_name,
+          onChange: e => handleChange('user_name', e.target.value),
+          placeholder: 'Optional',
+          className: 'w-full bg-slate-900 border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-aia-accent focus:outline-none',
+        }),
+      ),
+
+      // Communication language
+      React.createElement('div', { className: 'space-y-1' },
+        React.createElement('label', { className: 'text-xs text-slate-400' }, 'Communication Language'),
+        React.createElement('select', {
+          value: prefs.communication_language,
+          onChange: e => handleChange('communication_language', e.target.value),
+          className: 'w-full bg-slate-900 border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 focus:border-aia-accent focus:outline-none',
+        },
+          ...languages.map(lang => React.createElement('option', { key: lang, value: lang }, lang)),
+        ),
+      ),
+    ),
+
+    React.createElement('p', { className: 'text-xs text-slate-500' },
+      'Your personal preferences. Stored globally in ~/.aia/ and apply to all projects.'
+    ),
+    configPath && React.createElement('p', { className: 'text-xs text-slate-600' },
+      `Location: ${configPath}`
+    ),
+  );
+}
+
+function ProjectSettings({ onSaved }) {
+  const [settings, setSettings] = React.useState({
+    projectName: '',
+    document_output_language: 'English',
+  });
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [dirty, setDirty] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+
+  React.useEffect(() => {
+    api.get('/config').then(data => {
+      const parsed = data.parsed || {};
+      setSettings({
+        projectName: parsed.projectName || '',
+        document_output_language: parsed.document_output_language || 'English',
+      });
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const handleChange = (field, value) => {
+    setSettings(p => ({ ...p, [field]: value }));
+    setDirty(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setMsg(null);
+    try {
+      await api.patch('/config/project', settings);
+      setDirty(false);
+      setMsg({ type: 'ok', text: 'Saved.' });
+      if (onSaved) onSaved();
+    } catch (e) {
+      setMsg({ type: 'err', text: e.message });
+    }
+    setSaving(false);
+  };
+
+  if (loading) return React.createElement('p', { className: 'text-slate-500 text-sm' }, 'Loading...');
+
+  const languages = ['English', 'French', 'Spanish', 'German', 'Portuguese', 'Italian', 'Dutch', 'Russian', 'Chinese', 'Japanese', 'Korean'];
+
+  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
+    React.createElement('div', { className: 'flex items-center justify-between' },
+      React.createElement('h3', { className: 'text-sm font-semibold text-violet-400' }, 'Project Settings'),
+      React.createElement('div', { className: 'flex gap-2 items-center' },
+        dirty && React.createElement('span', { className: 'text-xs text-amber-400' }, 'unsaved'),
+        msg && React.createElement('span', { className: `text-xs ${msg.type === 'ok' ? 'text-emerald-400' : 'text-red-400'}` }, msg.text),
+        React.createElement('button', {
+          onClick: save,
+          disabled: saving || !dirty,
+          className: 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-3 py-1 text-xs hover:bg-aia-accent/30 disabled:opacity-40',
+        }, saving ? '...' : 'Save'),
+      ),
+    ),
+
+    React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
+      // Project name
+      React.createElement('div', { className: 'space-y-1' },
+        React.createElement('label', { className: 'text-xs text-slate-400' }, 'Project Name'),
+        React.createElement('input', {
+          type: 'text',
+          value: settings.projectName,
+          onChange: e => handleChange('projectName', e.target.value),
+          placeholder: 'My Project',
+          className: 'w-full bg-slate-900 border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-aia-accent focus:outline-none',
+        }),
+      ),
+
+      // Document output language
+      React.createElement('div', { className: 'space-y-1' },
+        React.createElement('label', { className: 'text-xs text-slate-400' }, 'Document Output Language'),
+        React.createElement('select', {
+          value: settings.document_output_language,
+          onChange: e => handleChange('document_output_language', e.target.value),
+          className: 'w-full bg-slate-900 border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 focus:border-aia-accent focus:outline-none',
+        },
+          ...languages.map(lang => React.createElement('option', { key: lang, value: lang }, lang)),
+        ),
+      ),
+    ),
+
+    React.createElement('p', { className: 'text-xs text-slate-500' },
+      'Project-wide settings. Stored in .aia/config.yaml and shared with your team.'
+    ),
+  );
+}
+
 export function ConfigView() {
   const [contextFiles, setContextFiles] = React.useState([]);
   const [knowledgeCategories, setKnowledgeCategories] = React.useState([]);
@@ -71,11 +253,16 @@ export function ConfigView() {
   const [selectedCategory, setSelectedCategory] = React.useState(null);
   const [logs, setLogs] = React.useState('');
   const [showLogs, setShowLogs] = React.useState(false);
+  const [configVersion, setConfigVersion] = React.useState(0);
 
   React.useEffect(() => {
     api.get('/context').then(setContextFiles).catch(() => {});
     api.get('/knowledge').then(setKnowledgeCategories).catch(() => {});
   }, []);
+
+  const handlePreferencesSaved = () => {
+    setConfigVersion(v => v + 1);
+  };
 
   function selectContext(f) {
     setSelectedFile(f);
@@ -100,9 +287,16 @@ export function ConfigView() {
   return React.createElement('div', { className: 'space-y-6' },
     React.createElement('h1', { className: 'text-xl font-bold text-slate-100' }, 'Configuration'),
 
-    // config.yaml
+    // Two columns: User Preferences + Project Settings
+    React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
+      React.createElement(UserPreferences),
+      React.createElement(ProjectSettings, { onSaved: handlePreferencesSaved }),
+    ),
+
+    // config.yaml (advanced)
     React.createElement(YamlEditor, {
-      title: 'config.yaml',
+      key: `config-${configVersion}`,
+      title: 'config.yaml (advanced)',
       loadFn: async () => (await api.get('/config')).content,
       saveFn: async (content) => api.put('/config', { content }),
     }),

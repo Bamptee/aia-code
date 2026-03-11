@@ -95,6 +95,13 @@ export async function buildPrompt(feature, step, { description, instructions, ro
 
   parts.push('IMPORTANT: You are working on a feature development pipeline. Everything you need is provided below in this prompt. Do NOT attempt to read, search for, or reference any external files. Do NOT say files are missing. Work exclusively with the content given below.\n');
 
+  // Inject user preferences - document language is the ONLY thing that matters for output
+  const docLang = config.document_output_language || 'English';
+
+  parts.push('=== OUTPUT LANGUAGE ===\n');
+  parts.push(`Write ALL your output in ${docLang}. This is mandatory and non-negotiable.`);
+  parts.push(`Do NOT use any other language for the document content.\n`);
+
   if (description) {
     parts.push('=== DESCRIPTION ===\n');
     parts.push(description);
@@ -135,6 +142,9 @@ export async function buildPrompt(feature, step, { description, instructions, ro
 
   parts.push('\n\n=== TASK ===\n');
   parts.push(task);
+
+  // Add language reminder at the end (always, to reinforce)
+  parts.push(`\n\n---\nREMINDER: Your entire output MUST be written in ${docLang}.`);
 
   return parts.join('\n');
 }

@@ -77,7 +77,7 @@ async function loadPromptTemplate(step, root) {
   return content;
 }
 
-export async function buildPrompt(feature, step, { description, instructions, history, root = process.cwd() } = {}) {
+export async function buildPrompt(feature, step, { description, instructions, history, attachments, root = process.cwd() } = {}) {
   const config = await loadConfig(root);
 
   const [context, knowledgeCategories, initSpecs, featureContent, previousOutput, task] = await Promise.all([
@@ -115,6 +115,18 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   if (description) {
     parts.push('=== DESCRIPTION ===\n');
     parts.push(description);
+    parts.push('');
+  }
+
+  if (attachments && attachments.length > 0) {
+    parts.push('=== ATTACHMENTS ===\n');
+    parts.push('The user has attached the following files. Use the Read tool to view them:\n');
+    for (const a of attachments) {
+      // F11: Sanitize filename to prevent prompt injection
+      const safeFilename = String(a.filename || 'unknown').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 255);
+      const safePath = String(a.path || '').slice(0, 1000);
+      parts.push(`- ${safeFilename}: ${safePath}`);
+    }
     parts.push('');
   }
 

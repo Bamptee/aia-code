@@ -38,6 +38,19 @@ export const api = {
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
     return res.json();
   },
+  async delete(path) {
+    const res = await fetch(`/api${path}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    return res.json();
+  },
+  async upload(path, formData) {
+    const res = await fetch(`/api${path}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    return res.json();
+  },
 };
 
 // --- SSE stream helper ---

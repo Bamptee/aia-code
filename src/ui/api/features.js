@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'fs-extra';
+import Busboy from 'busboy';
 import { AIA_DIR } from '../../constants.js';
 import { loadStatus, updateStepStatus, resetStep, updateFlowType } from '../../services/status.js';
 import { createFeature, validateFeatureName } from '../../services/feature.js';
@@ -24,6 +25,27 @@ function sseHeaders(res) {
 
 function sseSend(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+// F6: Extracted validation helpers to avoid code duplication
+function validateHistory(rawHistory) {
+  return Array.isArray(rawHistory)
+    ? rawHistory
+        .filter(msg => msg && typeof msg === 'object' && typeof msg.content === 'string')
+        .map(msg => ({
+          role: msg.role === 'agent' ? 'agent' : 'user',
+          content: String(msg.content).slice(0, 50000),
+        }))
+        .slice(-20)
+    : [];
+}
+
+function validateAttachments(rawAttachments) {
+  return Array.isArray(rawAttachments)
+    ? rawAttachments
+        .filter(a => a && typeof a === 'object' && typeof a.path === 'string')
+        .map(a => ({ filename: a.filename || 'unknown', path: a.path }))
+    : [];
 }
 
 export function registerFeatureRoutes(router) {
@@ -101,21 +123,13 @@ export function registerFeatureRoutes(router) {
     };
 
     try {
-      // Validate and sanitize history array
-      const rawHistory = body.history || [];
-      const validatedHistory = Array.isArray(rawHistory)
-        ? rawHistory
-            .filter(msg => msg && typeof msg === 'object' && typeof msg.content === 'string')
-            .map(msg => ({
-              role: msg.role === 'agent' ? 'agent' : 'user',
-              content: String(msg.content).slice(0, 50000), // Limit content length
-            }))
-            .slice(-20) // Limit history depth
-        : [];
+      const validatedHistory = validateHistory(body.history || []);
+      const validatedAttachments = validateAttachments(body.attachments || []);
 
       const output = await runStep(params.step, params.name, {
         description: body.description,
         history: validatedHistory,
+        attachments: validatedAttachments,
         model: body.model || undefined,
         verbose: body.verbose !== undefined ? body.verbose : true,
         apply: body.apply || false,
@@ -190,21 +204,13 @@ export function registerFeatureRoutes(router) {
         try { sseSend(res, 'log', { type, text }); } catch {}
       };
 
-      // F7: Validate and pass history for iterate too
-      const rawHistory = body.history || [];
-      const validatedHistory = Array.isArray(rawHistory)
-        ? rawHistory
-            .filter(msg => msg && typeof msg === 'object' && typeof msg.content === 'string')
-            .map(msg => ({
-              role: msg.role === 'agent' ? 'agent' : 'user',
-              content: String(msg.content).slice(0, 50000),
-            }))
-            .slice(-20)
-        : [];
+      const validatedHistory = validateHistory(body.history || []);
+      const validatedAttachments = validateAttachments(body.attachments || []);
 
-      const output = await runStep(params.step, params.name, {
+      await runStep(params.step, params.name, {
         instructions: body.instructions,
         history: validatedHistory,
+        attachments: validatedAttachments,
         model: body.model || undefined,
         verbose: body.verbose !== undefined ? body.verbose : true,
         apply: body.apply || false,
@@ -320,6 +326,149 @@ IMPORTANT:
       return error(res, `No guidance for step "${params.step}"`, 404);
     }
     json(res, guidance);
+  });
+
+  // Upload attachments (multipart/form-data)
+  router.post('/api/features/:name/attachments', async (req, res, { params, root }) => {
+    const attachDir = path.join(root, AIA_DIR, 'features', params.name, 'attachments');
+    await fs.ensureDir(attachDir);
+
+    const busboy = Busboy({
+      headers: req.headers,
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file
+    });
+
+    const files = [];
+    const writtenFiles = []; // F12: Track all written files for cleanup
+    let totalSize = 0;
+    const maxTotalSize = 50 * 1024 * 1024; // 50MB total
+    let hasError = false;
+
+    // F12: Cleanup function to remove all written files on error
+    const cleanupFiles = async () => {
+      for (const filepath of writtenFiles) {
+        await fs.unlink(filepath).catch(() => {});
+      }
+    };
+
+    busboy.on('file', (fieldname, file, info) => {
+      const { filename, mimeType } = info;
+
+      // Validate mime type
+      const allowedTypes = ['image/', 'application/pdf', 'text/'];
+      const isAllowed = allowedTypes.some(t => mimeType.startsWith(t));
+      if (!isAllowed) {
+        file.resume(); // Drain the stream
+        return;
+      }
+
+      const safeFilename = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const filepath = path.join(attachDir, safeFilename);
+      const writeStream = fs.createWriteStream(filepath);
+      writtenFiles.push(filepath); // F12: Track for cleanup
+
+      // F7: Handle writeStream errors
+      writeStream.on('error', async (err) => {
+        hasError = true;
+        file.resume(); // Stop reading
+        await cleanupFiles();
+        if (!res.headersSent) {
+          error(res, `Write error: ${err.message}`, 500);
+        }
+      });
+
+      let fileSize = 0;
+      file.on('data', (data) => {
+        fileSize += data.length;
+        totalSize += data.length;
+
+        // F3: Check total size during upload, not after
+        if (totalSize > maxTotalSize) {
+          hasError = true;
+          file.resume(); // Stop reading this file
+        }
+      });
+
+      file.pipe(writeStream);
+
+      file.on('end', () => {
+        if (!hasError && fileSize > 0) {
+          files.push({
+            filename: safeFilename,
+            originalName: filename,
+            path: filepath,
+            mimeType,
+            size: fileSize,
+          });
+        }
+      });
+
+      file.on('limit', () => {
+        fs.unlink(filepath).catch(() => {});
+        // Remove from writtenFiles since we're handling it here
+        const idx = writtenFiles.indexOf(filepath);
+        if (idx > -1) writtenFiles.splice(idx, 1);
+      });
+    });
+
+    busboy.on('finish', async () => {
+      if (hasError) {
+        // F12: Clean up all files if we hit an error
+        await cleanupFiles();
+        if (!res.headersSent) {
+          error(res, `Total size exceeds ${maxTotalSize / 1024 / 1024}MB limit`, 413);
+        }
+        return;
+      }
+      json(res, { ok: true, files });
+    });
+
+    busboy.on('error', async (err) => {
+      await cleanupFiles();
+      if (!res.headersSent) {
+        error(res, err.message, 500);
+      }
+    });
+
+    req.pipe(busboy);
+  });
+
+  // List attachments
+  router.get('/api/features/:name/attachments', async (req, res, { params, root }) => {
+    const attachDir = path.join(root, AIA_DIR, 'features', params.name, 'attachments');
+    if (!(await fs.pathExists(attachDir))) {
+      return json(res, []);
+    }
+
+    const entries = await fs.readdir(attachDir);
+    const files = await Promise.all(
+      entries.map(async (filename) => {
+        const filepath = path.join(attachDir, filename);
+        const stat = await fs.stat(filepath);
+        return {
+          filename,
+          path: filepath,
+          size: stat.size,
+        };
+      })
+    );
+    json(res, files);
+  });
+
+  // Delete an attachment
+  router.delete('/api/features/:name/attachments/:filename', async (req, res, { params, root }) => {
+    // F1: Prevent path traversal attacks
+    const filename = path.basename(params.filename);
+    if (filename !== params.filename || filename.includes('..')) {
+      return error(res, 'Invalid filename', 400);
+    }
+
+    const filepath = path.join(root, AIA_DIR, 'features', params.name, 'attachments', filename);
+    if (!(await fs.pathExists(filepath))) {
+      return error(res, 'Attachment not found', 404);
+    }
+    await fs.remove(filepath);
+    json(res, { ok: true });
   });
 
   // Update flow type (quick/full)

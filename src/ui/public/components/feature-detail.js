@@ -1,6 +1,94 @@
 import React from 'react';
 import { api, streamPost } from '/main.js';
 
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AttachmentZone({ feature, attachments, onUpload, onRemove }) {
+  const inputRef = React.useRef(null);
+  const [uploading, setUploading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  const handleFiles = async (files) => {
+    if (!files.length) return;
+
+    setUploading(true);
+    setError(null);
+
+    const formData = new FormData();
+    for (const file of files) {
+      if (file.size > 10 * 1024 * 1024) {
+        setError(`File "${file.name}" exceeds 10MB limit`);
+        setUploading(false);
+        return;
+      }
+      formData.append('files', file);
+    }
+
+    try {
+      const res = await api.upload(`/features/${feature}/attachments`, formData);
+      if (res.ok && res.files) {
+        onUpload(res.files);
+      }
+    } catch (e) {
+      setError(e.message || 'Upload failed');
+    }
+    setUploading(false);
+  };
+
+  const handleRemove = async (filename) => {
+    try {
+      await api.delete(`/features/${feature}/attachments/${filename}`);
+      onRemove(filename);
+    } catch (e) {
+      setError(e.message || 'Delete failed');
+    }
+  };
+
+  return React.createElement('div', { className: 'border border-dashed border-slate-600 rounded p-3 mb-3' },
+    React.createElement('input', {
+      ref: inputRef,
+      type: 'file',
+      multiple: true,
+      accept: 'image/*,application/pdf,text/*,.md,.txt,.json,.yaml,.yml',
+      className: 'hidden',
+      onChange: (e) => handleFiles(Array.from(e.target.files)),
+    }),
+    React.createElement('div', { className: 'flex items-center gap-2' },
+      React.createElement('button', {
+        onClick: () => inputRef.current?.click(),
+        disabled: uploading,
+        className: 'text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1',
+      },
+        uploading ? React.createElement('span', { className: 'animate-spin' }, '⟳') : '+',
+        uploading ? ' Uploading...' : ' Add attachments (images, PDF, text)',
+      ),
+      React.createElement('span', { className: 'text-xs text-slate-600' }, 'Max 10MB/file'),
+    ),
+    error && React.createElement('p', { className: 'text-red-400 text-xs mt-1' }, error),
+    attachments.length > 0 && React.createElement('div', { className: 'mt-2 flex flex-wrap gap-2' },
+      ...attachments.map(a => React.createElement('span', {
+        key: a.filename,
+        className: 'bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded flex items-center gap-2',
+        title: a.path,
+      },
+        a.mimeType?.startsWith('image/') && React.createElement('span', { className: 'text-emerald-400' }, '🖼'),
+        a.mimeType === 'application/pdf' && React.createElement('span', { className: 'text-red-400' }, '📄'),
+        a.originalName || a.filename,
+        a.size && React.createElement('span', { className: 'text-slate-500' }, `(${formatFileSize(a.size)})`),
+        React.createElement('button', {
+          onClick: () => handleRemove(a.filename),
+          className: 'text-red-400 hover:text-red-300 ml-1',
+          title: 'Remove attachment',
+        }, '×'),
+      )),
+    ),
+  );
+}
+
 const STATUS_CLASSES = {
   done: 'step-done',
   pending: 'step-pending',
@@ -307,9 +395,17 @@ function RunPanel({ name, step, stepStatus, onDone }) {
   const [verboseLogs, setVerboseLogs] = React.useState([]);
   const [verboseExpanded, setVerboseExpanded] = React.useState(false);
   const [history, setHistory] = React.useState([]);
+  const [attachments, setAttachments] = React.useState([]);
   const agentBuffer = React.useRef('');
   const requestId = React.useRef(0); // F4: Track request to prevent race conditions
   const [resetting, setResetting] = React.useState(false); // F14: Track reset state
+
+  // Load attachments when step changes
+  React.useEffect(() => {
+    api.get(`/features/${name}/attachments`)
+      .then(files => setAttachments(files))
+      .catch(() => setAttachments([]));
+  }, [name, step]);
 
   // Reset chat state when step changes
   React.useEffect(() => {
@@ -321,6 +417,14 @@ function RunPanel({ name, step, stepStatus, onDone }) {
     setErr(null);
     agentBuffer.current = '';
   }, [step]);
+
+  const handleAttachmentUpload = (files) => {
+    setAttachments(prev => [...prev, ...files]);
+  };
+
+  const handleAttachmentRemove = (filename) => {
+    setAttachments(prev => prev.filter(a => a.filename !== filename));
+  };
 
   // F4: Create callbacks bound to current request
   const createSseCallbacks = (currentRequestId) => ({
@@ -360,6 +464,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       apply,
       model: model || undefined,
       history: newHistory.slice(0, -1),
+      attachments: attachments.map(a => ({ filename: a.filename, path: a.path })),
     }, createSseCallbacks(currentRequestId));
 
     // F4: Check if this request is still current
@@ -402,6 +507,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       apply,
       model: model || undefined,
       history: newHistory.slice(0, -1),
+      attachments: attachments.map(a => ({ filename: a.filename, path: a.path })),
     }, createSseCallbacks(currentRequestId));
 
     if (requestId.current !== currentRequestId) return;
@@ -451,6 +557,14 @@ function RunPanel({ name, step, stepStatus, onDone }) {
 
     // --- Chat log ---
     React.createElement(ChatLog, { messages }),
+
+    // --- Attachments zone ---
+    React.createElement(AttachmentZone, {
+      feature: name,
+      attachments,
+      onUpload: handleAttachmentUpload,
+      onRemove: handleAttachmentRemove,
+    }),
 
     // --- Run block (when step is not done) ---
     !isDone && React.createElement('div', { className: 'bg-slate-900 border border-aia-border rounded p-4 space-y-3' },

@@ -8,7 +8,7 @@ import { callModel } from './model-call.js';
 import { loadStatus, updateStepStatus } from './status.js';
 import { logExecution } from '../logger.js';
 
-export async function runStep(step, feature, { description, verbose = false, apply = false, root = process.cwd(), onData } = {}) {
+export async function runStep(step, feature, { description, instructions, model: modelOverride, verbose = false, apply = false, root = process.cwd(), onData } = {}) {
   if (!FEATURE_STEPS.includes(step)) {
     throw new Error(`Unknown step "${step}". Valid steps: ${FEATURE_STEPS.join(', ')}`);
   }
@@ -26,8 +26,8 @@ export async function runStep(step, feature, { description, verbose = false, app
   const shouldApply = apply || APPLY_STEPS.has(step);
 
   try {
-    const model = await resolveModel(step, root);
-    const prompt = await buildPrompt(feature, step, { description, root });
+    const model = modelOverride || await resolveModel(step, root);
+    const prompt = await buildPrompt(feature, step, { description, instructions, root });
 
     const start = performance.now();
     const output = await callModel(model, prompt, { verbose, apply: shouldApply, onData });

@@ -35,10 +35,12 @@ Each CLI manages its own authentication. Run `claude`, `codex`, or `gemini` once
 | `aia next <feature> [description]` | Run the next pending step automatically |
 | `aia status <feature>` | Show the current status of a feature |
 | `aia reset <step> <feature>` | Reset a step to pending so it can be re-run |
+| `aia iterate <step> <feature> <instructions>` | Re-run a step with additional instructions to refine the output |
 | `aia quick <name> [description]` | Quick story/ticket: dev-plan → implement → review only |
 | `aia repo scan` | Scan codebase and generate `repo-map.json` |
+| `aia ui` | Launch the local web UI to manage features and config |
 
-### Options for `run`, `next`, and `quick`
+### Options for `run`, `next`, `quick`, and `iterate`
 
 | Flag | Description |
 |------|-------------|
@@ -281,6 +283,18 @@ aia reset tech-spec session-replay
 aia run tech-spec session-replay "Add WebSocket support and rate limiting"
 ```
 
+#### Iterating on a step
+
+Use `aia iterate` to refine a completed step with specific instructions. It resets the step, feeds back the previous output, and applies your instructions in a single command:
+
+```bash
+aia iterate tech-spec session-replay "Add error handling for WebSocket disconnections"
+aia iterate brief session-replay "Focus more on mobile use cases"
+aia iterate dev-plan session-replay "Split the implementation into smaller PRs" -v
+```
+
+You can iterate multiple times — each run builds on the previous output.
+
 #### Quick mode (stories & tickets)
 
 For small stories or tickets that don't need the full 8-step pipeline, use `aia quick`. It skips brief, ba-spec, questions, tech-spec, and challenge, and runs only **dev-plan → implement → review**:
@@ -419,6 +433,7 @@ src/
     feature.js            # aia feature <name>
     run.js                # aia run <step> <feature>
     next.js               # aia next <feature>
+    iterate.js            # aia iterate <step> <feature> <instructions>
     quick.js              # aia quick <name> [description]
     status.js             # aia status <feature>
     reset.js              # aia reset <step> <feature>

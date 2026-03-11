@@ -138,75 +138,126 @@ function LogViewer({ logs }) {
   }, logs.join(''));
 }
 
-function RunPanel({ name, step, onDone }) {
+function ModelSelect({ step, model, onChange, disabled }) {
+  const [models, setModels] = React.useState([]);
+
+  React.useEffect(() => {
+    api.get('/models').then(data => {
+      const stepModels = data[step] || [];
+      setModels(stepModels.map(m => m.model));
+    }).catch(() => {});
+  }, [step]);
+
+  if (models.length <= 1) return null;
+
+  return React.createElement('select', {
+    value: model,
+    onChange: e => onChange(e.target.value),
+    disabled,
+    className: 'bg-aia-card border border-aia-border rounded px-2 py-1 text-xs text-slate-300 focus:border-aia-accent focus:outline-none',
+  },
+    React.createElement('option', { value: '' }, 'Model: auto (weighted)'),
+    ...models.map(m => React.createElement('option', { key: m, value: m }, m)),
+  );
+}
+
+function RunPanel({ name, step, stepStatus, onDone }) {
+  const isDone = stepStatus === 'done';
   const [description, setDescription] = React.useState('');
+  const [instructions, setInstructions] = React.useState('');
+  const [model, setModel] = React.useState('');
   const [apply, setApply] = React.useState(false);
   const [running, setRunning] = React.useState(false);
   const [result, setResult] = React.useState(null);
   const [err, setErr] = React.useState(null);
   const [logs, setLogs] = React.useState([]);
 
+  const sseCallbacks = {
+    onLog: (text) => setLogs(prev => [...prev, text]),
+    onStatus: (data) => setLogs(prev => [...prev, `[${data.status}] ${data.step || ''}\n`]),
+  };
+
   async function run() {
-    setRunning(true);
-    setResult(null);
-    setErr(null);
-    setLogs([]);
+    setRunning(true); setResult(null); setErr(null); setLogs([]);
+    const res = await streamPost(`/features/${name}/run/${step}`, { description, apply, model: model || undefined }, sseCallbacks);
+    if (res.ok) { setResult('Step completed.'); if (onDone) onDone(); }
+    else setErr(res.error);
+    setRunning(false);
+  }
 
-    const res = await streamPost(`/features/${name}/run/${step}`, { description, apply }, {
-      onLog: (text) => setLogs(prev => [...prev, text]),
-      onStatus: (data) => setLogs(prev => [...prev, `[${data.status}] ${data.step || ''}\n`]),
-    });
-
-    if (res.ok) {
-      setResult('Step completed.');
-      if (onDone) onDone();
-    } else {
-      setErr(res.error);
-    }
+  async function iterate() {
+    setRunning(true); setResult(null); setErr(null); setLogs([]);
+    const res = await streamPost(`/features/${name}/iterate/${step}`, { instructions, apply, model: model || undefined }, sseCallbacks);
+    if (res.ok) { setResult('Iteration completed.'); setInstructions(''); if (onDone) onDone(); }
+    else setErr(res.error);
     setRunning(false);
   }
 
   async function reset() {
-    try {
-      await api.post(`/features/${name}/reset/${step}`);
-      if (onDone) onDone();
-    } catch (e) {
-      setErr(e.message);
-    }
+    try { await api.post(`/features/${name}/reset/${step}`); if (onDone) onDone(); }
+    catch (e) { setErr(e.message); }
   }
 
-  return React.createElement('div', { className: 'bg-slate-900 border border-aia-border rounded p-4 space-y-3' },
-    React.createElement('h4', { className: 'text-sm font-semibold text-slate-300' }, `Run: ${step}`),
-    React.createElement('input', {
-      type: 'text',
-      value: description,
-      onChange: e => setDescription(e.target.value),
-      placeholder: 'Optional description...',
-      disabled: running,
-      className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-aia-accent focus:outline-none',
-    }),
-    React.createElement('div', { className: 'flex items-center gap-4' },
-      React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer' },
-        React.createElement('input', {
-          type: 'checkbox',
-          checked: apply,
-          onChange: e => setApply(e.target.checked),
-          disabled: running,
-          className: 'rounded',
-        }),
-        'Agent mode (--apply)'
+  return React.createElement('div', { className: 'space-y-3' },
+
+    // --- Run block (when step is not done) ---
+    !isDone && React.createElement('div', { className: 'bg-slate-900 border border-aia-border rounded p-4 space-y-3' },
+      React.createElement('h4', { className: 'text-sm font-semibold text-emerald-400' }, `Run: ${step}`),
+      React.createElement('input', {
+        type: 'text',
+        value: description,
+        onChange: e => setDescription(e.target.value),
+        placeholder: 'Optional description...',
+        disabled: running,
+        className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-emerald-400 focus:outline-none',
+      }),
+      React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
+        React.createElement(ModelSelect, { step, model, onChange: setModel, disabled: running }),
+        React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer' },
+          React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running, className: 'rounded' }),
+          'Agent mode (--apply)'
+        ),
+        React.createElement('button', {
+          onClick: run, disabled: running,
+          className: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded px-4 py-1.5 text-sm hover:bg-emerald-500/30 disabled:opacity-40',
+        }, running ? 'Running...' : 'Run Step'),
       ),
-      React.createElement('button', {
-        onClick: run,
-        disabled: running,
-        className: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded px-4 py-1.5 text-sm hover:bg-emerald-500/30 disabled:opacity-40',
-      }, running ? 'Running...' : 'Run Step'),
-      React.createElement('button', {
-        onClick: reset,
-        disabled: running,
-        className: 'text-slate-500 hover:text-slate-300 text-xs',
-      }, 'Reset'),
     ),
+
+    // --- Iterate block (when step is done) ---
+    isDone && React.createElement('div', { className: 'bg-slate-900 border border-violet-500/30 rounded p-4 space-y-3' },
+      React.createElement('div', { className: 'flex items-center justify-between' },
+        React.createElement('h4', { className: 'text-sm font-semibold text-violet-400' }, `Iterate: ${step}`),
+        React.createElement('span', { className: 'text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded' }, 'done'),
+      ),
+      React.createElement('p', { className: 'text-xs text-slate-500' }, 'The previous output will be used as base. Describe what to change below.'),
+      React.createElement('label', { className: 'text-xs font-medium text-slate-400 block' }, 'Iteration instructions'),
+      React.createElement('textarea', {
+        value: instructions,
+        onChange: e => setInstructions(e.target.value),
+        placeholder: 'e.g. "Add error handling for edge cases", "Focus more on mobile", "Split into smaller functions"...',
+        disabled: running,
+        rows: 3,
+        className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-400 focus:outline-none resize-y',
+      }),
+      React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
+        React.createElement(ModelSelect, { step, model, onChange: setModel, disabled: running }),
+        React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer' },
+          React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running, className: 'rounded' }),
+          'Agent mode (--apply)'
+        ),
+        React.createElement('button', {
+          onClick: iterate, disabled: running || !instructions.trim(),
+          className: 'bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-4 py-1.5 text-sm hover:bg-violet-500/30 disabled:opacity-40',
+        }, running ? 'Iterating...' : 'Iterate'),
+        React.createElement('button', {
+          onClick: reset, disabled: running,
+          className: 'text-slate-500 hover:text-slate-300 text-xs',
+        }, 'Reset to pending'),
+      ),
+    ),
+
+    // --- Shared log viewer + results ---
     React.createElement(LogViewer, { logs }),
     result && React.createElement('p', { className: 'text-emerald-400 text-xs' }, result),
     err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
@@ -258,8 +309,8 @@ export function FeatureDetail({ name }) {
       )
     ),
 
-    // Run panel
-    activeStep && React.createElement(RunPanel, { name, step: activeStep, onDone: load }),
+    // Run / Iterate panel
+    activeStep && React.createElement(RunPanel, { name, step: activeStep, stepStatus: steps[activeStep], onDone: load }),
 
     // File tabs
     React.createElement('div', { className: 'flex gap-1 border-b border-aia-border' },

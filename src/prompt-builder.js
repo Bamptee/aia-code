@@ -77,7 +77,7 @@ async function loadPromptTemplate(step, root) {
   return content;
 }
 
-export async function buildPrompt(feature, step, { description, root = process.cwd() } = {}) {
+export async function buildPrompt(feature, step, { description, instructions, root = process.cwd() } = {}) {
   const config = await loadConfig(root);
 
   const [context, knowledgeCategories, initSpecs, featureContent, previousOutput, task] = await Promise.all([
@@ -125,6 +125,12 @@ export async function buildPrompt(feature, step, { description, root = process.c
     parts.push('\n\n=== PREVIOUS OUTPUT ===\n');
     parts.push(previousOutput);
     parts.push('\n\nThe above is a previous version of this step. Rewrite it incorporating any new information, answers to questions, and improvements.');
+  }
+
+  if (instructions) {
+    parts.push('\n\n=== ITERATION INSTRUCTIONS ===\n');
+    parts.push('Apply the following changes/feedback to the previous output:\n');
+    parts.push(instructions);
   }
 
   parts.push('\n\n=== TASK ===\n');

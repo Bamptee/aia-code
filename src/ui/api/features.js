@@ -97,6 +97,7 @@ export function registerFeatureRoutes(router) {
     try {
       const output = await runStep(params.step, params.name, {
         description: body.description,
+        model: body.model || undefined,
         verbose: true,
         apply: body.apply || false,
         root,
@@ -151,6 +152,34 @@ export function registerFeatureRoutes(router) {
         onData,
       });
       sseSend(res, 'done', { status: 'completed', name: body.name });
+    } catch (err) {
+      sseSend(res, 'error', { message: err.message });
+    }
+    res.end();
+  });
+
+  // Iterate a step with SSE streaming (reset + re-run with instructions)
+  router.post('/api/features/:name/iterate/:step', async (req, res, { params, root, parseBody }) => {
+    const body = await parseBody();
+    sseHeaders(res);
+    sseSend(res, 'status', { step: params.step, status: 'iterating' });
+
+    try {
+      await resetStep(params.name, params.step, root);
+
+      const onData = ({ type, text }) => {
+        try { sseSend(res, 'log', { type, text }); } catch {}
+      };
+
+      const output = await runStep(params.step, params.name, {
+        instructions: body.instructions,
+        model: body.model || undefined,
+        verbose: true,
+        apply: body.apply || false,
+        root,
+        onData,
+      });
+      sseSend(res, 'done', { step: params.step });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
     }

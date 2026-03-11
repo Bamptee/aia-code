@@ -13,6 +13,7 @@ import { registerStatusCommand } from './commands/status.js';
 import { registerResetCommand } from './commands/reset.js';
 import { registerNextCommand } from './commands/next.js';
 import { registerQuickCommand } from './commands/quick.js';
+import { registerIterateCommand } from './commands/iterate.js';
 import { registerUiCommand } from './commands/ui.js';
 
 export function createCli() {
@@ -31,6 +32,7 @@ export function createCli() {
   registerRepoCommand(program);
   registerStatusCommand(program);
   registerResetCommand(program);
+  registerIterateCommand(program);
   registerUiCommand(program);
 
   return program;

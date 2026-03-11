@@ -77,7 +77,7 @@ async function loadPromptTemplate(step, root) {
   return content;
 }
 
-export async function buildPrompt(feature, step, { description, instructions, root = process.cwd() } = {}) {
+export async function buildPrompt(feature, step, { description, instructions, history, root = process.cwd() } = {}) {
   const config = await loadConfig(root);
 
   const [context, knowledgeCategories, initSpecs, featureContent, previousOutput, task] = await Promise.all([
@@ -101,6 +101,16 @@ export async function buildPrompt(feature, step, { description, instructions, ro
   parts.push('=== OUTPUT LANGUAGE ===\n');
   parts.push(`Write ALL your output in ${docLang}. This is mandatory and non-negotiable.`);
   parts.push(`Do NOT use any other language for the document content.\n`);
+
+  // Add conversation history if present (for multi-turn)
+  if (history && history.length > 0) {
+    parts.push('=== CONVERSATION HISTORY ===\n');
+    for (const msg of history) {
+      const prefix = msg.role === 'user' ? 'User' : 'Agent';
+      parts.push(`${prefix}: ${msg.content}`);
+    }
+    parts.push('');
+  }
 
   if (description) {
     parts.push('=== DESCRIPTION ===\n');

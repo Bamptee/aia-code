@@ -101,8 +101,21 @@ export function registerFeatureRoutes(router) {
     };
 
     try {
+      // Validate and sanitize history array
+      const rawHistory = body.history || [];
+      const validatedHistory = Array.isArray(rawHistory)
+        ? rawHistory
+            .filter(msg => msg && typeof msg === 'object' && typeof msg.content === 'string')
+            .map(msg => ({
+              role: msg.role === 'agent' ? 'agent' : 'user',
+              content: String(msg.content).slice(0, 50000), // Limit content length
+            }))
+            .slice(-20) // Limit history depth
+        : [];
+
       const output = await runStep(params.step, params.name, {
         description: body.description,
+        history: validatedHistory,
         model: body.model || undefined,
         verbose: body.verbose !== undefined ? body.verbose : true,
         apply: body.apply || false,
@@ -177,8 +190,21 @@ export function registerFeatureRoutes(router) {
         try { sseSend(res, 'log', { type, text }); } catch {}
       };
 
+      // F7: Validate and pass history for iterate too
+      const rawHistory = body.history || [];
+      const validatedHistory = Array.isArray(rawHistory)
+        ? rawHistory
+            .filter(msg => msg && typeof msg === 'object' && typeof msg.content === 'string')
+            .map(msg => ({
+              role: msg.role === 'agent' ? 'agent' : 'user',
+              content: String(msg.content).slice(0, 50000),
+            }))
+            .slice(-20)
+        : [];
+
       const output = await runStep(params.step, params.name, {
         instructions: body.instructions,
+        history: validatedHistory,
         model: body.model || undefined,
         verbose: body.verbose !== undefined ? body.verbose : true,
         apply: body.apply || false,

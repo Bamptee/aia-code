@@ -112,6 +112,46 @@ function LogViewer({ logs }) {
   }, logs.join(''));
 }
 
+function VerbosePanel({ logs, expanded, onToggle }) {
+  if (!logs.length) return null;
+  return React.createElement('div', { className: 'mt-2' },
+    React.createElement('button', {
+      onClick: onToggle,
+      'aria-expanded': expanded, // F13: Accessibility
+      'aria-label': `Toggle verbose logs, ${logs.length} lines`,
+      className: 'text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1',
+    }, expanded ? '\u25BC' : '\u25B6', `Verbose (${logs.length} lines)`),
+    expanded && React.createElement('pre', {
+      className: 'bg-black/70 border border-slate-700 rounded p-2 mt-1 text-xs text-slate-500 overflow-auto max-h-48 whitespace-pre-wrap',
+      role: 'log',
+      'aria-label': 'Verbose output',
+    }, logs.join(''))
+  );
+}
+
+function ChatLog({ messages }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [messages]);
+
+  if (!messages.length) return null;
+
+  return React.createElement('div', {
+    ref,
+    className: 'bg-slate-900 border border-aia-border rounded p-3 font-mono text-sm overflow-auto max-h-80',
+    role: 'log', // F13: Accessibility
+    'aria-label': 'Chat history',
+  }, messages.map((msg) =>
+    React.createElement('div', { key: msg.id || msg.content.slice(0, 20), className: 'mb-2' }, // F11: Unique key
+      React.createElement('span', {
+        className: msg.role === 'user' ? 'text-cyan-400' : 'text-emerald-400'
+      }, msg.role === 'user' ? '> you: ' : 'agent: '),
+      React.createElement('span', { className: 'text-slate-300 whitespace-pre-wrap' }, msg.content)
+    )
+  ));
+}
+
 function ModelSelect({ model, onChange, disabled }) {
   const [models, setModels] = React.useState([]);
 
@@ -251,57 +291,180 @@ function StepGuidance({ step, feature }) {
   );
 }
 
+const MAX_MESSAGES = 100;
+const MAX_VERBOSE_LOGS = 500;
+
 function RunPanel({ name, step, stepStatus, onDone }) {
   const isDone = stepStatus === 'done';
-  const [description, setDescription] = React.useState('');
+  const [inputText, setInputText] = React.useState('');
   const [instructions, setInstructions] = React.useState('');
   const [model, setModel] = React.useState('');
   const [apply, setApply] = React.useState(false);
   const [running, setRunning] = React.useState(false);
   const [result, setResult] = React.useState(null);
   const [err, setErr] = React.useState(null);
-  const [logs, setLogs] = React.useState([]);
+  const [messages, setMessages] = React.useState([]);
+  const [verboseLogs, setVerboseLogs] = React.useState([]);
+  const [verboseExpanded, setVerboseExpanded] = React.useState(false);
+  const [history, setHistory] = React.useState([]);
+  const agentBuffer = React.useRef('');
+  const requestId = React.useRef(0); // F4: Track request to prevent race conditions
+  const [resetting, setResetting] = React.useState(false); // F14: Track reset state
 
-  const sseCallbacks = {
-    onLog: (text) => setLogs(prev => [...prev, text]),
-    onStatus: (data) => setLogs(prev => [...prev, `[${data.status}] ${data.step || ''}\n`]),
-  };
+  // Reset chat state when step changes
+  React.useEffect(() => {
+    requestId.current++; // F5: Invalidate pending requests on step change
+    setMessages([]);
+    setVerboseLogs([]);
+    setHistory([]);
+    setResult(null);
+    setErr(null);
+    agentBuffer.current = '';
+  }, [step]);
 
-  async function run() {
-    setRunning(true); setResult(null); setErr(null); setLogs([]);
-    const res = await streamPost(`/features/${name}/run/${step}`, { description, apply, model: model || undefined }, sseCallbacks);
-    if (res.ok) { setResult('Step completed.'); if (onDone) onDone(); }
-    else setErr(res.error);
+  // F4: Create callbacks bound to current request
+  const createSseCallbacks = (currentRequestId) => ({
+    onLog: (text, type) => {
+      if (requestId.current !== currentRequestId) return; // Ignore stale callbacks
+      if (type === 'stderr') {
+        setVerboseLogs(prev => [...prev, text].slice(-MAX_VERBOSE_LOGS)); // F8: Limit size
+      } else {
+        agentBuffer.current += text;
+      }
+    },
+    onStatus: (data) => {
+      if (requestId.current !== currentRequestId) return;
+      setVerboseLogs(prev => [...prev, `[${data.status}] ${data.step || ''}\n`].slice(-MAX_VERBOSE_LOGS));
+    },
+  });
+
+  async function handleSend() {
+    if (!inputText.trim() || running) return;
+
+    const userMessage = inputText.trim();
+    const msgId = Date.now(); // F11: Unique key for messages
+    setInputText('');
+    setMessages(prev => [...prev, { id: msgId, role: 'user', content: userMessage }].slice(-MAX_MESSAGES));
+    setRunning(true);
+    setResult(null);
+    setErr(null);
+    setVerboseLogs([]);
+    agentBuffer.current = '';
+
+    const currentRequestId = ++requestId.current; // F4: New request ID
+    const newHistory = [...history, { role: 'user', content: userMessage }];
+    setHistory(newHistory);
+
+    const res = await streamPost(`/features/${name}/run/${step}`, {
+      description: userMessage,
+      apply,
+      model: model || undefined,
+      history: newHistory.slice(0, -1),
+    }, createSseCallbacks(currentRequestId));
+
+    // F4: Check if this request is still current
+    if (requestId.current !== currentRequestId) return;
+
+    if (agentBuffer.current.trim()) {
+      const agentResponse = agentBuffer.current.trim();
+      setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: agentResponse }].slice(-MAX_MESSAGES));
+      setHistory(prev => [...prev, { role: 'agent', content: agentResponse }]);
+    }
+
+    if (res.ok) {
+      setResult('Step completed.');
+      if (onDone) onDone();
+    } else {
+      setErr(res.error);
+    }
     setRunning(false);
   }
 
   async function iterate() {
-    setRunning(true); setResult(null); setErr(null); setLogs([]);
-    const res = await streamPost(`/features/${name}/iterate/${step}`, { instructions, apply, model: model || undefined }, sseCallbacks);
-    if (res.ok) { setResult('Iteration completed.'); setInstructions(''); if (onDone) onDone(); }
-    else setErr(res.error);
+    if (!instructions.trim() || running) return;
+
+    const msgId = Date.now();
+    const iterationInstructions = instructions;
+    setMessages(prev => [...prev, { id: msgId, role: 'user', content: iterationInstructions }].slice(-MAX_MESSAGES));
+    setRunning(true);
+    setResult(null);
+    setErr(null);
+    setVerboseLogs([]);
+    agentBuffer.current = '';
+
+    const currentRequestId = ++requestId.current;
+    // F7: Pass history in iterate mode too
+    const newHistory = [...history, { role: 'user', content: iterationInstructions }];
+    setHistory(newHistory);
+
+    const res = await streamPost(`/features/${name}/iterate/${step}`, {
+      instructions: iterationInstructions,
+      apply,
+      model: model || undefined,
+      history: newHistory.slice(0, -1),
+    }, createSseCallbacks(currentRequestId));
+
+    if (requestId.current !== currentRequestId) return;
+
+    if (agentBuffer.current.trim()) {
+      setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: agentBuffer.current.trim() }].slice(-MAX_MESSAGES));
+      setHistory(prev => [...prev, { role: 'agent', content: agentBuffer.current.trim() }]);
+    }
+
+    if (res.ok) {
+      setResult('Iteration completed.');
+      setInstructions('');
+      if (onDone) onDone();
+    } else {
+      setErr(res.error);
+    }
     setRunning(false);
   }
 
+  // F14: Better reset with state tracking
   async function reset() {
-    try { await api.post(`/features/${name}/reset/${step}`); if (onDone) onDone(); }
-    catch (e) { setErr(e.message); }
+    setResetting(true);
+    setErr(null);
+    try {
+      await api.post(`/features/${name}/reset/${step}`);
+      requestId.current++;
+      setMessages([]);
+      setVerboseLogs([]);
+      setHistory([]);
+      setResult(null);
+      if (onDone) onDone();
+    } catch (e) {
+      setErr(`Reset failed: ${e.message}`);
+    } finally {
+      setResetting(false);
+    }
   }
 
+  const handleKeyDown = (e, submitFn) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitFn();
+    }
+  };
+
   return React.createElement('div', { className: 'space-y-3' },
+
+    // --- Chat log ---
+    React.createElement(ChatLog, { messages }),
 
     // --- Run block (when step is not done) ---
     !isDone && React.createElement('div', { className: 'bg-slate-900 border border-aia-border rounded p-4 space-y-3' },
       React.createElement('h4', { className: 'text-sm font-semibold text-emerald-400' }, `Run: ${step}`),
       React.createElement('textarea', {
-        value: description,
-        onChange: e => setDescription(e.target.value),
-        placeholder: 'Optional description or additional context...',
+        value: inputText,
+        onChange: e => setInputText(e.target.value),
+        onKeyDown: e => handleKeyDown(e, handleSend),
+        placeholder: 'Describe what you want... (Enter to send, Shift+Enter for newline)',
         disabled: running,
         rows: 3,
         className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-emerald-400 focus:outline-none resize-y max-h-96 overflow-auto',
       }),
-      description.length > 0 && React.createElement('span', { className: 'text-xs text-slate-500' }, `${description.length} characters`),
+      inputText.length > 0 && React.createElement('span', { className: 'text-xs text-slate-500' }, `${inputText.length} characters`),
       React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
         React.createElement(ModelSelect, { model, onChange: setModel, disabled: running }),
         React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer', title: 'Allow AI to edit files in your project' },
@@ -309,9 +472,9 @@ function RunPanel({ name, step, stepStatus, onDone }) {
           'Agent mode'
         ),
         React.createElement('button', {
-          onClick: run, disabled: running,
+          onClick: handleSend, disabled: running || !inputText.trim(),
           className: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded px-4 py-1.5 text-sm hover:bg-emerald-500/30 disabled:opacity-40',
-        }, running ? 'Running...' : 'Run Step'),
+        }, running ? 'Running...' : 'Send'),
       ),
     ),
 
@@ -326,7 +489,8 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       React.createElement('textarea', {
         value: instructions,
         onChange: e => setInstructions(e.target.value),
-        placeholder: 'e.g. "Add error handling for edge cases", "Focus more on mobile", "Split into smaller functions"...',
+        onKeyDown: e => handleKeyDown(e, iterate),
+        placeholder: 'e.g. "Add error handling for edge cases"... (Enter to send, Shift+Enter for newline)',
         disabled: running,
         rows: 3,
         className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-400 focus:outline-none resize-y max-h-96 overflow-auto',
@@ -343,16 +507,22 @@ function RunPanel({ name, step, stepStatus, onDone }) {
           className: 'bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-4 py-1.5 text-sm hover:bg-violet-500/30 disabled:opacity-40',
         }, running ? 'Iterating...' : 'Iterate'),
         React.createElement('button', {
-          onClick: reset, disabled: running,
-          className: 'text-slate-500 hover:text-slate-300 text-xs',
-        }, 'Reset to pending'),
+          onClick: reset, disabled: running || resetting,
+          className: 'text-slate-500 hover:text-slate-300 text-xs disabled:opacity-40',
+        }, resetting ? 'Resetting...' : 'Reset to pending'),
       ),
       // Step guidance for completed steps
       React.createElement(StepGuidance, { step, feature: name }),
     ),
 
-    // --- Shared log viewer + results ---
-    React.createElement(LogViewer, { logs }),
+    // --- Verbose panel (stderr logs) ---
+    React.createElement(VerbosePanel, {
+      logs: verboseLogs,
+      expanded: verboseExpanded,
+      onToggle: () => setVerboseExpanded(!verboseExpanded),
+    }),
+
+    // --- Results ---
     result && React.createElement('p', { className: 'text-emerald-400 text-xs' }, result),
     err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
   );

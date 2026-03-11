@@ -138,17 +138,12 @@ function LogViewer({ logs }) {
   }, logs.join(''));
 }
 
-function ModelSelect({ step, model, onChange, disabled }) {
+function ModelSelect({ model, onChange, disabled }) {
   const [models, setModels] = React.useState([]);
 
   React.useEffect(() => {
-    api.get('/models').then(data => {
-      const stepModels = data[step] || [];
-      setModels(stepModels.map(m => m.model));
-    }).catch(() => {});
-  }, [step]);
-
-  if (models.length <= 1) return null;
+    api.get('/models').then(setModels).catch(() => {});
+  }, []);
 
   return React.createElement('select', {
     value: model,
@@ -212,7 +207,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
         className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-emerald-400 focus:outline-none',
       }),
       React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
-        React.createElement(ModelSelect, { step, model, onChange: setModel, disabled: running }),
+        React.createElement(ModelSelect, { model, onChange: setModel, disabled: running }),
         React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer' },
           React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running, className: 'rounded' }),
           'Agent mode (--apply)'
@@ -241,7 +236,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
         className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-400 focus:outline-none resize-y',
       }),
       React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
-        React.createElement(ModelSelect, { step, model, onChange: setModel, disabled: running }),
+        React.createElement(ModelSelect, { model, onChange: setModel, disabled: running }),
         React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer' },
           React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running, className: 'rounded' }),
           'Agent mode (--apply)'

@@ -7,13 +7,19 @@ export function registerConstantsRoutes(router) {
     json(res, { FEATURE_STEPS, STEP_STATUS, QUICK_STEPS });
   });
 
-  // List available models per step from config
+  // List all unique models from config
   router.get('/api/models', async (req, res, { root }) => {
     try {
       const config = await loadConfig(root);
-      json(res, config.models || {});
+      const all = new Set();
+      for (const models of Object.values(config.models || {})) {
+        for (const entry of models) {
+          all.add(entry.model);
+        }
+      }
+      json(res, [...all]);
     } catch (err) {
-      json(res, {});
+      json(res, []);
     }
   });
 }

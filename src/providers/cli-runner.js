@@ -9,9 +9,10 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
     idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
   }
   return new Promise((resolve, reject) => {
+    const { CLAUDECODE, ...cleanEnv } = process.env;
     const child = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, FORCE_COLOR: '0' },
+      env: { ...cleanEnv, FORCE_COLOR: '0' },
     });
 
     const chunks = [];

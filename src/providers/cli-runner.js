@@ -1,4 +1,8 @@
 import { spawn } from 'node:child_process';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import chalk from 'chalk';
 
 const DEFAULT_IDLE_TIMEOUT_MS = 180_000;
@@ -8,16 +12,42 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
   if (!idleTimeoutMs) {
     idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
   }
+
+  // Write prompt to a temp file to avoid stdin piping issues
+  let tmpFile;
+  if (stdinData) {
+    tmpFile = path.join(tmpdir(), `aia-prompt-${randomBytes(6).toString('hex')}.txt`);
+    writeFileSync(tmpFile, stdinData, 'utf-8');
+  }
+
   return new Promise((resolve, reject) => {
     const { CLAUDECODE, ...cleanEnv } = process.env;
-    const child = spawn(command, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
+
+    // Replace the `-` stdin marker with the temp file path via shell redirection
+    const finalArgs = tmpFile
+      ? args.filter(a => a !== '-')
+      : args;
+
+    const spawnCommand = tmpFile
+      ? `${command} ${finalArgs.map(a => `'${a}'`).join(' ')} < '${tmpFile}'`
+      : `${command} ${args.map(a => `'${a}'`).join(' ')}`;
+
+    console.error(`[DEBUG] ${spawnCommand}`);
+
+    const child = spawn('sh', ['-c', spawnCommand], {
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...cleanEnv, FORCE_COLOR: '0' },
     });
 
     const chunks = [];
     let stderr = '';
     let settled = false;
+
+    function cleanup() {
+      if (tmpFile) {
+        try { unlinkSync(tmpFile); } catch {}
+      }
+    }
 
     function resetTimer() {
       clearTimeout(timer);
@@ -31,6 +61,7 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      cleanup();
       if (err) reject(err);
       else resolve(result);
     }
@@ -71,10 +102,5 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
         finish(null, chunks.join(''));
       }
     });
-
-    if (stdinData) {
-      child.stdin.write(stdinData);
-      child.stdin.end();
-    }
   });
 }

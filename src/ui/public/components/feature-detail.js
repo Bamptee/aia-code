@@ -1,5 +1,6 @@
 import React from 'react';
 import { api, streamPost } from '/main.js';
+import { WorktrunkPanel } from '/components/worktrunk-panel.js';
 
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -776,6 +777,9 @@ export function FeatureDetail({ name }) {
       currentFlow: selectedFlow || 'full',
       onFlowChanged: handleFlowChanged,
     }),
+
+    // Worktrunk panel
+    !showInitPanel && React.createElement(WorktrunkPanel, { featureName: name }),
 
     // Pipeline
     React.createElement('div', { className: 'flex flex-wrap gap-2' },

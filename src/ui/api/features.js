@@ -11,6 +11,7 @@ import { getGuidance } from '../../services/suggestions.js';
 import { callModel } from '../../services/model-call.js';
 import { loadConfig } from '../../models.js';
 import { json, error } from '../router.js';
+import { isWtInstalled, hasWorktree, getFeatureBranch } from '../../services/worktrunk.js';
 
 const MAX_DESCRIPTION_LENGTH = 50000; // 50KB
 
@@ -57,13 +58,15 @@ export function registerFeatureRoutes(router) {
     }
     const entries = await fs.readdir(featuresDir, { withFileTypes: true });
     const features = [];
+    const wtInstalled = isWtInstalled();
     for (const entry of entries) {
       if (entry.isDirectory()) {
         try {
           const status = await loadStatus(entry.name, root);
-          features.push({ name: entry.name, ...status });
+          const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+          features.push({ name: entry.name, ...status, hasWorktree: hasWt });
         } catch {
-          features.push({ name: entry.name, error: true });
+          features.push({ name: entry.name, error: true, hasWorktree: false });
         }
       }
     }

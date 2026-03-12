@@ -10,6 +10,7 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
     idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
   }
   return new Promise((resolve, reject) => {
+    const { CLAUDECODE, ...cleanEnv } = process.env;
     const child = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, FORCE_COLOR: '0' },
@@ -19,6 +20,7 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
     const chunks = [];
     let stderr = '';
     let settled = false;
+    let gotFirstOutput = false;
 
     function resetTimer() {
       clearTimeout(timer);
@@ -40,6 +42,10 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
     resetTimer();
 
     child.stdout.on('data', (data) => {
+      if (!gotFirstOutput) {
+        gotFirstOutput = true;
+        console.error(chalk.gray('[AI] First stdout received — agent is running'));
+      }
       const text = data.toString();
       if (verbose) process.stdout.write(text);
       chunks.push(text);
@@ -48,6 +54,10 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
     });
 
     child.stderr.on('data', (data) => {
+      if (!gotFirstOutput) {
+        gotFirstOutput = true;
+        console.error(chalk.gray('[AI] First stderr received — agent is running'));
+      }
       const text = data.toString();
       stderr += text;
       if (verbose) {
@@ -74,8 +84,9 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
     });
 
     if (stdinData) {
-      const stdinStream = Readable.from([stdinData]);
-      stdinStream.pipe(child.stdin);
+      child.stdin.on('error', () => {}); // Ignore EPIPE if child exits early
+      child.stdin.write(stdinData);
+      child.stdin.end();
     }
   });
 }

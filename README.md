@@ -4,6 +4,19 @@ CLI tool that orchestrates AI-assisted development workflows using a `.aia` fold
 
 AIA structures your feature development into steps (brief, spec, tech-spec, dev-plan, implement, etc.), builds rich prompts from project context and knowledge files, and delegates execution to AI CLI tools (Claude Code, Codex CLI, Gemini CLI) with weighted random model selection.
 
+## Table of contents
+
+- [Quick start](#quick-start)
+- [Prerequisites](#prerequisites)
+- [Commands](#commands)
+- [Integrate into an existing project](#integrate-into-an-existing-project)
+- [Web UI](#web-ui)
+- [Feature workflow](#feature-workflow)
+- [Prompt assembly](#prompt-assembly)
+- [Project structure](#project-structure)
+- [Dependencies](#dependencies)
+- [Worktrunk Integration](#worktrunk-integration)
+
 ## Quick start
 
 ```bash
@@ -400,6 +413,37 @@ aia repo scan
 
 Generates `.aia/repo-map.json` -- a categorized index of your source files (services, models, routes, controllers, middleware, utils, config). Useful as additional context for prompts.
 
+## Web UI
+
+Launch the local web interface to manage features visually:
+
+```bash
+aia ui
+# Opens http://localhost:3000
+```
+
+### Dashboard
+
+- View all features with their current step and progress
+- Create new features
+- Delete features
+- Quick access to run next step
+
+### Feature detail
+
+- Execute steps with real-time log streaming (SSE)
+- View step outputs (specs, plans, code)
+- Reset steps to re-run them
+- Edit `init.md` directly in the UI
+
+### Integrated terminal
+
+The UI includes a full terminal emulator (xterm.js + node-pty). Open a shell directly in your project directory without leaving the browser.
+
+### Config editor
+
+Edit your `.aia/config.yaml` directly in the UI with syntax highlighting and validation.
+
 ## Feature workflow
 
 Each feature follows a fixed pipeline of 8 steps:
@@ -470,49 +514,79 @@ The full prompt is piped to the CLI tool via stdin, so there are no argument len
 
 ```
 bin/
-  aia.js                  # CLI entrypoint
+  aia.js                    # CLI entrypoint
 src/
-  cli.js                  # Commander program, registers commands
-  constants.js            # Shared constants (dirs, steps, scan config)
-  models.js               # Config loader + validation, weighted model selection
-  logger.js               # Execution log writer
-  knowledge-loader.js     # Recursive markdown loader by category
-  prompt-builder.js       # Assembles full prompt from all sources
-  utils.js                # Shared filesystem helpers
+  cli.js                    # Commander program, registers commands
+  constants.js              # Shared constants (dirs, steps, icons)
+  models.js                 # Config loader + validation, weighted model selection
+  logger.js                 # Execution log writer
+  knowledge-loader.js       # Recursive markdown loader by category
+  prompt-builder.js         # Assembles full prompt from all sources
+  utils.js                  # Shared filesystem helpers
   commands/
-    init.js               # aia init
-    feature.js            # aia feature <name>
-    run.js                # aia run <step> <feature>
-    next.js               # aia next <feature>
-    iterate.js            # aia iterate <step> <feature> <instructions>
-    quick.js              # aia quick <name> [description]
-    status.js             # aia status <feature>
-    reset.js              # aia reset <step> <feature>
-    repo.js               # aia repo scan
+    init.js                 # aia init
+    feature.js              # aia feature <name>
+    run.js                  # aia run <step> <feature>
+    next.js                 # aia next <feature>
+    iterate.js              # aia iterate <step> <feature> <instructions>
+    quick.js                # aia quick <name> [description]
+    status.js               # aia status <feature>
+    reset.js                # aia reset <step> <feature>
+    repo.js                 # aia repo scan
+    ui.js                   # aia ui
   providers/
-    registry.js           # Model name + aliases -> provider routing
-    cli-runner.js         # Shared CLI spawn (streaming, idle timeout, verbose)
-    openai.js             # codex exec
-    anthropic.js          # claude -p
-    gemini.js             # gemini
+    registry.js             # Model name + aliases -> provider routing
+    cli-runner.js           # Shared CLI spawn (streaming, idle timeout, verbose)
+    openai.js               # codex exec
+    anthropic.js            # claude -p
+    gemini.js               # gemini
   services/
-    scaffold.js           # .aia/ folder creation
-    config.js             # Default config generation
-    feature.js            # Feature workspace creation + validation
-    status.js             # status.yaml read/write/reset
-    runner.js             # Step execution orchestrator
-    model-call.js         # Provider dispatch
-    repo-scan.js          # Codebase scanner + categorizer
+    scaffold.js             # .aia/ folder creation
+    config.js               # Default config generation
+    feature.js              # Feature workspace creation + validation
+    status.js               # status.yaml read/write/reset
+    runner.js               # Step execution orchestrator
+    model-call.js           # Provider dispatch
+    repo-scan.js            # Codebase scanner + categorizer
+    agent-sessions.js       # Real-time agent session tracking (SSE)
+    apps.js                 # Monorepo app/submodule detection
+    worktrunk.js            # Worktrunk git worktree integration
+  types/
+    test-quick.js           # Type definitions and validators
+  ui/
+    server.js               # Express server for web UI
+    router.js               # API route registration
+    api/
+      features.js           # Feature CRUD + step execution
+      config.js             # Config read/write endpoints
+      worktrunk.js          # Worktree management endpoints
+      logs.js               # Log streaming
+    public/
+      index.html            # SPA entry point
+      main.js               # App initialization
+      components/
+        dashboard.js        # Feature list + status overview
+        feature-detail.js   # Step execution + outputs
+        config-view.js      # Config editor
+        terminal.js         # Integrated xterm terminal
+        worktrunk-panel.js  # Worktree management UI
 ```
 
 ## Dependencies
 
-Only four runtime dependencies:
+Runtime dependencies:
 
-- `commander` -- CLI framework
-- `yaml` -- YAML parse/stringify
-- `fs-extra` -- filesystem utilities
-- `chalk` -- terminal colors
+| Package | Purpose |
+|---------|---------|
+| `commander` | CLI framework |
+| `yaml` | YAML parse/stringify |
+| `fs-extra` | Filesystem utilities |
+| `chalk` | Terminal colors |
+| `@iarna/toml` | TOML parsing (for `wt.toml`) |
+| `ws` | WebSocket server (UI real-time updates) |
+| `node-pty` | Pseudo-terminal (UI integrated terminal) |
+| `xterm` + `xterm-addon-fit` | Terminal emulator (UI) |
+| `busboy` | Multipart form parsing |
 
 AI calls use `child_process.spawn` to delegate to installed CLI tools. No API keys needed -- each CLI manages its own authentication.
 

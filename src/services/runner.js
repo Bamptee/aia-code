@@ -7,6 +7,8 @@ import { buildPrompt } from '../prompt-builder.js';
 import { callModel } from './model-call.js';
 import { loadStatus, updateStepStatus } from './status.js';
 import { logExecution } from '../logger.js';
+import { startSession, endSession, appendLog } from './agent-sessions.js';
+import { hasWorktree, getWorktreePath, getFeatureBranch } from './worktrunk.js';
 
 export async function runStep(step, feature, { description, instructions, history, attachments, model: modelOverride, verbose = false, apply = false, root = process.cwd(), onData } = {}) {
   if (!FEATURE_STEPS.includes(step)) {
@@ -25,12 +27,26 @@ export async function runStep(step, feature, { description, instructions, histor
 
   const shouldApply = apply || APPLY_STEPS.has(step);
 
+  // Start agent session for tracking
+  startSession(feature, step);
+
+  // Detect worktree for this feature
+  const branch = getFeatureBranch(feature);
+  const wtPath = hasWorktree(branch, root) ? getWorktreePath(branch, root) : null;
+  const cwd = wtPath || root;
+
+  // Wrapper onData to buffer logs in session
+  const wrappedOnData = (data) => {
+    appendLog(feature, data.text, data.type);
+    if (onData) onData(data);
+  };
+
   try {
     const model = modelOverride || await resolveModel(step, root);
     const prompt = await buildPrompt(feature, step, { description, instructions, history, attachments, root });
 
     const start = performance.now();
-    const output = await callModel(model, prompt, { verbose, apply: shouldApply, onData });
+    const output = await callModel(model, prompt, { verbose, apply: shouldApply, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
 
     const outputPath = path.join(root, AIA_DIR, 'features', feature, `${step}.md`);
@@ -44,5 +60,8 @@ export async function runStep(step, feature, { description, instructions, histor
   } catch (err) {
     await updateStepStatus(feature, step, STEP_STATUS.ERROR, root);
     throw err;
+  } finally {
+    // End session regardless of success or failure
+    endSession(feature);
   }
 }

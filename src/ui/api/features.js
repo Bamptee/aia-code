@@ -1,8 +1,8 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import Busboy from 'busboy';
-import { AIA_DIR } from '../../constants.js';
-import { loadStatus, updateStepStatus, resetStep, updateFlowType, updateType, updateApps } from '../../services/status.js';
+import { AIA_DIR, DELETION_FILTER } from '../../constants.js';
+import { loadStatus, updateStepStatus, resetStep, updateFlowType, updateType, updateApps, softDeleteFeature, restoreFeature, isFeatureDeleted } from '../../services/status.js';
 import { FEATURE_TYPES } from '../../constants.js';
 import { createFeature, validateFeatureName } from '../../services/feature.js';
 import { runStep } from '../../services/runner.js';
@@ -13,6 +13,7 @@ import { callModel } from '../../services/model-call.js';
 import { loadConfig } from '../../models.js';
 import { json, error } from '../router.js';
 import { isWtInstalled, hasWorktree, getFeatureBranch } from '../../services/worktrunk.js';
+import { getSession, isRunning, addSseClient, removeSseClient } from '../../services/agent-sessions.js';
 
 const MAX_DESCRIPTION_LENGTH = 50000; // 50KB
 
@@ -52,7 +53,8 @@ function validateAttachments(rawAttachments) {
 
 export function registerFeatureRoutes(router) {
   // List all features
-  router.get('/api/features', async (req, res, { root }) => {
+  // Query params: ?filter=active|deleted|all (default: active)
+  router.get('/api/features', async (req, res, { root, query }) => {
     const featuresDir = path.join(root, AIA_DIR, 'features');
     if (!(await fs.pathExists(featuresDir))) {
       return json(res, []);
@@ -60,14 +62,27 @@ export function registerFeatureRoutes(router) {
     const entries = await fs.readdir(featuresDir, { withFileTypes: true });
     const features = [];
     const wtInstalled = isWtInstalled();
+
+    // Parse filter from query params (default: active, with validation)
+    const validFilters = [DELETION_FILTER.ACTIVE, DELETION_FILTER.DELETED, DELETION_FILTER.ALL];
+    const filter = validFilters.includes(query?.filter) ? query.filter : DELETION_FILTER.ACTIVE;
+
     for (const entry of entries) {
       if (entry.isDirectory()) {
         try {
           const status = await loadStatus(entry.name, root);
           const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
-          features.push({ name: entry.name, ...status, hasWorktree: hasWt });
+          const deleted = isFeatureDeleted(status);
+
+          // Apply deletion filter
+          if (filter === DELETION_FILTER.ACTIVE && deleted) continue;
+          if (filter === DELETION_FILTER.DELETED && !deleted) continue;
+          // DELETION_FILTER.ALL shows everything
+
+          const running = isRunning(entry.name);
+          features.push({ name: entry.name, ...status, hasWorktree: hasWt, isDeleted: deleted, agentRunning: running });
         } catch {
-          features.push({ name: entry.name, error: true, hasWorktree: false });
+          features.push({ name: entry.name, error: true, hasWorktree: false, isDeleted: false, agentRunning: false });
         }
       }
     }
@@ -84,6 +99,36 @@ export function registerFeatureRoutes(router) {
     } catch (err) {
       error(res, err.message, 404);
     }
+  });
+
+  // Get agent running status for a feature
+  router.get('/api/features/:name/agent-status', (req, res, { params }) => {
+    const session = getSession(params.name);
+    if (!session) {
+      return json(res, { running: false });
+    }
+    json(res, {
+      running: true,
+      step: session.step,
+      startedAt: session.startedAt,
+      logs: session.logs,
+    });
+  });
+
+  // SSE stream for agent logs (reconnection endpoint)
+  router.get('/api/features/:name/agent-stream', (req, res, { params }) => {
+    const session = getSession(params.name);
+    if (!session) {
+      return error(res, 'No active session', 404);
+    }
+    sseHeaders(res);
+    // Replay buffered logs
+    for (const log of session.logs) {
+      sseSend(res, 'log', { text: log.text, type: log.type });
+    }
+    // Register for live updates
+    addSseClient(params.name, res);
+    req.on('close', () => removeSseClient(params.name, res));
   });
 
   // Read a feature file
@@ -504,6 +549,26 @@ IMPORTANT:
     try {
       await updateApps(params.name, apps, root);
       json(res, { ok: true, apps });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Soft delete a feature
+  router.delete('/api/features/:name', async (req, res, { params, root }) => {
+    try {
+      await softDeleteFeature(params.name, root);
+      json(res, { ok: true, deletedAt: new Date().toISOString() });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Restore a deleted feature
+  router.post('/api/features/:name/restore', async (req, res, { params, root }) => {
+    try {
+      await restoreFeature(params.name, root);
+      json(res, { ok: true });
     } catch (err) {
       error(res, err.message, 400);
     }

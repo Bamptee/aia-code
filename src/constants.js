@@ -52,6 +52,15 @@ export const STEP_STATUS = {
 export const FEATURE_TYPES = Object.freeze(['feature', 'bug']);
 export const DEFAULT_FEATURE_TYPE = 'feature';
 
+/**
+ * Feature deletion status filter options
+ */
+export const DELETION_FILTER = Object.freeze({
+  ACTIVE: 'active',
+  DELETED: 'deleted',
+  ALL: 'all',
+});
+
 export const APP_ICONS = {
   react: '\u269B',
   vue: '\uD83D\uDC9A',

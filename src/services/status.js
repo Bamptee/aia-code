@@ -114,3 +114,36 @@ export async function updateApps(feature, apps, root = process.cwd()) {
   const content = yaml.stringify(status);
   await fs.writeFile(statusPath(feature, root), content, 'utf-8');
 }
+
+/**
+ * Soft delete a feature by setting deletedAt timestamp
+ * @param {string} feature - Feature name
+ * @param {string} root - Project root directory
+ */
+export async function softDeleteFeature(feature, root = process.cwd()) {
+  const status = await loadStatus(feature, root);
+  status.deletedAt = new Date().toISOString();
+  const content = yaml.stringify(status);
+  await fs.writeFile(statusPath(feature, root), content, 'utf-8');
+}
+
+/**
+ * Restore a deleted feature by clearing deletedAt
+ * @param {string} feature - Feature name
+ * @param {string} root - Project root directory
+ */
+export async function restoreFeature(feature, root = process.cwd()) {
+  const status = await loadStatus(feature, root);
+  delete status.deletedAt;
+  const content = yaml.stringify(status);
+  await fs.writeFile(statusPath(feature, root), content, 'utf-8');
+}
+
+/**
+ * Check if a feature is deleted
+ * @param {object} status - Feature status object
+ * @returns {boolean}
+ */
+export function isFeatureDeleted(status) {
+  return !!(status && status.deletedAt != null);
+}

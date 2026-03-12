@@ -12,6 +12,7 @@ const STATUS_CLASSES = {
 const QUICK_STEPS = ['dev-plan', 'implement', 'review'];
 const FEATURE_TYPES = ['feature', 'bug'];
 const DEFAULT_FEATURE_TYPE = 'feature';
+const DELETION_FILTER = { ACTIVE: 'active', DELETED: 'deleted', ALL: 'all' };
 
 function StepBadge({ step, status }) {
   return React.createElement('span', {
@@ -33,11 +34,13 @@ function AppChip({ app, small = false }) {
   }, typeof app === 'object' ? `${app.icon || ''} ${app.name}` : app);
 }
 
-function FeatureCard({ feature, availableApps }) {
+function FeatureCard({ feature, availableApps, onRestore }) {
   const steps = feature.steps || {};
   const isQuickFlow = feature.flow === 'quick';
   const featureType = feature.type || DEFAULT_FEATURE_TYPE;
   const featureApps = feature.apps || [];
+  const isDeleted = feature.isDeleted || feature.deletedAt != null;
+  const [restoring, setRestoring] = React.useState(false);
 
   // Filter steps based on flow type
   const relevantSteps = isQuickFlow
@@ -53,29 +56,62 @@ function FeatureCard({ feature, availableApps }) {
     return found || { name: appName, icon: '\uD83D\uDCC1' };
   });
 
+  const handleRestore = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setRestoring(true);
+    try {
+      await api.post(`/features/${feature.name}/restore`);
+      if (onRestore) onRestore();
+    } catch (err) {
+      console.error('Failed to restore:', err);
+    }
+    setRestoring(false);
+  };
+
   return React.createElement('a', {
     href: `#/features/${feature.name}`,
-    className: 'block bg-aia-card border border-aia-border rounded-lg p-4 hover:border-aia-accent/50 transition-colors',
+    className: `block bg-aia-card border rounded-lg p-4 transition-colors ${
+      isDeleted
+        ? 'border-red-500/30 opacity-75 hover:border-red-500/50'
+        : 'border-aia-border hover:border-aia-accent/50'
+    }`,
   },
-    // Header row: Type badge + step count
+    // Header row: Type badge + step count / deleted badge
     React.createElement('div', { className: 'flex items-center justify-between mb-2' },
-      React.createElement(TypeBadge, { type: featureType }),
-      React.createElement('span', { className: 'text-xs text-slate-500' },
+      isDeleted
+        ? React.createElement('span', {
+            className: 'text-xs px-1.5 py-0.5 rounded border bg-red-500/20 text-red-400 border-red-500/30',
+          }, '\uD83D\uDDD1 DELETED')
+        : React.createElement(TypeBadge, { type: featureType }),
+      !isDeleted && React.createElement('span', { className: 'text-xs text-slate-500' },
         `${doneCount}/${totalCount} steps`
       ),
+      isDeleted && React.createElement('button', {
+        onClick: handleRestore,
+        disabled: restoring,
+        className: 'text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded hover:bg-emerald-500/30 disabled:opacity-40',
+      }, restoring ? 'Restoring...' : 'Restore'),
     ),
 
     // Feature name row with Quick/wt badges
     React.createElement('div', { className: 'flex items-center gap-2 mb-2' },
-      React.createElement('h3', { className: 'text-slate-100 font-semibold' }, feature.name),
-      isQuickFlow && React.createElement('span', {
+      React.createElement('h3', { className: `font-semibold ${isDeleted ? 'text-slate-500 line-through' : 'text-slate-100'}` }, feature.name),
+      !isDeleted && isQuickFlow && React.createElement('span', {
         className: 'bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded',
         title: 'Quick Flow',
       }, 'QUICK'),
-      feature.hasWorktree && React.createElement('span', {
+      !isDeleted && feature.hasWorktree && React.createElement('span', {
         className: 'bg-orange-500/20 text-orange-400 text-xs px-1.5 py-0.5 rounded',
         title: 'Git worktree active',
       }, 'wt'),
+      !isDeleted && feature.agentRunning && React.createElement('span', {
+        className: 'bg-blue-500/20 text-blue-400 text-xs px-1.5 py-0.5 rounded flex items-center gap-1',
+        title: 'Agent running',
+      },
+        React.createElement('span', { className: 'animate-pulse' }, '\u25CF'),
+        'Running'
+      ),
     ),
 
     // Progress bar
@@ -186,6 +222,41 @@ function WorktreeFilter({ filter, onChange, counts }) {
         }, `(${tab.count})`),
       )
     )
+  );
+}
+
+function DeletionFilter({ filter, onChange, deletedCount }) {
+  return React.createElement('div', { className: 'flex items-center gap-2' },
+    React.createElement('span', { className: 'text-xs text-slate-500' }, 'Show:'),
+    React.createElement('button', {
+      onClick: () => onChange(DELETION_FILTER.ACTIVE),
+      className: `px-3 py-1 text-xs rounded border transition-colors ${
+        filter === DELETION_FILTER.ACTIVE
+          ? 'bg-aia-accent/20 text-aia-accent border-aia-accent/30'
+          : 'bg-slate-800 text-slate-400 border-slate-600 hover:border-slate-500'
+      }`,
+    }, 'Active'),
+    React.createElement('button', {
+      onClick: () => onChange(DELETION_FILTER.DELETED),
+      className: `px-3 py-1 text-xs rounded border transition-colors flex items-center gap-1.5 ${
+        filter === DELETION_FILTER.DELETED
+          ? 'bg-red-500/20 text-red-400 border-red-500/30'
+          : 'bg-slate-800 text-slate-400 border-slate-600 hover:border-slate-500'
+      }`,
+    },
+      '\uD83D\uDDD1 Deleted',
+      deletedCount > 0 && React.createElement('span', {
+        className: 'bg-red-500/30 text-red-400 text-xs px-1.5 py-0.5 rounded',
+      }, deletedCount),
+    ),
+    React.createElement('button', {
+      onClick: () => onChange(DELETION_FILTER.ALL),
+      className: `px-3 py-1 text-xs rounded border transition-colors ${
+        filter === DELETION_FILTER.ALL
+          ? 'bg-slate-600 text-slate-200 border-slate-500'
+          : 'bg-slate-800 text-slate-400 border-slate-600 hover:border-slate-500'
+      }`,
+    }, 'All'),
   );
 }
 
@@ -391,11 +462,13 @@ function CreateFeatureModal({ apps, onCreated, onClose }) {
 
 export function Dashboard() {
   const [features, setFeatures] = React.useState([]);
+  const [deletedCount, setDeletedCount] = React.useState(0);
   const [apps, setApps] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [typeFilter, setTypeFilter] = React.useState('all');
   const [appsFilter, setAppsFilter] = React.useState([]);
   const [wtFilter, setWtFilter] = React.useState('all');
+  const [deletionFilter, setDeletionFilter] = React.useState(DELETION_FILTER.ACTIVE);
   const [showCreateModal, setShowCreateModal] = React.useState(false);
 
   const [loadError, setLoadError] = React.useState(null);
@@ -404,19 +477,30 @@ export function Dashboard() {
     setLoadError(null);
     setLoading(true);
     try {
-      const [featuresData, appsData] = await Promise.all([
-        api.get('/features'),
+      // Fetch features based on deletion filter
+      const [featuresData, appsData, deletedData] = await Promise.all([
+        api.get(`/features?filter=${deletionFilter}`),
         api.get('/apps'),
+        // Also fetch deleted count for the filter badge
+        deletionFilter !== DELETION_FILTER.DELETED
+          ? api.get(`/features?filter=${DELETION_FILTER.DELETED}`)
+          : Promise.resolve([]),
       ]);
       setFeatures(featuresData);
       setApps(appsData);
+      // Set deleted count
+      if (deletionFilter === DELETION_FILTER.DELETED) {
+        setDeletedCount(featuresData.length);
+      } else {
+        setDeletedCount(deletedData.length);
+      }
     } catch (e) {
       setLoadError(e.message || 'Failed to load data');
     }
     setLoading(false);
   }
 
-  React.useEffect(() => { load(); }, []);
+  React.useEffect(() => { load(); }, [deletionFilter]);
 
   // Filter features
   const filteredFeatures = features.filter(f => {
@@ -462,23 +546,30 @@ export function Dashboard() {
     ),
 
     // Filters row
-    !loading && features.length > 0 && React.createElement('div', { className: 'space-y-3' },
-      // Type filter pills
-      React.createElement(TypeFilterTabs, {
+    !loading && React.createElement('div', { className: 'space-y-3' },
+      // Deletion filter (Active / Deleted / All)
+      React.createElement(DeletionFilter, {
+        filter: deletionFilter,
+        onChange: setDeletionFilter,
+        deletedCount,
+      }),
+
+      // Type filter pills (only show if there are features to filter)
+      features.length > 0 && React.createElement(TypeFilterTabs, {
         filter: typeFilter,
         onChange: setTypeFilter,
         counts: typeCounts,
       }),
 
       // Apps filter
-      React.createElement(AppsFilter, {
+      features.length > 0 && React.createElement(AppsFilter, {
         apps,
         selected: appsFilter,
         onChange: setAppsFilter,
       }),
 
       // Worktree filter tabs
-      wtCounts.withWt > 0 && React.createElement(WorktreeFilter, {
+      features.length > 0 && wtCounts.withWt > 0 && React.createElement(WorktreeFilter, {
         filter: wtFilter,
         onChange: setWtFilter,
         counts: wtCounts,
@@ -492,11 +583,18 @@ export function Dashboard() {
     loading
       ? React.createElement('p', { className: 'text-slate-500' }, 'Loading...')
       : features.length === 0
-        ? React.createElement('p', { className: 'text-slate-500' }, 'No features yet. Create one to get started.')
+        ? React.createElement('div', { className: 'text-center py-8' },
+            deletionFilter === DELETION_FILTER.DELETED
+              ? React.createElement('div', { className: 'space-y-2' },
+                  React.createElement('p', { className: 'text-slate-500' }, '\uD83D\uDDD1 No deleted features'),
+                  React.createElement('p', { className: 'text-xs text-slate-600' }, 'Deleted features will appear here for recovery'),
+                )
+              : React.createElement('p', { className: 'text-slate-500' }, 'No features yet. Create one to get started.')
+          )
         : filteredFeatures.length === 0
           ? React.createElement('p', { className: 'text-slate-500' }, 'No features match these filters.')
           : React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' },
-              ...filteredFeatures.map(f => React.createElement(FeatureCard, { key: f.name, feature: f, availableApps: apps }))
+              ...filteredFeatures.map(f => React.createElement(FeatureCard, { key: f.name, feature: f, availableApps: apps, onRestore: load }))
             ),
 
     // Create modal

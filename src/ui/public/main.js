@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Dashboard } from '/components/dashboard.js';
 import { FeatureDetail } from '/components/feature-detail.js';
 import { ConfigView } from '/components/config-view.js';
+import { TestQuickView } from '/components/test-quick.js';
 
 // --- API client ---
 export const api = {
@@ -116,6 +117,7 @@ function parseRoute(hash) {
     return { page: 'feature', name: decodeURIComponent(hash.slice('#/features/'.length)) };
   }
   if (hash === '#/config') return { page: 'config' };
+  if (hash === '#/test-quick') return { page: 'test-quick' };
   return { page: 'dashboard' };
 }
 
@@ -141,12 +143,14 @@ function App() {
         className: 'bg-violet-500/20 text-violet-300 border border-violet-500/30 px-2 py-0.5 rounded text-xs font-medium',
       }, projectName),
       React.createElement('a', { href: '#/', className: 'text-slate-400 hover:text-slate-200 text-sm' }, 'Features'),
+      React.createElement('a', { href: '#/test-quick', className: 'text-slate-400 hover:text-slate-200 text-sm' }, 'Test Quick'),
       React.createElement('a', { href: '#/config', className: 'text-slate-400 hover:text-slate-200 text-sm' }, 'Config'),
     ),
     React.createElement('main', { className: 'max-w-6xl mx-auto p-6' },
       page === 'dashboard' ? React.createElement(Dashboard) :
       page === 'feature' ? React.createElement(FeatureDetail, { name }) :
-      page === 'config' ? React.createElement(ConfigView) : null
+      page === 'config' ? React.createElement(ConfigView) :
+      page === 'test-quick' ? React.createElement(TestQuickView) : null
     )
   );
 }

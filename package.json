@@ -30,7 +30,16 @@
     "url": "git+https://github.com/bamptee/aia-code.git"
   },
   "scripts": {
-    "start": "node bin/aia.js"
+    "start": "node bin/aia.js",
+    "test": "node --test tests/*.test.js",
+    "test:service": "node --test tests/test-quick.service.test.js",
+    "test:api": "node --test tests/test-quick.api.test.js",
+    "test:delete": "node --test tests/feature-delete.*.test.js",
+    "test:delete:service": "node --test tests/feature-delete.service.test.js",
+    "test:delete:api": "node --test tests/feature-delete.api.test.js",
+    "test:ux": "node --test tests/feature-list-ux.*.test.js",
+    "test:ux:unit": "node --test tests/feature-list-ux.unit.test.js",
+    "test:ux:api": "node --test tests/feature-list-ux.api.test.js"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

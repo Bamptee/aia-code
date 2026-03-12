@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
-import { AIA_DIR, FEATURE_STEPS } from '../constants.js';
+import { AIA_DIR, FEATURE_STEPS, DEFAULT_FEATURE_TYPE, FEATURE_TYPES } from '../constants.js';
 
 const FEATURE_FILES = [
   'status.yaml',
@@ -36,21 +36,42 @@ function buildInitMd(name) {
 `;
 }
 
-function buildStatusYaml(name) {
+function buildStatusYaml(name, { type = DEFAULT_FEATURE_TYPE, apps = [] } = {}) {
+  // Validate type
+  const validType = FEATURE_TYPES.includes(type) ? type : DEFAULT_FEATURE_TYPE;
+
+  // Validate apps - ensure it's an array of strings
+  const validApps = Array.isArray(apps)
+    ? apps.filter(a => typeof a === 'string' && a.trim()).map(a => a.trim())
+    : [];
+
   const steps = {};
   for (const step of FEATURE_STEPS) {
     steps[step] = 'pending';
   }
 
-  return yaml.stringify({
+  // Bug type defaults to quick flow, feature type defaults to full flow
+  const flow = validType === 'bug' ? 'quick' : 'full';
+  const currentStep = flow === 'quick' ? 'dev-plan' : 'brief';
+
+  const status = {
     feature: name,
-    current_step: 'brief',
+    type: validType,
+    flow,
+    current_step: currentStep,
+    createdAt: new Date().toISOString(),
     steps,
     knowledge: ['backend'],
-  });
+  };
+
+  if (validApps.length > 0) {
+    status.apps = validApps;
+  }
+
+  return yaml.stringify(status);
 }
 
-export async function createFeature(name, root = process.cwd()) {
+export async function createFeature(name, root = process.cwd(), options = {}) {
   validateFeatureName(name);
 
   const featureDir = path.join(root, AIA_DIR, 'features', name);
@@ -64,7 +85,7 @@ export async function createFeature(name, root = process.cwd()) {
   for (const file of FEATURE_FILES) {
     const filePath = path.join(featureDir, file);
     let content = '';
-    if (file === 'status.yaml') content = buildStatusYaml(name);
+    if (file === 'status.yaml') content = buildStatusYaml(name, options);
     else if (file === 'init.md') content = buildInitMd(name);
     await fs.writeFile(filePath, content, 'utf-8');
   }

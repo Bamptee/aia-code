@@ -4,6 +4,11 @@ import fs from 'fs-extra';
 import yaml from 'yaml';
 import { AIA_DIR } from '../constants.js';
 
+// Project config path helper
+function projectConfigPath(root) {
+  return path.join(root, AIA_DIR, 'config.yaml');
+}
+
 // Global user config directory
 const GLOBAL_AIA_DIR = path.join(os.homedir(), '.aia');
 const GLOBAL_CONFIG_PATH = path.join(GLOBAL_AIA_DIR, 'config.yaml');
@@ -102,4 +107,40 @@ export async function updateGlobalConfig(updates) {
 
 export function getGlobalConfigPath() {
   return GLOBAL_CONFIG_PATH;
+}
+
+// Project config helpers for apps
+export async function loadProjectConfig(root = process.cwd()) {
+  const configPath = projectConfigPath(root);
+  if (!(await fs.pathExists(configPath))) {
+    return {};
+  }
+  const raw = await fs.readFile(configPath, 'utf-8');
+  return yaml.parse(raw) || {};
+}
+
+export async function getApps(root = process.cwd()) {
+  const config = await loadProjectConfig(root);
+  return config.apps || [];
+}
+
+export async function setApps(apps, root = process.cwd()) {
+  const configPath = projectConfigPath(root);
+  let config = {};
+  if (await fs.pathExists(configPath)) {
+    const raw = await fs.readFile(configPath, 'utf-8');
+    config = yaml.parse(raw) || {};
+  }
+  config.apps = apps;
+  await fs.writeFile(configPath, yaml.stringify(config), 'utf-8');
+}
+
+export async function toggleApp(appName, enabled, root = process.cwd()) {
+  const apps = await getApps(root);
+  const app = apps.find(a => a.name === appName);
+  if (!app) {
+    throw new Error(`App "${appName}" not found`);
+  }
+  app.enabled = Boolean(enabled);
+  await setApps(apps, root);
 }

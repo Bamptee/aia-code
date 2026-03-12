@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import chalk from 'chalk';
 
 const DEFAULT_IDLE_TIMEOUT_MS = 180_000;
 const AGENT_IDLE_TIMEOUT_MS = 600_000;
 
-export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, idleTimeoutMs, onData } = {}) {
+export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, idleTimeoutMs, onData, cwd } = {}) {
   if (!idleTimeoutMs) {
     idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
   }
@@ -12,7 +13,8 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
     const { CLAUDECODE, ...cleanEnv } = process.env;
     const child = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...cleanEnv, FORCE_COLOR: '0' },
+      env: { ...process.env, FORCE_COLOR: '0' },
+      cwd,
     });
 
     const chunks = [];
@@ -45,7 +47,7 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
         console.error(chalk.gray('[AI] First stdout received — agent is running'));
       }
       const text = data.toString();
-      process.stdout.write(text);
+      if (verbose) process.stdout.write(text);
       chunks.push(text);
       if (onData) onData({ type: 'stdout', text });
       resetTimer();

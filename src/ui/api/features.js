@@ -1,8 +1,25 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import Busboy from 'busboy';
-import { AIA_DIR } from '../../constants.js';
-import { loadStatus, updateStepStatus, resetStep, updateFlowType } from '../../services/status.js';
+import { AIA_DIR, DELETION_FILTER, QUICK_STEPS } from '../../constants.js';
+import { loadStatus, updateStepStatus, resetStep, updateFlowType, updateType, updateApps, softDeleteFeature, restoreFeature, isFeatureDeleted } from '../../services/status.js';
+import { FEATURE_TYPES } from '../../constants.js';
+
+/**
+ * Check if a feature is completed (all relevant steps are done)
+ * @param {Object} status - Feature status object with steps and flow
+ * @returns {boolean}
+ */
+function isFeatureCompleted(status) {
+  const steps = status.steps || {};
+  const isQuickFlow = status.flow === 'quick';
+  const relevantSteps = isQuickFlow
+    ? Object.entries(steps).filter(([k]) => QUICK_STEPS.includes(k))
+    : Object.entries(steps);
+
+  if (relevantSteps.length === 0) return false;
+  return relevantSteps.every(([_, s]) => s === 'done');
+}
 import { createFeature, validateFeatureName } from '../../services/feature.js';
 import { runStep } from '../../services/runner.js';
 import { runQuick } from '../../services/quick.js';
@@ -12,6 +29,7 @@ import { callModel } from '../../services/model-call.js';
 import { loadConfig } from '../../models.js';
 import { json, error } from '../router.js';
 import { isWtInstalled, hasWorktree, getFeatureBranch } from '../../services/worktrunk.js';
+import { getSession, isRunning, addSseClient, removeSseClient } from '../../services/agent-sessions.js';
 
 const MAX_DESCRIPTION_LENGTH = 50000; // 50KB
 
@@ -21,24 +39,15 @@ function sseHeaders(res) {
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
     'Access-Control-Allow-Origin': '*',
+    'X-Accel-Buffering': 'no', // Disable nginx buffering if behind proxy
   });
+  res.flushHeaders(); // Force headers to be sent immediately
 }
 
 function sseSend(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-}
-
-// F6: Extracted validation helpers to avoid code duplication
-function validateHistory(rawHistory) {
-  return Array.isArray(rawHistory)
-    ? rawHistory
-        .filter(msg => msg && typeof msg === 'object' && typeof msg.content === 'string')
-        .map(msg => ({
-          role: msg.role === 'agent' ? 'agent' : 'user',
-          content: String(msg.content).slice(0, 50000),
-        }))
-        .slice(-20)
-    : [];
+  // Force flush for SSE streaming
+  if (res.flush) res.flush();
 }
 
 function validateAttachments(rawAttachments) {
@@ -51,7 +60,10 @@ function validateAttachments(rawAttachments) {
 
 export function registerFeatureRoutes(router) {
   // List all features
-  router.get('/api/features', async (req, res, { root }) => {
+  // Query params:
+  //   ?filter=active|deleted|all (default: active)
+  //   ?minimal=true - Return minimal data for faster initial load (name, type, flow, createdAt, deletedAt only)
+  router.get('/api/features', async (req, res, { root, query }) => {
     const featuresDir = path.join(root, AIA_DIR, 'features');
     if (!(await fs.pathExists(featuresDir))) {
       return json(res, []);
@@ -59,14 +71,49 @@ export function registerFeatureRoutes(router) {
     const entries = await fs.readdir(featuresDir, { withFileTypes: true });
     const features = [];
     const wtInstalled = isWtInstalled();
+
+    // Parse filter from query params (default: active, with validation)
+    const validFilters = [DELETION_FILTER.ACTIVE, DELETION_FILTER.DELETED, DELETION_FILTER.ALL];
+    const filter = validFilters.includes(query?.filter) ? query.filter : DELETION_FILTER.ACTIVE;
+
+    // Parse minimal flag for lazy loading support
+    const minimal = query?.minimal === 'true';
+
     for (const entry of entries) {
       if (entry.isDirectory()) {
         try {
           const status = await loadStatus(entry.name, root);
-          const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
-          features.push({ name: entry.name, ...status, hasWorktree: hasWt });
+          const deleted = isFeatureDeleted(status);
+
+          // Apply deletion filter
+          if (filter === DELETION_FILTER.ACTIVE && deleted) continue;
+          if (filter === DELETION_FILTER.DELETED && !deleted) continue;
+          // DELETION_FILTER.ALL shows everything
+
+          if (minimal) {
+            // Minimal mode: return basic info + essential computed fields for fast initial render
+            // Include hasWorktree and isCompleted since they're needed for filtering
+            const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+            const completed = isFeatureCompleted(status);
+            features.push({
+              name: entry.name,
+              type: status.type,
+              flow: status.flow,
+              createdAt: status.createdAt,
+              deletedAt: status.deletedAt,
+              isDeleted: deleted,
+              hasWorktree: hasWt,
+              isCompleted: completed,
+            });
+          } else {
+            // Full mode: return all data including computed states
+            const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+            const running = isRunning(entry.name);
+            const completed = isFeatureCompleted(status);
+            features.push({ name: entry.name, ...status, hasWorktree: hasWt, isDeleted: deleted, agentRunning: running, isCompleted: completed });
+          }
         } catch {
-          features.push({ name: entry.name, error: true, hasWorktree: false });
+          features.push({ name: entry.name, error: true, hasWorktree: false, isDeleted: false, agentRunning: false });
         }
       }
     }
@@ -83,6 +130,36 @@ export function registerFeatureRoutes(router) {
     } catch (err) {
       error(res, err.message, 404);
     }
+  });
+
+  // Get agent running status for a feature
+  router.get('/api/features/:name/agent-status', (req, res, { params }) => {
+    const session = getSession(params.name);
+    if (!session) {
+      return json(res, { running: false });
+    }
+    json(res, {
+      running: true,
+      step: session.step,
+      startedAt: session.startedAt,
+      logs: session.logs,
+    });
+  });
+
+  // SSE stream for agent logs (reconnection endpoint)
+  router.get('/api/features/:name/agent-stream', (req, res, { params }) => {
+    const session = getSession(params.name);
+    if (!session) {
+      return error(res, 'No active session', 404);
+    }
+    sseHeaders(res);
+    // Replay buffered logs
+    for (const log of session.logs) {
+      sseSend(res, 'log', { text: log.text, type: log.type });
+    }
+    // Register for live updates
+    addSseClient(params.name, res);
+    req.on('close', () => removeSseClient(params.name, res));
   });
 
   // Read a feature file
@@ -107,9 +184,10 @@ export function registerFeatureRoutes(router) {
   router.post('/api/features', async (req, res, { root, parseBody }) => {
     const body = await parseBody();
     try {
-      validateFeatureName(body.name);
-      await createFeature(body.name, root);
-      json(res, { ok: true, name: body.name }, 201);
+      const { name, type = 'feature', apps = [] } = body;
+      validateFeatureName(name);
+      await createFeature(name, root, { type, apps });
+      json(res, { ok: true, name, type, apps }, 201);
     } catch (err) {
       error(res, err.message, 400);
     }
@@ -126,12 +204,10 @@ export function registerFeatureRoutes(router) {
     };
 
     try {
-      const validatedHistory = validateHistory(body.history || []);
       const validatedAttachments = validateAttachments(body.attachments || []);
 
       const output = await runStep(params.step, params.name, {
         description: body.description,
-        history: validatedHistory,
         attachments: validatedAttachments,
         model: body.model || undefined,
         verbose: body.verbose !== undefined ? body.verbose : true,
@@ -170,30 +246,6 @@ export function registerFeatureRoutes(router) {
     res.end();
   });
 
-  // Quick ticket with SSE streaming (create + run)
-  router.post('/api/quick', async (req, res, { root, parseBody }) => {
-    const body = await parseBody();
-    sseHeaders(res);
-    sseSend(res, 'status', { status: 'started', mode: 'quick', name: body.name });
-
-    const onData = ({ type, text }) => {
-      try { sseSend(res, 'log', { type, text }); } catch {}
-    };
-
-    try {
-      await runQuick(body.name, {
-        description: body.description,
-        apply: body.apply || false,
-        root,
-        onData,
-      });
-      sseSend(res, 'done', { status: 'completed', name: body.name });
-    } catch (err) {
-      sseSend(res, 'error', { message: err.message });
-    }
-    res.end();
-  });
-
   // Iterate a step with SSE streaming (reset + re-run with instructions)
   router.post('/api/features/:name/iterate/:step', async (req, res, { params, root, parseBody }) => {
     const body = await parseBody();
@@ -207,12 +259,10 @@ export function registerFeatureRoutes(router) {
         try { sseSend(res, 'log', { type, text }); } catch {}
       };
 
-      const validatedHistory = validateHistory(body.history || []);
       const validatedAttachments = validateAttachments(body.attachments || []);
 
       await runStep(params.step, params.name, {
         instructions: body.instructions,
-        history: validatedHistory,
         attachments: validatedAttachments,
         model: body.model || undefined,
         verbose: body.verbose !== undefined ? body.verbose : true,
@@ -486,6 +536,66 @@ IMPORTANT:
     try {
       await updateFlowType(params.name, flow, root);
       json(res, { ok: true, flow });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Update feature type (feature/bug)
+  router.patch('/api/features/:name/type', async (req, res, { params, root, parseBody }) => {
+    const body = await parseBody();
+    const { type } = body;
+
+    if (!type || !FEATURE_TYPES.includes(type)) {
+      return error(res, `Invalid type. Must be one of: ${FEATURE_TYPES.join(', ')}`, 400);
+    }
+
+    try {
+      await updateType(params.name, type, root);
+      json(res, { ok: true, type });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Update feature apps/scope
+  router.patch('/api/features/:name/apps', async (req, res, { params, root, parseBody }) => {
+    const body = await parseBody();
+    const { apps } = body;
+
+    if (!Array.isArray(apps)) {
+      return error(res, 'apps must be an array', 400);
+    }
+
+    // Validate all elements are non-empty strings
+    const invalidApps = apps.filter(a => typeof a !== 'string' || !a.trim());
+    if (invalidApps.length > 0) {
+      return error(res, 'apps must contain only non-empty strings', 400);
+    }
+
+    try {
+      await updateApps(params.name, apps, root);
+      json(res, { ok: true, apps });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Soft delete a feature
+  router.delete('/api/features/:name', async (req, res, { params, root }) => {
+    try {
+      await softDeleteFeature(params.name, root);
+      json(res, { ok: true, deletedAt: new Date().toISOString() });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Restore a deleted feature
+  router.post('/api/features/:name/restore', async (req, res, { params, root }) => {
+    try {
+      await restoreFeature(params.name, root);
+      json(res, { ok: true });
     } catch (err) {
       error(res, err.message, 400);
     }

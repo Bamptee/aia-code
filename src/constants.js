@@ -48,3 +48,27 @@ export const STEP_STATUS = {
   DONE: 'done',
   ERROR: 'error',
 };
+
+export const FEATURE_TYPES = Object.freeze(['feature', 'bug']);
+export const DEFAULT_FEATURE_TYPE = 'feature';
+
+/**
+ * Feature deletion status filter options
+ */
+export const DELETION_FILTER = Object.freeze({
+  ACTIVE: 'active',
+  DELETED: 'deleted',
+  ALL: 'all',
+});
+
+export const APP_ICONS = {
+  react: '\u269B',
+  vue: '\uD83D\uDC9A',
+  angular: '\uD83C\uDD70',
+  node: '\uD83D\uDCE6',
+  go: '\uD83D\uDD27',
+  java: '\u2615',
+  python: '\uD83D\uDC0D',
+  rust: '\uD83E\uDD80',
+  generic: '\uD83D\uDCC1',
+};

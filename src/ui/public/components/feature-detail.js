@@ -99,6 +99,189 @@ const STATUS_CLASSES = {
 
 const STATUS_ICONS = { done: '\u2713', pending: '\u00b7', 'in-progress': '\u25b6', error: '\u2717' };
 
+const FEATURE_TYPES = ['feature', 'bug'];
+const DEFAULT_FEATURE_TYPE = 'feature';
+
+/**
+ * Confirmation dialog for delete actions
+ */
+function ConfirmDialog({ title, message, confirmText, confirmClass, onConfirm, onCancel }) {
+  React.useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
+  return React.createElement('div', {
+    className: 'fixed inset-0 bg-black/50 flex items-center justify-center z-50',
+    onClick: (e) => e.target === e.currentTarget && onCancel(),
+  },
+    React.createElement('div', {
+      className: 'bg-aia-card border border-aia-border rounded-lg p-6 w-full max-w-md space-y-4',
+    },
+      React.createElement('h3', { className: 'text-lg font-semibold text-slate-100' }, title),
+      React.createElement('p', { className: 'text-sm text-slate-400' }, message),
+      React.createElement('div', { className: 'flex justify-end gap-3 pt-2' },
+        React.createElement('button', {
+          onClick: onCancel,
+          className: 'text-slate-400 hover:text-slate-200 text-sm px-4 py-2',
+        }, 'Cancel'),
+        React.createElement('button', {
+          onClick: onConfirm,
+          className: confirmClass || 'bg-red-500/20 text-red-400 border border-red-500/30 rounded px-4 py-2 text-sm hover:bg-red-500/30',
+        }, confirmText || 'Confirm'),
+      ),
+    )
+  );
+}
+
+function TypeBadgeEditable({ name, currentType, onChanged }) {
+  const [showPopover, setShowPopover] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const type = currentType || DEFAULT_FEATURE_TYPE;
+  const isFeature = type !== 'bug';
+
+  const handleChange = async (newType) => {
+    if (newType === type) {
+      setShowPopover(false);
+      return;
+    }
+
+    // Confirm if changing to bug (will switch to quick flow)
+    if (newType === 'bug') {
+      const confirmed = window.confirm('Changing to Bug will set the flow to Quick. Continue?');
+      if (!confirmed) {
+        setShowPopover(false);
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      await api.patch(`/features/${name}/type`, { type: newType });
+      if (onChanged) onChanged(newType);
+    } catch (e) {
+      console.error('Failed to update type:', e);
+    }
+    setSaving(false);
+    setShowPopover(false);
+  };
+
+  return React.createElement('div', { className: 'relative' },
+    React.createElement('button', {
+      onClick: () => setShowPopover(!showPopover),
+      disabled: saving,
+      className: `text-xs px-2 py-1 rounded border transition-colors ${
+        isFeature ? 'type-feature' : 'type-bug'
+      } hover:brightness-110`,
+      title: 'Click to change type',
+    }, saving ? '...' : (isFeature ? '\u2728 Feature' : '\uD83D\uDC1B Bug')),
+
+    showPopover && React.createElement('div', {
+      className: 'absolute top-full left-0 mt-1 bg-aia-card border border-aia-border rounded shadow-lg z-10',
+    },
+      ...FEATURE_TYPES.map(t =>
+        React.createElement('button', {
+          key: t,
+          onClick: () => handleChange(t),
+          className: `block w-full px-3 py-1.5 text-xs text-left hover:bg-slate-700 ${
+            t === type ? 'text-aia-accent' : 'text-slate-300'
+          }`,
+        }, t === 'feature' ? '\u2728 Feature' : '\uD83D\uDC1B Bug')
+      )
+    ),
+  );
+}
+
+function ScopeEditor({ name, currentApps, availableApps, onChanged }) {
+  const [showDropdown, setShowDropdown] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const selectedApps = currentApps || [];
+
+  const enabledApps = availableApps.filter(a => a.enabled !== false);
+  const availableToAdd = enabledApps.filter(a => !selectedApps.includes(a.name));
+
+  const handleRemove = async (appName) => {
+    setSaving(true);
+    const newApps = selectedApps.filter(n => n !== appName);
+    try {
+      await api.patch(`/features/${name}/apps`, { apps: newApps });
+      if (onChanged) onChanged(newApps);
+    } catch (e) {
+      console.error('Failed to update apps:', e);
+    }
+    setSaving(false);
+  };
+
+  const handleAdd = async (appName) => {
+    setSaving(true);
+    const newApps = [...selectedApps, appName];
+    try {
+      await api.patch(`/features/${name}/apps`, { apps: newApps });
+      if (onChanged) onChanged(newApps);
+    } catch (e) {
+      console.error('Failed to update apps:', e);
+    }
+    setSaving(false);
+    setShowDropdown(false);
+  };
+
+  // Map app names to full objects for icons
+  const selectedAppObjects = selectedApps.map(appName => {
+    const found = availableApps.find(a => a.name === appName);
+    return found || { name: appName, icon: '\uD83D\uDCC1' };
+  });
+
+  if (enabledApps.length === 0) return null;
+
+  return React.createElement('div', { className: 'flex items-center gap-2 flex-wrap' },
+    React.createElement('span', { className: 'text-xs text-slate-500' }, 'Scope:'),
+
+    // Selected apps as chips with remove button
+    ...selectedAppObjects.map(app =>
+      React.createElement('span', {
+        key: app.name,
+        className: 'app-chip-selected flex items-center gap-1',
+      },
+        `${app.icon || '\uD83D\uDCC1'} ${app.name}`,
+        React.createElement('button', {
+          onClick: () => handleRemove(app.name),
+          disabled: saving,
+          className: 'text-slate-400 hover:text-red-400 ml-0.5',
+          title: 'Remove',
+        }, '\u00D7')
+      )
+    ),
+
+    // Add button with dropdown
+    availableToAdd.length > 0 && React.createElement('div', { className: 'relative' },
+      React.createElement('button', {
+        onClick: () => setShowDropdown(!showDropdown),
+        disabled: saving,
+        className: 'app-chip text-slate-400 hover:text-slate-200',
+      }, saving ? '...' : '+'),
+
+      showDropdown && React.createElement('div', {
+        className: 'absolute top-full left-0 mt-1 bg-aia-card border border-aia-border rounded shadow-lg z-10 min-w-32',
+      },
+        ...availableToAdd.map(app =>
+          React.createElement('button', {
+            key: app.name,
+            onClick: () => handleAdd(app.name),
+            className: 'block w-full px-3 py-1.5 text-xs text-left text-slate-300 hover:bg-slate-700',
+          }, `${app.icon || '\uD83D\uDCC1'} ${app.name}`)
+        )
+      ),
+    ),
+
+    selectedApps.length === 0 && React.createElement('span', {
+      className: 'text-xs text-slate-600 italic',
+    }, 'No scope defined'),
+  );
+}
+
 function StepPill({ step, status, active, onClick }) {
   return React.createElement('button', {
     onClick,
@@ -201,45 +384,60 @@ function LogViewer({ logs }) {
   }, logs.join(''));
 }
 
-function VerbosePanel({ logs, expanded, onToggle }) {
-  if (!logs.length) return null;
-  return React.createElement('div', { className: 'mt-2' },
-    React.createElement('button', {
-      onClick: onToggle,
-      'aria-expanded': expanded, // F13: Accessibility
-      'aria-label': `Toggle verbose logs, ${logs.length} lines`,
-      className: 'text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1',
-    }, expanded ? '\u25BC' : '\u25B6', `Verbose (${logs.length} lines)`),
-    expanded && React.createElement('pre', {
-      className: 'bg-black/70 border border-slate-700 rounded p-2 mt-1 text-xs text-slate-500 overflow-auto max-h-48 whitespace-pre-wrap',
-      role: 'log',
-      'aria-label': 'Verbose output',
-    }, logs.join(''))
+function StreamingOutputPanel({ output }) {
+  const ref = React.useRef(null);
+  const [elapsed, setElapsed] = React.useState(0);
+  const startTime = React.useRef(Date.now());
+
+  React.useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [output]);
+
+  // Timer to show elapsed time
+  React.useEffect(() => {
+    startTime.current = Date.now();
+    setElapsed(0);
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTime.current) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatTime = (seconds) => {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
+
+  return React.createElement('div', {
+    className: 'bg-slate-900 border border-blue-500/30 rounded p-3',
+  },
+    React.createElement('div', { className: 'flex items-center justify-between mb-2' },
+      React.createElement('div', { className: 'flex items-center gap-2' },
+        React.createElement('div', { className: 'animate-spin w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full' }),
+        React.createElement('span', { className: 'text-xs text-blue-400 font-medium' }, 'Output'),
+      ),
+      React.createElement('span', { className: 'text-xs text-slate-500 font-mono' }, formatTime(elapsed)),
+    ),
+    output
+      ? React.createElement('pre', {
+          ref,
+          className: 'text-xs text-slate-300 whitespace-pre-wrap overflow-auto max-h-80 font-mono bg-black/30 p-2 rounded',
+        }, output.slice(-5000))
+      : React.createElement('div', { className: 'flex flex-col items-center gap-3 py-6' },
+          React.createElement('div', { className: 'flex gap-1' },
+            React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full animate-bounce', style: { animationDelay: '0ms' } }),
+            React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full animate-bounce', style: { animationDelay: '150ms' } }),
+            React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full animate-bounce', style: { animationDelay: '300ms' } }),
+          ),
+          React.createElement('span', { className: 'text-sm text-blue-400' }, 'Agent is working...'),
+          React.createElement('span', { className: 'text-xs text-slate-600' }, 'Claude CLI buffers output until complete'),
+        ),
   );
 }
 
-function ChatLog({ messages }) {
-  const ref = React.useRef(null);
-  React.useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [messages]);
 
-  if (!messages.length) return null;
-
-  return React.createElement('div', {
-    ref,
-    className: 'bg-slate-900 border border-aia-border rounded p-3 font-mono text-sm overflow-auto max-h-80',
-    role: 'log', // F13: Accessibility
-    'aria-label': 'Chat history',
-  }, messages.map((msg) =>
-    React.createElement('div', { key: msg.id || msg.content.slice(0, 20), className: 'mb-2' }, // F11: Unique key
-      React.createElement('span', {
-        className: msg.role === 'user' ? 'text-cyan-400' : 'text-emerald-400'
-      }, msg.role === 'user' ? '> you: ' : 'agent: '),
-      React.createElement('span', { className: 'text-slate-300 whitespace-pre-wrap' }, msg.content)
-    )
-  ));
-}
 
 function ModelSelect({ model, onChange, disabled }) {
   const [models, setModels] = React.useState([]);
@@ -259,29 +457,54 @@ function ModelSelect({ model, onChange, disabled }) {
   );
 }
 
-function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
+function InitPanel({ name, featureType, onFlowSelected, onCancel, onEnriched }) {
   const [description, setDescription] = React.useState('');
   const [suggestion, setSuggestion] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
   const [statusMsg, setStatusMsg] = React.useState('');
   const [logs, setLogs] = React.useState([]);
   const [err, setErr] = React.useState(null);
+  const [attachments, setAttachments] = React.useState([]);
+
+  const isBug = featureType === 'bug';
+
+  const handleAttachmentUpload = (files) => {
+    setAttachments(prev => [...prev, ...files]);
+  };
+
+  const handleAttachmentRemove = (filename) => {
+    setAttachments(prev => prev.filter(a => a.filename !== filename));
+  };
 
   const handleSubmit = async () => {
     setLoading(true);
     setErr(null);
     setLogs([]);
-    setStatusMsg('Structuring your description...');
+    setStatusMsg(isBug ? 'Structuring your bug report...' : 'Structuring your description...');
 
-    const res = await streamPost(`/features/${name}/init`, { description }, {
+    // Note: Attachments are already uploaded via AttachmentZone to /api/features/:name/attachments
+    // Passing filenames here for potential future use in AI enrichment
+    const res = await streamPost(`/features/${name}/init`, {
+      description,
+      attachments: attachments.map(a => ({ filename: a.filename, path: a.path })),
+    }, {
       onLog: (text) => setLogs(prev => [...prev, text]),
       onStatus: (data) => setStatusMsg(data.message || data.status),
     });
 
     if (res.ok) {
-      setSuggestion(res.suggestion);
-      setStatusMsg('');
-      if (onEnriched) onEnriched();
+      // For bugs, skip flow selection and go directly to quick flow
+      if (isBug) {
+        setStatusMsg('');
+        setAttachments([]);
+        if (onEnriched) onEnriched();
+        onFlowSelected('quick');
+      } else {
+        setSuggestion(res.suggestion);
+        setStatusMsg('');
+        setAttachments([]);
+        if (onEnriched) onEnriched();
+      }
     } else {
       setErr(res.error || 'Failed to enrich description');
     }
@@ -292,16 +515,28 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
     onFlowSelected(flow);
   };
 
-  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
-    React.createElement('h3', { className: 'text-sm font-semibold text-cyan-400' }, 'Describe your feature'),
+  return React.createElement('div', { className: `bg-aia-card border rounded p-4 space-y-4 ${isBug ? 'border-red-500/30' : 'border-aia-border'}` },
+    React.createElement('h3', { className: `text-sm font-semibold ${isBug ? 'text-red-400' : 'text-cyan-400'}` },
+      isBug ? '\uD83D\uDC1B Describe the bug & fix' : 'Describe your feature'
+    ),
+
+    // Attachment zone (hidden when loading or has suggestion)
+    !loading && !suggestion && React.createElement(AttachmentZone, {
+      feature: name,
+      attachments,
+      onUpload: handleAttachmentUpload,
+      onRemove: handleAttachmentRemove,
+    }),
 
     // Textarea (hidden when loading or has suggestion)
     !loading && !suggestion && React.createElement('textarea', {
       value: description,
       onChange: e => setDescription(e.target.value),
-      placeholder: 'Describe what you want to build...\n\nBe as detailed as needed. The AI will structure your description.',
+      placeholder: isBug
+        ? 'Describe the bug and how to fix it...\n\n- What is the current behavior?\n- What is the expected behavior?\n- How should it be fixed?'
+        : 'Describe what you want to build...\n\nBe as detailed as needed. The AI will structure your description.',
       rows: 8,
-      className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-aia-accent focus:outline-none resize-y max-h-96 overflow-auto',
+      className: `w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none resize-y max-h-96 overflow-auto ${isBug ? 'focus:border-red-400' : 'focus:border-aia-accent'}`,
     }),
 
     // Character count and buttons
@@ -315,16 +550,18 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
         React.createElement('button', {
           onClick: handleSubmit,
           disabled: !description.trim(),
-          className: 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-4 py-2 text-sm hover:bg-aia-accent/30 disabled:opacity-40',
-        }, 'Continue'),
+          className: isBug
+            ? 'bg-red-500/20 text-red-400 border border-red-500/30 rounded px-4 py-2 text-sm hover:bg-red-500/30 disabled:opacity-40'
+            : 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-4 py-2 text-sm hover:bg-aia-accent/30 disabled:opacity-40',
+        }, isBug ? 'Start Fix' : 'Continue'),
       ),
     ),
 
     // Loading state with logs
     loading && React.createElement('div', { className: 'space-y-3' },
       React.createElement('div', { className: 'flex items-center gap-2' },
-        React.createElement('div', { className: 'animate-spin w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full' }),
-        React.createElement('span', { className: 'text-sm text-cyan-400' }, statusMsg || 'Processing...'),
+        React.createElement('div', { className: `animate-spin w-4 h-4 border-2 ${isBug ? 'border-red-400' : 'border-cyan-400'} border-t-transparent rounded-full` }),
+        React.createElement('span', { className: `text-sm ${isBug ? 'text-red-400' : 'text-cyan-400'}` }, statusMsg || 'Processing...'),
       ),
       logs.length > 0 && React.createElement(LogViewer, { logs }),
     ),
@@ -332,8 +569,8 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
     // Error
     err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
 
-    // Flow suggestion
-    suggestion && React.createElement('div', { className: 'space-y-3' },
+    // Flow suggestion (only for features, bugs go directly to quick flow)
+    !isBug && suggestion && React.createElement('div', { className: 'space-y-3' },
       React.createElement('div', { className: 'flex items-center gap-2' },
         React.createElement('span', { className: 'text-emerald-400' }, '\u2713'),
         React.createElement('span', { className: 'text-sm text-slate-300' }, 'Feature spec created in init.md'),
@@ -380,9 +617,6 @@ function StepGuidance({ step, feature }) {
   );
 }
 
-const MAX_MESSAGES = 100;
-const MAX_VERBOSE_LOGS = 500;
-
 function RunPanel({ name, step, stepStatus, onDone }) {
   const isDone = stepStatus === 'done';
   const [inputText, setInputText] = React.useState('');
@@ -390,16 +624,85 @@ function RunPanel({ name, step, stepStatus, onDone }) {
   const [model, setModel] = React.useState('');
   const [apply, setApply] = React.useState(false);
   const [running, setRunning] = React.useState(false);
+  const [serverRunning, setServerRunning] = React.useState(false);
+  const [reconnecting, setReconnecting] = React.useState(true);
   const [result, setResult] = React.useState(null);
   const [err, setErr] = React.useState(null);
-  const [messages, setMessages] = React.useState([]);
-  const [verboseLogs, setVerboseLogs] = React.useState([]);
-  const [verboseExpanded, setVerboseExpanded] = React.useState(false);
-  const [history, setHistory] = React.useState([]);
   const [attachments, setAttachments] = React.useState([]);
   const agentBuffer = React.useRef('');
+  const [streamingOutput, setStreamingOutput] = React.useState(''); // Live agent output display
   const requestId = React.useRef(0); // F4: Track request to prevent race conditions
   const [resetting, setResetting] = React.useState(false); // F14: Track reset state
+  const eventSourceRef = React.useRef(null);
+
+  // Check agent status at mount and reconnect to SSE if running
+  React.useEffect(() => {
+    let cancelled = false;
+    setReconnecting(true);
+
+    api.get(`/features/${name}/agent-status`)
+      .then(data => {
+        if (cancelled) return;
+        if (data.running) {
+          setServerRunning(true);
+          setRunning(true);
+          // Connect to SSE stream for live updates (stream will replay buffered logs)
+          const evtSource = new EventSource(`/api/features/${name}/agent-stream`);
+          eventSourceRef.current = evtSource;
+
+          // Timeout: close if no response after 30s
+          const timeoutId = setTimeout(() => {
+            if (eventSourceRef.current === evtSource) {
+              evtSource.close();
+              eventSourceRef.current = null;
+              setServerRunning(false);
+              setRunning(false);
+            }
+          }, 30000);
+
+          evtSource.addEventListener('log', (e) => {
+            clearTimeout(timeoutId);
+            const { text, type } = JSON.parse(e.data);
+            if (type !== 'stderr') {
+              agentBuffer.current += text;
+            }
+            // Update streaming output for real-time display (both stdout and stderr)
+            setStreamingOutput(prev => (prev + text).slice(-10000));
+          });
+
+          evtSource.addEventListener('done', () => {
+            clearTimeout(timeoutId);
+            setServerRunning(false);
+            setRunning(false);
+            setStreamingOutput('');
+            evtSource.close();
+            eventSourceRef.current = null;
+            if (onDone) onDone();
+          });
+
+          evtSource.onerror = () => {
+            clearTimeout(timeoutId);
+            evtSource.close();
+            eventSourceRef.current = null;
+            setServerRunning(false);
+            setRunning(false);
+          };
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setReconnecting(false);
+      });
+
+    // Cleanup on unmount or step change
+    return () => {
+      cancelled = true;
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+  }, [name, step]);
 
   // Load attachments when step changes
   React.useEffect(() => {
@@ -408,15 +711,13 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       .catch(() => setAttachments([]));
   }, [name, step]);
 
-  // Reset chat state when step changes
+  // Reset state when step changes
   React.useEffect(() => {
     requestId.current++; // F5: Invalidate pending requests on step change
-    setMessages([]);
-    setVerboseLogs([]);
-    setHistory([]);
     setResult(null);
     setErr(null);
     agentBuffer.current = '';
+    setStreamingOutput('');
   }, [step]);
 
   const handleAttachmentUpload = (files) => {
@@ -431,51 +732,43 @@ function RunPanel({ name, step, stepStatus, onDone }) {
   const createSseCallbacks = (currentRequestId) => ({
     onLog: (text, type) => {
       if (requestId.current !== currentRequestId) return; // Ignore stale callbacks
-      if (type === 'stderr') {
-        setVerboseLogs(prev => [...prev, text].slice(-MAX_VERBOSE_LOGS)); // F8: Limit size
-      } else {
+      if (type !== 'stderr') {
         agentBuffer.current += text;
       }
+      // Update streaming output for real-time display (both stdout and stderr)
+      setStreamingOutput(prev => (prev + text).slice(-10000));
     },
     onStatus: (data) => {
       if (requestId.current !== currentRequestId) return;
-      setVerboseLogs(prev => [...prev, `[${data.status}] ${data.step || ''}\n`].slice(-MAX_VERBOSE_LOGS));
+      const statusLine = `[${data.status}] ${data.step || ''}\n`;
+      setStreamingOutput(prev => (prev + statusLine).slice(-10000));
     },
   });
 
   async function handleSend() {
-    if (!inputText.trim() || running) return;
+    if (running) return;
 
-    const userMessage = inputText.trim();
-    const msgId = Date.now(); // F11: Unique key for messages
+    const userMessage = inputText.trim() || `Run ${step} step`;
     setInputText('');
-    setMessages(prev => [...prev, { id: msgId, role: 'user', content: userMessage }].slice(-MAX_MESSAGES));
     setRunning(true);
     setResult(null);
     setErr(null);
-    setVerboseLogs([]);
     agentBuffer.current = '';
+    setStreamingOutput('');
 
     const currentRequestId = ++requestId.current; // F4: New request ID
-    const newHistory = [...history, { role: 'user', content: userMessage }];
-    setHistory(newHistory);
 
     const res = await streamPost(`/features/${name}/run/${step}`, {
       description: userMessage,
       apply,
       model: model || undefined,
-      history: newHistory.slice(0, -1),
       attachments: attachments.map(a => ({ filename: a.filename, path: a.path })),
     }, createSseCallbacks(currentRequestId));
 
     // F4: Check if this request is still current
     if (requestId.current !== currentRequestId) return;
 
-    if (agentBuffer.current.trim()) {
-      const agentResponse = agentBuffer.current.trim();
-      setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: agentResponse }].slice(-MAX_MESSAGES));
-      setHistory(prev => [...prev, { role: 'agent', content: agentResponse }]);
-    }
+    setStreamingOutput('');
 
     if (res.ok) {
       setResult('Step completed.');
@@ -487,36 +780,27 @@ function RunPanel({ name, step, stepStatus, onDone }) {
   }
 
   async function iterate() {
-    if (!instructions.trim() || running) return;
+    if (running) return;
 
-    const msgId = Date.now();
-    const iterationInstructions = instructions;
-    setMessages(prev => [...prev, { id: msgId, role: 'user', content: iterationInstructions }].slice(-MAX_MESSAGES));
+    const iterationInstructions = instructions.trim() || 'Re-run this step';
     setRunning(true);
     setResult(null);
     setErr(null);
-    setVerboseLogs([]);
     agentBuffer.current = '';
+    setStreamingOutput('');
 
     const currentRequestId = ++requestId.current;
-    // F7: Pass history in iterate mode too
-    const newHistory = [...history, { role: 'user', content: iterationInstructions }];
-    setHistory(newHistory);
 
     const res = await streamPost(`/features/${name}/iterate/${step}`, {
       instructions: iterationInstructions,
       apply,
       model: model || undefined,
-      history: newHistory.slice(0, -1),
       attachments: attachments.map(a => ({ filename: a.filename, path: a.path })),
     }, createSseCallbacks(currentRequestId));
 
     if (requestId.current !== currentRequestId) return;
 
-    if (agentBuffer.current.trim()) {
-      setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: agentBuffer.current.trim() }].slice(-MAX_MESSAGES));
-      setHistory(prev => [...prev, { role: 'agent', content: agentBuffer.current.trim() }]);
-    }
+    setStreamingOutput('');
 
     if (res.ok) {
       setResult('Iteration completed.');
@@ -535,10 +819,8 @@ function RunPanel({ name, step, stepStatus, onDone }) {
     try {
       await api.post(`/features/${name}/reset/${step}`);
       requestId.current++;
-      setMessages([]);
-      setVerboseLogs([]);
-      setHistory([]);
       setResult(null);
+      setStreamingOutput('');
       if (onDone) onDone();
     } catch (e) {
       setErr(`Reset failed: ${e.message}`);
@@ -556,9 +838,6 @@ function RunPanel({ name, step, stepStatus, onDone }) {
 
   return React.createElement('div', { className: 'space-y-3' },
 
-    // --- Chat log ---
-    React.createElement(ChatLog, { messages }),
-
     // --- Attachments zone ---
     React.createElement(AttachmentZone, {
       feature: name,
@@ -567,6 +846,22 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       onRemove: handleAttachmentRemove,
     }),
 
+    // --- Reconnecting indicator ---
+    reconnecting && React.createElement('div', {
+      className: 'bg-slate-500/10 border border-slate-500/30 rounded-lg p-3 flex items-center gap-2',
+    },
+      React.createElement('div', { className: 'animate-spin w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full' }),
+      React.createElement('span', { className: 'text-slate-400 text-sm' }, 'Checking agent status...'),
+    ),
+
+    // --- Server running banner ---
+    !reconnecting && serverRunning && React.createElement('div', {
+      className: 'bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 flex items-center gap-2',
+    },
+      React.createElement('span', { className: 'animate-pulse text-blue-400' }, '\u25CF'),
+      React.createElement('span', { className: 'text-blue-400 text-sm' }, 'Agent is running on this feature...'),
+    ),
+
     // --- Run block (when step is not done) ---
     !isDone && React.createElement('div', { className: 'bg-slate-900 border border-aia-border rounded p-4 space-y-3' },
       React.createElement('h4', { className: 'text-sm font-semibold text-emerald-400' }, `Run: ${step}`),
@@ -574,22 +869,26 @@ function RunPanel({ name, step, stepStatus, onDone }) {
         value: inputText,
         onChange: e => setInputText(e.target.value),
         onKeyDown: e => handleKeyDown(e, handleSend),
-        placeholder: 'Describe what you want... (Enter to send, Shift+Enter for newline)',
-        disabled: running,
+        placeholder: serverRunning ? 'Agent is running...' : 'Optional: add instructions... (Enter to run, Shift+Enter for newline)',
+        disabled: running || serverRunning,
         rows: 3,
         className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-emerald-400 focus:outline-none resize-y max-h-96 overflow-auto',
       }),
       inputText.length > 0 && React.createElement('span', { className: 'text-xs text-slate-500' }, `${inputText.length} characters`),
       React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
-        React.createElement(ModelSelect, { model, onChange: setModel, disabled: running }),
-        React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer', title: 'Allow AI to edit files in your project' },
-          React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running, className: 'rounded' }),
-          'Agent mode'
+        React.createElement(ModelSelect, { model, onChange: setModel, disabled: running || serverRunning }),
+        React.createElement('label', {
+          className: 'flex items-center gap-2 text-xs cursor-pointer group',
+          title: 'When enabled, the AI can read/write files and execute commands in your project',
+        },
+          React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running || serverRunning, className: 'rounded' }),
+          React.createElement('span', { className: apply ? 'text-amber-400' : 'text-slate-400' }, apply ? '🤖 Agent mode ON' : 'Agent mode'),
+          React.createElement('span', { className: 'text-slate-600 text-[10px] hidden group-hover:inline' }, '(can edit files)')
         ),
         React.createElement('button', {
-          onClick: handleSend, disabled: running || !inputText.trim(),
+          onClick: handleSend, disabled: running || serverRunning,
           className: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded px-4 py-1.5 text-sm hover:bg-emerald-500/30 disabled:opacity-40',
-        }, running ? 'Running...' : 'Send'),
+        }, running || serverRunning ? 'Running...' : (inputText.trim() ? 'Send' : 'Run')),
       ),
     ),
 
@@ -605,24 +904,28 @@ function RunPanel({ name, step, stepStatus, onDone }) {
         value: instructions,
         onChange: e => setInstructions(e.target.value),
         onKeyDown: e => handleKeyDown(e, iterate),
-        placeholder: 'e.g. "Add error handling for edge cases"... (Enter to send, Shift+Enter for newline)',
-        disabled: running,
+        placeholder: serverRunning ? 'Agent is running...' : 'Optional: iteration instructions... (Enter to run, Shift+Enter for newline)',
+        disabled: running || serverRunning,
         rows: 3,
         className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-400 focus:outline-none resize-y max-h-96 overflow-auto',
       }),
       instructions.length > 0 && React.createElement('span', { className: 'text-xs text-slate-500' }, `${instructions.length} characters`),
       React.createElement('div', { className: 'flex items-center gap-4 flex-wrap' },
-        React.createElement(ModelSelect, { model, onChange: setModel, disabled: running }),
-        React.createElement('label', { className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer', title: 'Allow AI to edit files in your project' },
-          React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running, className: 'rounded' }),
-          'Agent mode'
+        React.createElement(ModelSelect, { model, onChange: setModel, disabled: running || serverRunning }),
+        React.createElement('label', {
+          className: 'flex items-center gap-2 text-xs cursor-pointer group',
+          title: 'When enabled, the AI can read/write files and execute commands in your project',
+        },
+          React.createElement('input', { type: 'checkbox', checked: apply, onChange: e => setApply(e.target.checked), disabled: running || serverRunning, className: 'rounded' }),
+          React.createElement('span', { className: apply ? 'text-amber-400' : 'text-slate-400' }, apply ? '🤖 Agent mode ON' : 'Agent mode'),
+          React.createElement('span', { className: 'text-slate-600 text-[10px] hidden group-hover:inline' }, '(can edit files)')
         ),
         React.createElement('button', {
-          onClick: iterate, disabled: running || !instructions.trim(),
+          onClick: iterate, disabled: running || serverRunning,
           className: 'bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-4 py-1.5 text-sm hover:bg-violet-500/30 disabled:opacity-40',
-        }, running ? 'Iterating...' : 'Iterate'),
+        }, running || serverRunning ? 'Running...' : (instructions.trim() ? 'Iterate' : 'Re-run')),
         React.createElement('button', {
-          onClick: reset, disabled: running || resetting,
+          onClick: reset, disabled: running || serverRunning || resetting,
           className: 'text-slate-500 hover:text-slate-300 text-xs disabled:opacity-40',
         }, resetting ? 'Resetting...' : 'Reset to pending'),
       ),
@@ -630,12 +933,9 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       React.createElement(StepGuidance, { step, feature: name }),
     ),
 
-    // --- Verbose panel (stderr logs) ---
-    React.createElement(VerbosePanel, {
-      logs: verboseLogs,
-      expanded: verboseExpanded,
-      onToggle: () => setVerboseExpanded(!verboseExpanded),
-    }),
+    // --- Streaming output panel (live agent output) ---
+    (running || serverRunning) && React.createElement(StreamingOutputPanel, { output: streamingOutput }),
+
 
     // --- Results ---
     result && React.createElement('p', { className: 'text-emerald-400 text-xs' }, result),
@@ -645,16 +945,24 @@ function RunPanel({ name, step, stepStatus, onDone }) {
 
 export function FeatureDetail({ name }) {
   const [feature, setFeature] = React.useState(null);
+  const [availableApps, setAvailableApps] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [activeFile, setActiveFile] = React.useState('init.md');
   const [activeStep, setActiveStep] = React.useState(null);
   const [showInitPanel, setShowInitPanel] = React.useState(false);
   const [selectedFlow, setSelectedFlow] = React.useState(null);
   const [fileVersion, setFileVersion] = React.useState(0);
+  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+  const [restoring, setRestoring] = React.useState(false);
 
   async function load(checkInitPanel = true) {
     try {
-      const data = await api.get(`/features/${name}`);
+      const [data, appsData] = await Promise.all([
+        api.get(`/features/${name}`),
+        api.get('/apps'),
+      ]);
+      setAvailableApps(appsData);
       setFeature(data);
       const steps = data.steps || {};
 
@@ -668,7 +976,7 @@ export function FeatureDetail({ name }) {
         const allPending = Object.values(steps).every(s => s === 'pending');
         const persistedFlow = data.flow || selectedFlow;
 
-        if (allPending && !persistedFlow) {
+        if (allPending) {
           // Check if init.md has content (enriched)
           try {
             const initFile = await api.get(`/features/${name}/files/init.md`);
@@ -752,17 +1060,94 @@ export function FeatureDetail({ name }) {
 
   const steps = feature.steps || {};
 
+  const handleTypeChanged = (newType) => {
+    setFeature(prev => ({ ...prev, type: newType }));
+    // If changed to bug, flow should switch to quick
+    if (newType === 'bug') {
+      setSelectedFlow('quick');
+    }
+    load(false);
+  };
+
+  const handleAppsChanged = (newApps) => {
+    setFeature(prev => ({ ...prev, apps: newApps }));
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/features/${name}`);
+      // Navigate back to dashboard
+      window.location.hash = '#/';
+    } catch (e) {
+      console.error('Failed to delete feature:', e);
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    setRestoring(true);
+    try {
+      await api.post(`/features/${name}/restore`);
+      setFeature(prev => ({ ...prev, deletedAt: null, isDeleted: false }));
+    } catch (e) {
+      console.error('Failed to restore feature:', e);
+    }
+    setRestoring(false);
+  };
+
+  const isDeleted = feature.deletedAt != null || feature.isDeleted;
+
   return React.createElement('div', { className: 'space-y-6' },
+    // Delete confirmation dialog
+    showDeleteConfirm && React.createElement(ConfirmDialog, {
+      title: 'Delete Feature',
+      message: `Are you sure you want to delete "${name}"? The feature will be moved to the deleted items and can be restored later.`,
+      confirmText: deleting ? 'Deleting...' : 'Delete',
+      onConfirm: handleDelete,
+      onCancel: () => setShowDeleteConfirm(false),
+    }),
+
+    // Deleted banner
+    isDeleted && React.createElement('div', {
+      className: 'bg-red-500/10 border border-red-500/30 rounded-lg p-4 flex items-center justify-between',
+    },
+      React.createElement('div', { className: 'flex items-center gap-2' },
+        React.createElement('span', { className: 'text-red-400 text-lg' }, '\uD83D\uDDD1'),
+        React.createElement('span', { className: 'text-red-400 text-sm' }, 'This feature has been deleted'),
+      ),
+      React.createElement('button', {
+        onClick: handleRestore,
+        disabled: restoring,
+        className: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded px-4 py-2 text-sm hover:bg-emerald-500/30 disabled:opacity-40',
+      }, restoring ? 'Restoring...' : 'Restore Feature'),
+    ),
+
     // Header
-    React.createElement('div', { className: 'flex items-center gap-3' },
-      React.createElement('a', { href: '#/', className: 'text-slate-500 hover:text-slate-300' }, '\u2190'),
-      React.createElement('h1', { className: 'text-xl font-bold text-slate-100' }, name),
-      feature.current_step && React.createElement('span', { className: 'text-xs bg-aia-accent/20 text-aia-accent px-2 py-0.5 rounded' }, feature.current_step),
+    React.createElement('div', { className: 'flex items-center justify-between' },
+      React.createElement('div', { className: 'flex items-center gap-3' },
+        React.createElement('a', { href: '#/', className: 'text-slate-500 hover:text-slate-300' }, '\u2190'),
+        React.createElement('h1', { className: `text-xl font-bold ${isDeleted ? 'text-slate-500 line-through' : 'text-slate-100'}` }, name),
+        React.createElement(TypeBadgeEditable, {
+          name,
+          currentType: feature.type,
+          onChanged: handleTypeChanged,
+        }),
+        feature.current_step && !isDeleted && React.createElement('span', { className: 'text-xs bg-aia-accent/20 text-aia-accent px-2 py-0.5 rounded' }, feature.current_step),
+      ),
+      // Delete button (only show if not deleted)
+      !isDeleted && React.createElement('button', {
+        onClick: () => setShowDeleteConfirm(true),
+        className: 'bg-red-500/20 text-red-400 border border-red-500/30 rounded px-4 py-2 text-sm hover:bg-red-500/30 transition-colors',
+        'aria-label': `Delete feature ${name}`,
+      }, 'Remove'),
     ),
 
     // Init panel (when no steps started)
     showInitPanel && React.createElement(InitPanel, {
       name,
+      featureType: feature.type || DEFAULT_FEATURE_TYPE,
       onFlowSelected: handleFlowSelected,
       onCancel: () => setShowInitPanel(false),
       onEnriched: () => {
@@ -776,6 +1161,14 @@ export function FeatureDetail({ name }) {
       name,
       currentFlow: selectedFlow || 'full',
       onFlowChanged: handleFlowChanged,
+    }),
+
+    // Scope editor (only show if not showing init panel and apps are available)
+    !showInitPanel && availableApps.length > 0 && React.createElement(ScopeEditor, {
+      name,
+      currentApps: feature.apps,
+      availableApps,
+      onChanged: handleAppsChanged,
     }),
 
     // Worktrunk panel

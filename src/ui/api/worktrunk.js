@@ -6,10 +6,13 @@ import {
   hasWorktree,
   removeWorktree,
   getFeatureBranch,
-  startServices,
-  stopServices,
   hasDockerServices,
+  isDockerRunning,
   getServicesStatus,
+  startComposeService,
+  stopComposeService,
+  startAllComposeServices,
+  stopAllComposeServices,
 } from '../../services/worktrunk.js';
 import { json, error } from '../router.js';
 
@@ -28,21 +31,25 @@ export function registerWorktrunkRoutes(router) {
         installed: false,
         hasWorktree: false,
         path: null,
-        hasServices: false,
+        docker: { available: false, hasComposeFile: false },
       });
     }
 
     const branch = getFeatureBranch(params.name);
     const wtPath = getWorktreePath(branch, root);
     const hasWt = wtPath !== null;
-    const hasServices = hasWt && hasDockerServices(wtPath);
+    const dockerRunning = isDockerRunning();
+    const hasComposeFile = hasWt && hasDockerServices(wtPath);
 
     json(res, {
       installed: true,
       hasWorktree: hasWt,
       path: wtPath,
       branch,
-      hasServices,
+      docker: {
+        available: dockerRunning,
+        hasComposeFile,
+      },
     });
   });
 
@@ -94,7 +101,61 @@ export function registerWorktrunkRoutes(router) {
     }
   });
 
-  // Start docker services in worktree
+  // Get services status (from docker-compose.wt.yml)
+  router.get('/api/features/:name/wt/services', async (req, res, { params, root }) => {
+    const branch = getFeatureBranch(params.name);
+    const wtPath = getWorktreePath(branch, root);
+
+    if (!wtPath) {
+      return json(res, { services: [], hasComposeFile: false, dockerAvailable: false });
+    }
+
+    const dockerAvailable = isDockerRunning();
+    const hasComposeFile = hasDockerServices(wtPath);
+
+    if (!dockerAvailable || !hasComposeFile) {
+      return json(res, { services: [], hasComposeFile, dockerAvailable });
+    }
+
+    const services = getServicesStatus(wtPath);
+    json(res, { services, hasComposeFile, dockerAvailable });
+  });
+
+  // Start a specific service
+  router.post('/api/features/:name/wt/services/:service/start', async (req, res, { params, root }) => {
+    const branch = getFeatureBranch(params.name);
+    const wtPath = getWorktreePath(branch, root);
+
+    if (!wtPath) {
+      return error(res, 'No worktree found for this feature', 404);
+    }
+
+    try {
+      startComposeService(wtPath, params.service);
+      json(res, { ok: true });
+    } catch (err) {
+      error(res, `Failed to start service: ${err.message}`, 500);
+    }
+  });
+
+  // Stop a specific service
+  router.post('/api/features/:name/wt/services/:service/stop', async (req, res, { params, root }) => {
+    const branch = getFeatureBranch(params.name);
+    const wtPath = getWorktreePath(branch, root);
+
+    if (!wtPath) {
+      return error(res, 'No worktree found for this feature', 404);
+    }
+
+    try {
+      stopComposeService(wtPath, params.service);
+      json(res, { ok: true });
+    } catch (err) {
+      error(res, `Failed to stop service: ${err.message}`, 500);
+    }
+  });
+
+  // Start all services
   router.post('/api/features/:name/wt/services/start', async (req, res, { params, root }) => {
     const branch = getFeatureBranch(params.name);
     const wtPath = getWorktreePath(branch, root);
@@ -103,19 +164,15 @@ export function registerWorktrunkRoutes(router) {
       return error(res, 'No worktree found for this feature', 404);
     }
 
-    if (!hasDockerServices(wtPath)) {
-      return error(res, 'No docker-compose.wt.yml found in worktree', 404);
-    }
-
     try {
-      startServices(wtPath);
+      startAllComposeServices(wtPath);
       json(res, { ok: true });
     } catch (err) {
       error(res, `Failed to start services: ${err.message}`, 500);
     }
   });
 
-  // Stop docker services in worktree
+  // Stop all services
   router.post('/api/features/:name/wt/services/stop', async (req, res, { params, root }) => {
     const branch = getFeatureBranch(params.name);
     const wtPath = getWorktreePath(branch, root);
@@ -124,30 +181,11 @@ export function registerWorktrunkRoutes(router) {
       return error(res, 'No worktree found for this feature', 404);
     }
 
-    if (!hasDockerServices(wtPath)) {
-      return error(res, 'No docker-compose.wt.yml found in worktree', 404);
-    }
-
     try {
-      stopServices(wtPath);
+      stopAllComposeServices(wtPath);
       json(res, { ok: true });
     } catch (err) {
       error(res, `Failed to stop services: ${err.message}`, 500);
     }
-  });
-
-  // Get services status
-  router.get('/api/features/:name/wt/services', async (req, res, { params, root }) => {
-    const branch = getFeatureBranch(params.name);
-    const wtPath = getWorktreePath(branch, root);
-
-    if (!wtPath) {
-      return json(res, { services: [], hasServices: false });
-    }
-
-    const hasServices = hasDockerServices(wtPath);
-    const services = hasServices ? getServicesStatus(wtPath) : [];
-
-    json(res, { services, hasServices });
   });
 }

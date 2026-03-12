@@ -515,3 +515,303 @@ Only four runtime dependencies:
 - `chalk` -- terminal colors
 
 AI calls use `child_process.spawn` to delegate to installed CLI tools. No API keys needed -- each CLI manages its own authentication.
+
+## Worktrunk Integration
+
+AIA integrates with [Worktrunk](https://github.com/bamptee/worktrunk) (`wt`) to create isolated development environments for each feature using git worktrees.
+
+### Why Worktrunk?
+
+- **Isolation**: Each feature gets its own directory and branch, no stashing needed
+- **Services**: Run separate Docker containers per feature (database, cache, etc.)
+- **Parallel work**: Work on multiple features simultaneously without conflicts
+- **Clean state**: Delete the worktree when done, main branch stays untouched
+
+### Installation
+
+```bash
+# Install Worktrunk CLI
+cargo install worktrunk
+
+# Verify installation
+wt --version
+```
+
+### Quick Start
+
+```bash
+# In the AIA UI, click "Create Worktree" on any feature
+# Or via CLI:
+wt switch -c feature/my-feature
+```
+
+### Configuration
+
+Create `wt.toml` at the root of your project:
+
+```toml
+# wt.toml - Worktrunk configuration
+
+[worktree]
+# Directory where worktrees are created (relative to repo root)
+# Default: "../<repo-name>-wt"
+base_path = "../my-project-wt"
+
+# Branch prefix for feature worktrees
+# AIA uses "feature/" by default
+branch_prefix = "feature/"
+
+[hooks]
+# Hooks run automatically when creating/removing worktrees
+# Available hooks: post_create, pre_remove, post_remove
+
+# Run after worktree is created
+post_create = [
+    "cp .env.example .env",
+    "docker-compose -f docker-compose.wt.yml up -d",
+    "npm install",
+]
+
+# Run before worktree is removed
+pre_remove = [
+    "docker-compose -f docker-compose.wt.yml down -v",
+]
+```
+
+### Docker Services per Feature
+
+Create `docker-compose.wt.yml` for services that should run in each worktree:
+
+```yaml
+# docker-compose.wt.yml - Services for isolated development
+
+version: '3.8'
+
+# Use environment variable for unique container names
+# WT_BRANCH is set by worktrunk (e.g., "feature-my-feature")
+x-branch: &branch ${WT_BRANCH:-dev}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${WT_BRANCH:-dev}-postgres
+    environment:
+      POSTGRES_DB: myapp_dev
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${WT_BRANCH:-dev}-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+  mailhog:
+    image: mailhog/mailhog
+    container_name: ${WT_BRANCH:-dev}-mailhog
+    ports:
+      - "${MAIL_UI_PORT:-8025}:8025"
+      - "${MAIL_SMTP_PORT:-1025}:1025"
+
+volumes:
+  postgres_data:
+    name: ${WT_BRANCH:-dev}-postgres-data
+```
+
+### Port Management
+
+To avoid port conflicts between worktrees, use a `.env` file with dynamic ports:
+
+```bash
+# .env.example - Copy to .env in each worktree
+
+# Each worktree should use different ports
+# Tip: Use feature hash or manual assignment
+DB_PORT=5432
+REDIS_PORT=6379
+MAIL_UI_PORT=8025
+MAIL_SMTP_PORT=1025
+```
+
+Or use a hook to auto-assign ports:
+
+```toml
+# wt.toml
+[hooks]
+post_create = [
+    # Generate random ports based on branch name hash
+    '''
+    HASH=$(echo "$WT_BRANCH" | md5sum | cut -c1-4)
+    PORT_OFFSET=$((16#$HASH % 1000))
+    cat > .env << EOF
+    DB_PORT=$((5432 + PORT_OFFSET))
+    REDIS_PORT=$((6379 + PORT_OFFSET))
+    MAIL_UI_PORT=$((8025 + PORT_OFFSET))
+    EOF
+    ''',
+    "docker-compose -f docker-compose.wt.yml up -d",
+]
+```
+
+### Full Example Setup
+
+Here's a complete setup for a Node.js project with PostgreSQL, Redis, and S3 (MinIO):
+
+```
+my-project/
+├── wt.toml                    # Worktrunk config
+├── docker-compose.wt.yml      # Services template
+├── .env.example               # Environment template
+├── scripts/
+│   └── setup-worktree.sh      # Custom setup script
+└── .aia/
+    └── features/
+        └── my-feature/
+```
+
+**wt.toml**:
+```toml
+[worktree]
+base_path = "../my-project-wt"
+
+[hooks]
+post_create = [
+    "bash scripts/setup-worktree.sh",
+]
+
+pre_remove = [
+    "docker-compose -f docker-compose.wt.yml down -v --remove-orphans",
+]
+```
+
+**scripts/setup-worktree.sh**:
+```bash
+#!/bin/bash
+set -e
+
+echo "🔧 Setting up worktree: $WT_BRANCH"
+
+# Copy environment template
+cp .env.example .env
+
+# Generate unique ports based on branch
+HASH=$(echo "$WT_BRANCH" | md5sum | cut -c1-4)
+OFFSET=$((16#$HASH % 900 + 100))
+
+sed -i "s/DB_PORT=.*/DB_PORT=$((5000 + OFFSET))/" .env
+sed -i "s/REDIS_PORT=.*/REDIS_PORT=$((6000 + OFFSET))/" .env
+sed -i "s/MINIO_PORT=.*/MINIO_PORT=$((9000 + OFFSET))/" .env
+sed -i "s/APP_PORT=.*/APP_PORT=$((3000 + OFFSET))/" .env
+
+echo "📦 Starting Docker services..."
+docker-compose -f docker-compose.wt.yml up -d
+
+echo "📚 Installing dependencies..."
+npm install
+
+echo "🗃️ Running migrations..."
+npm run db:migrate
+
+echo "✅ Worktree ready!"
+echo "   App:      http://localhost:$((3000 + OFFSET))"
+echo "   Database: localhost:$((5000 + OFFSET))"
+```
+
+**docker-compose.wt.yml**:
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${WT_BRANCH:-dev}-postgres
+    environment:
+      POSTGRES_DB: app_dev
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${WT_BRANCH:-dev}-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio
+    container_name: ${WT_BRANCH:-dev}-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+
+volumes:
+  pg_data:
+    name: ${WT_BRANCH:-dev}-pg-data
+  minio_data:
+    name: ${WT_BRANCH:-dev}-minio-data
+```
+
+### Using Worktrunk in AIA UI
+
+1. **Create a feature**: `aia feature my-feature` or via UI
+2. **Open the feature** in the UI
+3. **Click "Create Worktree"** in the Worktrunk panel
+   - Runs `wt switch -c feature/my-feature`
+   - Executes `post_create` hooks (Docker services, npm install, etc.)
+4. **Open Terminal** to work in the worktree directory
+5. **View Docker Containers** directly in the UI
+   - Start/Stop individual containers
+   - Open a shell inside any running container
+6. **When done**: Click "Remove" to clean up
+   - Runs `pre_remove` hooks (docker-compose down)
+   - Removes the worktree directory
+
+### Troubleshooting
+
+**"Worktrunk not installed"**
+```bash
+cargo install worktrunk
+# Make sure ~/.cargo/bin is in your PATH
+```
+
+**Containers not showing in UI**
+- Containers must have names matching pattern: `feature-<name>-*`
+- Check Docker is running: `docker ps`
+- Click "Refresh Containers" in the UI
+
+**Port conflicts**
+- Each worktree needs unique ports
+- Use the port auto-assignment hook above
+- Or manually set ports in `.env` per worktree
+
+**Worktree creation fails**
+```bash
+# Check git status - uncommitted changes can block
+git status
+
+# Manual worktree creation
+wt switch -c feature/my-feature --force
+```

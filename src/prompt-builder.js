@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { execFile } from 'node:child_process';
 import fs from 'fs-extra';
 import yaml from 'yaml';
 import { AIA_DIR, FEATURE_STEPS } from './constants.js';
@@ -66,6 +67,34 @@ async function resolveKnowledgeCategories(feature, config, root) {
   }
 
   return config.knowledge_default ?? [];
+}
+
+function execGit(args, root) {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd: root, maxBuffer: 1024 * 1024 * 5 }, (err, stdout) => {
+      resolve(err ? '' : (stdout?.trim() || ''));
+    });
+  });
+}
+
+async function getGitDiff(root) {
+  // 1. Try uncommitted changes (staged + unstaged), excluding .aia
+  const uncommitted = await execGit(['diff', 'HEAD', '--', '.', ':!.aia'], root);
+  if (uncommitted) return uncommitted;
+
+  // 2. If no uncommitted changes, the implement step likely committed.
+  //    Find the merge-base with main and diff from there.
+  const branch = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], root);
+  if (branch && branch !== 'main' && branch !== 'master') {
+    const base = await execGit(['merge-base', branch, 'main'], root) ||
+                 await execGit(['merge-base', branch, 'master'], root);
+    if (base) {
+      return execGit(['diff', base, 'HEAD', '--', '.', ':!.aia'], root);
+    }
+  }
+
+  // 3. Fallback: diff last commit
+  return execGit(['diff', 'HEAD~1', 'HEAD', '--', '.', ':!.aia'], root);
 }
 
 async function loadPromptTemplate(step, root) {
@@ -148,6 +177,18 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   if (featureContent) {
     parts.push('\n\n=== FEATURE ===\n');
     parts.push(featureContent);
+  }
+
+  // For the review step, include actual code changes so the reviewer can see the code
+  if (step === 'review') {
+    const diff = await getGitDiff(root);
+    if (diff) {
+      parts.push('\n\n=== CODE CHANGES (git diff) ===\n');
+      parts.push('Below is the actual git diff of the implementation. Review this code:\n');
+      parts.push('```diff');
+      parts.push(diff);
+      parts.push('```');
+    }
   }
 
   if (previousOutput) {

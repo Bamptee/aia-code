@@ -384,6 +384,29 @@ function LogViewer({ logs }) {
   }, logs.join(''));
 }
 
+function StreamingOutputPanel({ output }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [output]);
+
+  return React.createElement('div', {
+    className: 'bg-slate-900 border border-blue-500/30 rounded p-3',
+  },
+    React.createElement('div', { className: 'flex items-center gap-2 mb-2' },
+      React.createElement('span', { className: 'animate-pulse text-blue-400' }, '\u25CF'),
+      React.createElement('span', { className: 'text-xs text-blue-400 font-medium' }, 'Agent output (live)'),
+      output && React.createElement('span', { className: 'text-xs text-slate-500 ml-2' }, `${output.length} chars`),
+    ),
+    output
+      ? React.createElement('pre', {
+          ref,
+          className: 'text-xs text-slate-300 whitespace-pre-wrap overflow-auto max-h-80 font-mono bg-black/30 p-2 rounded',
+        }, output.slice(-5000))
+      : React.createElement('span', { className: 'text-xs text-slate-500 italic' }, 'Waiting for output...'),
+  );
+}
+
 function VerbosePanel({ logs, expanded, onToggle }) {
   if (!logs.length) return null;
   return React.createElement('div', { className: 'mt-2' },
@@ -622,6 +645,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
   const [history, setHistory] = React.useState([]);
   const [attachments, setAttachments] = React.useState([]);
   const agentBuffer = React.useRef('');
+  const [streamingOutput, setStreamingOutput] = React.useState(''); // Live agent output display
   const requestId = React.useRef(0); // F4: Track request to prevent race conditions
   const [resetting, setResetting] = React.useState(false); // F14: Track reset state
   const eventSourceRef = React.useRef(null);
@@ -659,6 +683,8 @@ function RunPanel({ name, step, stepStatus, onDone }) {
             } else {
               agentBuffer.current += text;
             }
+            // Update streaming output for real-time display (both stdout and stderr)
+            setStreamingOutput(prev => (prev + text).slice(-10000));
           });
 
           evtSource.addEventListener('done', () => {
@@ -669,6 +695,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
             if (agentBuffer.current.trim()) {
               setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: agentBuffer.current.trim() }].slice(-MAX_MESSAGES));
             }
+            setStreamingOutput('');
             evtSource.close();
             eventSourceRef.current = null;
             if (onDone) onDone();
@@ -714,6 +741,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
     setResult(null);
     setErr(null);
     agentBuffer.current = '';
+    setStreamingOutput('');
   }, [step]);
 
   const handleAttachmentUpload = (files) => {
@@ -733,10 +761,14 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       } else {
         agentBuffer.current += text;
       }
+      // Update streaming output for real-time display (both stdout and stderr)
+      setStreamingOutput(prev => (prev + text).slice(-10000));
     },
     onStatus: (data) => {
       if (requestId.current !== currentRequestId) return;
-      setVerboseLogs(prev => [...prev, `[${data.status}] ${data.step || ''}\n`].slice(-MAX_VERBOSE_LOGS));
+      const statusLine = `[${data.status}] ${data.step || ''}\n`;
+      setVerboseLogs(prev => [...prev, statusLine].slice(-MAX_VERBOSE_LOGS));
+      setStreamingOutput(prev => (prev + statusLine).slice(-10000));
     },
   });
 
@@ -752,6 +784,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
     setErr(null);
     setVerboseLogs([]);
     agentBuffer.current = '';
+    setStreamingOutput('');
 
     const currentRequestId = ++requestId.current; // F4: New request ID
     const newHistory = [...history, { role: 'user', content: userMessage }];
@@ -773,6 +806,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: agentResponse }].slice(-MAX_MESSAGES));
       setHistory(prev => [...prev, { role: 'agent', content: agentResponse }]);
     }
+    setStreamingOutput('');
 
     if (res.ok) {
       setResult('Step completed.');
@@ -794,6 +828,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
     setErr(null);
     setVerboseLogs([]);
     agentBuffer.current = '';
+    setStreamingOutput('');
 
     const currentRequestId = ++requestId.current;
     // F7: Pass history in iterate mode too
@@ -814,6 +849,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       setMessages(prev => [...prev, { id: Date.now(), role: 'agent', content: agentBuffer.current.trim() }].slice(-MAX_MESSAGES));
       setHistory(prev => [...prev, { role: 'agent', content: agentBuffer.current.trim() }]);
     }
+    setStreamingOutput('');
 
     if (res.ok) {
       setResult('Iteration completed.');
@@ -836,6 +872,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       setVerboseLogs([]);
       setHistory([]);
       setResult(null);
+      setStreamingOutput('');
       if (onDone) onDone();
     } catch (e) {
       setErr(`Reset failed: ${e.message}`);
@@ -942,6 +979,9 @@ function RunPanel({ name, step, stepStatus, onDone }) {
       // Step guidance for completed steps
       React.createElement(StepGuidance, { step, feature: name }),
     ),
+
+    // --- Streaming output panel (live agent output) ---
+    (running || serverRunning) && React.createElement(StreamingOutputPanel, { output: streamingOutput }),
 
     // --- Verbose panel (stderr logs) ---
     React.createElement(VerbosePanel, {

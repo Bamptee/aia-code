@@ -23,11 +23,15 @@ function sseHeaders(res) {
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
     'Access-Control-Allow-Origin': '*',
+    'X-Accel-Buffering': 'no', // Disable nginx buffering if behind proxy
   });
+  res.flushHeaders(); // Force headers to be sent immediately
 }
 
 function sseSend(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  // Force flush for SSE streaming
+  if (res.flush) res.flush();
 }
 
 // F6: Extracted validation helpers to avoid code duplication
@@ -53,7 +57,9 @@ function validateAttachments(rawAttachments) {
 
 export function registerFeatureRoutes(router) {
   // List all features
-  // Query params: ?filter=active|deleted|all (default: active)
+  // Query params:
+  //   ?filter=active|deleted|all (default: active)
+  //   ?minimal=true - Return minimal data for faster initial load (name, type, flow, createdAt, deletedAt only)
   router.get('/api/features', async (req, res, { root, query }) => {
     const featuresDir = path.join(root, AIA_DIR, 'features');
     if (!(await fs.pathExists(featuresDir))) {
@@ -67,11 +73,13 @@ export function registerFeatureRoutes(router) {
     const validFilters = [DELETION_FILTER.ACTIVE, DELETION_FILTER.DELETED, DELETION_FILTER.ALL];
     const filter = validFilters.includes(query?.filter) ? query.filter : DELETION_FILTER.ACTIVE;
 
+    // Parse minimal flag for lazy loading support
+    const minimal = query?.minimal === 'true';
+
     for (const entry of entries) {
       if (entry.isDirectory()) {
         try {
           const status = await loadStatus(entry.name, root);
-          const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
           const deleted = isFeatureDeleted(status);
 
           // Apply deletion filter
@@ -79,8 +87,25 @@ export function registerFeatureRoutes(router) {
           if (filter === DELETION_FILTER.DELETED && !deleted) continue;
           // DELETION_FILTER.ALL shows everything
 
-          const running = isRunning(entry.name);
-          features.push({ name: entry.name, ...status, hasWorktree: hasWt, isDeleted: deleted, agentRunning: running });
+          if (minimal) {
+            // Minimal mode: return basic info + essential computed fields for fast initial render
+            // Include hasWorktree since it's needed for filtering and is a fast check
+            const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+            features.push({
+              name: entry.name,
+              type: status.type,
+              flow: status.flow,
+              createdAt: status.createdAt,
+              deletedAt: status.deletedAt,
+              isDeleted: deleted,
+              hasWorktree: hasWt,
+            });
+          } else {
+            // Full mode: return all data including computed states
+            const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+            const running = isRunning(entry.name);
+            features.push({ name: entry.name, ...status, hasWorktree: hasWt, isDeleted: deleted, agentRunning: running });
+          }
         } catch {
           features.push({ name: entry.name, error: true, hasWorktree: false, isDeleted: false, agentRunning: false });
         }

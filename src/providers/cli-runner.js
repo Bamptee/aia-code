@@ -1,19 +1,24 @@
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import chalk from 'chalk';
 
 const DEFAULT_IDLE_TIMEOUT_MS = 180_000;
 const AGENT_IDLE_TIMEOUT_MS = 600_000;
 
 export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, idleTimeoutMs, onData, cwd } = {}) {
+  console.log('[cli-runner] stdinData length:', stdinData?.length || 0);
+  console.log('[cli-runner] args:', args.join(' '));
   if (!idleTimeoutMs) {
     idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
   }
   return new Promise((resolve, reject) => {
+    console.log('[cli-runner] spawning:', command, 'cwd:', cwd);
     const child = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, FORCE_COLOR: '0' },
       cwd,
     });
+    console.log('[cli-runner] spawned PID:', child.pid);
 
     const chunks = [];
     let stderr = '';
@@ -73,8 +78,11 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
     });
 
     if (stdinData) {
-      child.stdin.write(stdinData);
-      child.stdin.end();
+      console.log('[cli-runner] piping stdin...');
+      const stdinStream = Readable.from([stdinData]);
+      stdinStream.on('end', () => console.log('[cli-runner] stdin stream ended'));
+      stdinStream.pipe(child.stdin);
+      child.stdin.on('finish', () => console.log('[cli-runner] stdin finished'));
     }
   });
 }

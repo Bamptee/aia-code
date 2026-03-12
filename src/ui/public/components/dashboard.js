@@ -14,6 +14,96 @@ const FEATURE_TYPES = ['feature', 'bug'];
 const DEFAULT_FEATURE_TYPE = 'feature';
 const DELETION_FILTER = { ACTIVE: 'active', DELETED: 'deleted', ALL: 'all' };
 
+// Sorting options
+const SORT_OPTIONS = {
+  DATE_DESC: { field: 'date', order: 'desc', label: 'Newest first' },
+  DATE_ASC: { field: 'date', order: 'asc', label: 'Oldest first' },
+  NAME_ASC: { field: 'name', order: 'asc', label: 'Name (A-Z)' },
+  NAME_DESC: { field: 'name', order: 'desc', label: 'Name (Z-A)' },
+};
+
+// LocalStorage keys for persistence
+const STORAGE_KEYS = {
+  SORT: 'aia-feature-list-sort',
+  SHOW_COMPLETED: 'aia-feature-list-show-completed',
+  TYPE_FILTER: 'aia-feature-list-type-filter',
+  APPS_FILTER: 'aia-feature-list-apps-filter',
+  WT_FILTER: 'aia-feature-list-wt-filter',
+  DELETION_FILTER: 'aia-feature-list-deletion-filter',
+};
+
+/**
+ * Load a value from localStorage with fallback
+ * @param {string} key - Storage key
+ * @param {*} defaultValue - Default value if not found
+ * @returns {*} Parsed value or default
+ */
+function loadFromStorage(key, defaultValue) {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+}
+
+/**
+ * Save a value to localStorage
+ * @param {string} key - Storage key
+ * @param {*} value - Value to store
+ */
+function saveToStorage(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Sort features by the specified field and order
+ * @param {Array} features - Array of features to sort
+ * @param {string} field - 'date' or 'name'
+ * @param {string} order - 'asc' or 'desc'
+ * @returns {Array} Sorted array (new array, doesn't mutate original)
+ */
+function sortFeatures(features, field, order) {
+  const sorted = [...features];
+
+  sorted.sort((a, b) => {
+    let comparison = 0;
+
+    if (field === 'name') {
+      comparison = a.name.localeCompare(b.name);
+    } else if (field === 'date') {
+      // Use createdAt if available, otherwise fall back to name (alphabetical as proxy)
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      comparison = dateA - dateB;
+    }
+
+    return order === 'desc' ? -comparison : comparison;
+  });
+
+  return sorted;
+}
+
+/**
+ * Check if a feature is completed (all relevant steps are done)
+ * @param {Object} feature - Feature object with steps
+ * @returns {boolean}
+ */
+function isFeatureCompleted(feature) {
+  const steps = feature.steps || {};
+  const isQuickFlow = feature.flow === 'quick';
+  const relevantSteps = isQuickFlow
+    ? Object.entries(steps).filter(([k]) => QUICK_STEPS.includes(k))
+    : Object.entries(steps);
+
+  if (relevantSteps.length === 0) return false;
+  return relevantSteps.every(([_, status]) => status === 'done');
+}
+
 function StepBadge({ step, status }) {
   return React.createElement('span', {
     className: `inline-block px-2 py-0.5 text-xs rounded border ${STATUS_CLASSES[status] || 'step-pending'}`,
@@ -34,13 +124,107 @@ function AppChip({ app, small = false }) {
   }, typeof app === 'object' ? `${app.icon || ''} ${app.name}` : app);
 }
 
-function FeatureCard({ feature, availableApps, onRestore }) {
-  const steps = feature.steps || {};
-  const isQuickFlow = feature.flow === 'quick';
-  const featureType = feature.type || DEFAULT_FEATURE_TYPE;
-  const featureApps = feature.apps || [];
-  const isDeleted = feature.isDeleted || feature.deletedAt != null;
+/**
+ * Skeleton loader component for feature cards
+ * Displays a loading placeholder while card state is being fetched
+ */
+function FeatureCardSkeleton({ featureName }) {
+  return React.createElement('div', {
+    className: 'block bg-aia-card border border-aia-border rounded-lg p-4 animate-pulse',
+    'aria-label': `Loading ${featureName}...`,
+    role: 'status',
+  },
+    // Header row skeleton
+    React.createElement('div', { className: 'flex items-center justify-between mb-2' },
+      React.createElement('div', { className: 'h-5 w-20 bg-slate-700 rounded' }),
+      React.createElement('div', { className: 'h-4 w-16 bg-slate-700 rounded' }),
+    ),
+    // Name row skeleton - show actual name for context
+    React.createElement('div', { className: 'flex items-center gap-2 mb-2' },
+      React.createElement('h3', { className: 'font-semibold text-slate-400' }, featureName),
+    ),
+    // Progress bar skeleton
+    React.createElement('div', { className: 'h-1.5 bg-slate-700 rounded-full mb-2' }),
+    // Loading indicator
+    React.createElement('div', { className: 'flex items-center gap-2' },
+      React.createElement('div', { className: 'w-3 h-3 border-2 border-slate-600 border-t-aia-accent rounded-full animate-spin' }),
+      React.createElement('span', { className: 'text-xs text-slate-500' }, 'Loading details...'),
+    ),
+  );
+}
+
+/**
+ * Hook to fetch individual card state asynchronously
+ * @param {string} featureName - The feature name to fetch state for
+ * @param {boolean} enabled - Whether to enable fetching
+ * @returns {{ state: Object|null, isLoading: boolean, error: string|null }}
+ */
+function useCardState(featureName, enabled = true) {
+  const [state, setState] = React.useState(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!enabled || !featureName) {
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    api.get(`/features/${featureName}`)
+      .then(data => {
+        if (!cancelled) {
+          setState(data);
+          setIsLoading(false);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setError(err.message || 'Failed to load');
+          setIsLoading(false);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [featureName, enabled]);
+
+  return { state, isLoading, error };
+}
+
+function FeatureCard({ feature, availableApps, onRestore, lazyLoad = false }) {
+  // Use lazy loading hook if enabled, otherwise use the feature data directly
+  const { state: lazyState, isLoading, error } = useCardState(
+    lazyLoad ? feature.name : null,
+    lazyLoad
+  );
+
+  // Use lazy-loaded state if available, otherwise use the passed feature
+  const effectiveFeature = lazyLoad && lazyState ? { ...feature, ...lazyState } : feature;
+
+  const steps = effectiveFeature.steps || {};
+  const isQuickFlow = effectiveFeature.flow === 'quick';
+  const featureType = effectiveFeature.type || DEFAULT_FEATURE_TYPE;
+  const featureApps = effectiveFeature.apps || [];
+  const isDeleted = effectiveFeature.isDeleted || effectiveFeature.deletedAt != null;
   const [restoring, setRestoring] = React.useState(false);
+
+  // Show skeleton while loading in lazy mode
+  if (lazyLoad && isLoading) {
+    return React.createElement(FeatureCardSkeleton, { featureName: feature.name });
+  }
+
+  // Show error state if lazy load failed
+  if (lazyLoad && error) {
+    return React.createElement('div', {
+      className: 'block bg-aia-card border border-red-500/30 rounded-lg p-4',
+    },
+      React.createElement('h3', { className: 'font-semibold text-slate-100 mb-2' }, feature.name),
+      React.createElement('p', { className: 'text-xs text-red-400' }, `Error: ${error}`),
+    );
+  }
 
   // Filter steps based on flow type
   const relevantSteps = isQuickFlow
@@ -96,16 +280,16 @@ function FeatureCard({ feature, availableApps, onRestore }) {
 
     // Feature name row with Quick/wt badges
     React.createElement('div', { className: 'flex items-center gap-2 mb-2' },
-      React.createElement('h3', { className: `font-semibold ${isDeleted ? 'text-slate-500 line-through' : 'text-slate-100'}` }, feature.name),
+      React.createElement('h3', { className: `font-semibold ${isDeleted ? 'text-slate-500 line-through' : 'text-slate-100'}` }, effectiveFeature.name),
       !isDeleted && isQuickFlow && React.createElement('span', {
         className: 'bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded',
         title: 'Quick Flow',
       }, 'QUICK'),
-      !isDeleted && feature.hasWorktree && React.createElement('span', {
+      !isDeleted && effectiveFeature.hasWorktree && React.createElement('span', {
         className: 'bg-orange-500/20 text-orange-400 text-xs px-1.5 py-0.5 rounded',
         title: 'Git worktree active',
       }, 'wt'),
-      !isDeleted && feature.agentRunning && React.createElement('span', {
+      !isDeleted && effectiveFeature.agentRunning && React.createElement('span', {
         className: 'bg-blue-500/20 text-blue-400 text-xs px-1.5 py-0.5 rounded flex items-center gap-1',
         title: 'Agent running',
       },
@@ -123,8 +307,8 @@ function FeatureCard({ feature, availableApps, onRestore }) {
     ),
 
     // Current step
-    feature.current_step && React.createElement('p', { className: 'text-xs text-slate-400 mb-2' },
-      'Current: ', React.createElement('span', { className: 'text-aia-accent' }, feature.current_step)
+    effectiveFeature.current_step && React.createElement('p', { className: 'text-xs text-slate-400 mb-2' },
+      'Current: ', React.createElement('span', { className: 'text-aia-accent' }, effectiveFeature.current_step)
     ),
 
     // App tags
@@ -244,7 +428,7 @@ function DeletionFilter({ filter, onChange, deletedCount }) {
           : 'bg-slate-800 text-slate-400 border-slate-600 hover:border-slate-500'
       }`,
     },
-      '\uD83D\uDDD1 Deleted',
+      'Deleted',  // Text-only label, no trash icon
       deletedCount > 0 && React.createElement('span', {
         className: 'bg-red-500/30 text-red-400 text-xs px-1.5 py-0.5 rounded',
       }, deletedCount),
@@ -257,6 +441,75 @@ function DeletionFilter({ filter, onChange, deletedCount }) {
           : 'bg-slate-800 text-slate-400 border-slate-600 hover:border-slate-500'
       }`,
     }, 'All'),
+  );
+}
+
+/**
+ * Completion filter toggle - show/hide completed features
+ */
+function CompletionFilter({ showCompleted, onChange }) {
+  return React.createElement('div', { className: 'flex items-center gap-2' },
+    React.createElement('label', {
+      className: 'flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none',
+    },
+      React.createElement('input', {
+        type: 'checkbox',
+        checked: showCompleted,
+        onChange: (e) => onChange(e.target.checked),
+        className: 'w-3.5 h-3.5 rounded border-slate-500 bg-slate-800 text-aia-accent focus:ring-aia-accent focus:ring-offset-0',
+      }),
+      'Show completed',
+    ),
+  );
+}
+
+/**
+ * Sort dropdown component for sorting features
+ */
+function SortDropdown({ sortKey, onChange }) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const dropdownRef = React.useRef(null);
+
+  // Close dropdown when clicking outside
+  React.useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const currentOption = SORT_OPTIONS[sortKey] || SORT_OPTIONS.DATE_DESC;
+
+  return React.createElement('div', { className: 'relative', ref: dropdownRef },
+    React.createElement('button', {
+      onClick: () => setIsOpen(!isOpen),
+      className: 'flex items-center gap-2 px-3 py-1.5 text-xs rounded border border-slate-600 bg-slate-800 text-slate-300 hover:border-slate-500 transition-colors',
+    },
+      React.createElement('span', { className: 'text-slate-500' }, 'Sort:'),
+      currentOption.label,
+      React.createElement('span', { className: 'text-slate-500' }, isOpen ? '\u25B2' : '\u25BC'),
+    ),
+    isOpen && React.createElement('div', {
+      className: 'absolute top-full left-0 mt-1 w-40 bg-slate-800 border border-slate-600 rounded shadow-lg z-10',
+    },
+      ...Object.entries(SORT_OPTIONS).map(([key, option]) =>
+        React.createElement('button', {
+          key,
+          onClick: () => {
+            onChange(key);
+            setIsOpen(false);
+          },
+          className: `w-full text-left px-3 py-2 text-xs transition-colors ${
+            sortKey === key
+              ? 'bg-aia-accent/20 text-aia-accent'
+              : 'text-slate-300 hover:bg-slate-700'
+          }`,
+        }, option.label)
+      ),
+    ),
   );
 }
 
@@ -299,16 +552,16 @@ function CreateFeatureModal({ apps, onCreated, onClose }) {
     setErr('');
     setLoading(true);
     try {
-      await api.post('/features', {
+      const result = await api.post('/features', {
         name: cleanName,
         type,
         apps: selectedApps,
       });
-      onCreated();
       onClose();
+      // Navigate directly to the edit page for the new feature
+      window.location.hash = `#/features/${encodeURIComponent(result.name || cleanName)}`;
     } catch (e) {
       setErr(e.message);
-    } finally {
       setLoading(false);
     }
   };
@@ -465,29 +718,48 @@ export function Dashboard() {
   const [deletedCount, setDeletedCount] = React.useState(0);
   const [apps, setApps] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
-  const [typeFilter, setTypeFilter] = React.useState('all');
-  const [appsFilter, setAppsFilter] = React.useState([]);
-  const [wtFilter, setWtFilter] = React.useState('all');
-  const [deletionFilter, setDeletionFilter] = React.useState(DELETION_FILTER.ACTIVE);
-  const [showCreateModal, setShowCreateModal] = React.useState(false);
 
+  // Filter states with localStorage persistence
+  const [typeFilter, setTypeFilter] = React.useState(() => loadFromStorage(STORAGE_KEYS.TYPE_FILTER, 'all'));
+  const [appsFilter, setAppsFilter] = React.useState(() => loadFromStorage(STORAGE_KEYS.APPS_FILTER, []));
+  const [wtFilter, setWtFilter] = React.useState(() => loadFromStorage(STORAGE_KEYS.WT_FILTER, 'all'));
+  const [deletionFilter, setDeletionFilter] = React.useState(() => loadFromStorage(STORAGE_KEYS.DELETION_FILTER, DELETION_FILTER.ACTIVE));
+  const [showCompleted, setShowCompleted] = React.useState(() => loadFromStorage(STORAGE_KEYS.SHOW_COMPLETED, false));
+
+  // Sort state with localStorage persistence
+  const [sortKey, setSortKey] = React.useState(() => loadFromStorage(STORAGE_KEYS.SORT, 'DATE_DESC'));
+
+  const [showCreateModal, setShowCreateModal] = React.useState(false);
   const [loadError, setLoadError] = React.useState(null);
+
+  // Persist filter/sort changes to localStorage
+  React.useEffect(() => { saveToStorage(STORAGE_KEYS.TYPE_FILTER, typeFilter); }, [typeFilter]);
+  React.useEffect(() => { saveToStorage(STORAGE_KEYS.APPS_FILTER, appsFilter); }, [appsFilter]);
+  React.useEffect(() => { saveToStorage(STORAGE_KEYS.WT_FILTER, wtFilter); }, [wtFilter]);
+  React.useEffect(() => { saveToStorage(STORAGE_KEYS.DELETION_FILTER, deletionFilter); }, [deletionFilter]);
+  React.useEffect(() => { saveToStorage(STORAGE_KEYS.SHOW_COMPLETED, showCompleted); }, [showCompleted]);
+  React.useEffect(() => { saveToStorage(STORAGE_KEYS.SORT, sortKey); }, [sortKey]);
+
+  // Track whether to use lazy loading for card states
+  const [useLazyLoad, setUseLazyLoad] = React.useState(true);
 
   async function load() {
     setLoadError(null);
     setLoading(true);
     try {
-      // Fetch features based on deletion filter
+      // Fetch minimal features data for fast initial render
+      // Card states will be loaded asynchronously per-card
       const [featuresData, appsData, deletedData] = await Promise.all([
-        api.get(`/features?filter=${deletionFilter}`),
+        api.get(`/features?filter=${deletionFilter}&minimal=true`),
         api.get('/apps'),
-        // Also fetch deleted count for the filter badge
+        // Also fetch deleted count for the filter badge (minimal mode)
         deletionFilter !== DELETION_FILTER.DELETED
-          ? api.get(`/features?filter=${DELETION_FILTER.DELETED}`)
+          ? api.get(`/features?filter=${DELETION_FILTER.DELETED}&minimal=true`)
           : Promise.resolve([]),
       ]);
       setFeatures(featuresData);
       setApps(appsData);
+      setUseLazyLoad(true); // Enable lazy loading for new data
       // Set deleted count
       if (deletionFilter === DELETION_FILTER.DELETED) {
         setDeletedCount(featuresData.length);
@@ -502,37 +774,52 @@ export function Dashboard() {
 
   React.useEffect(() => { load(); }, [deletionFilter]);
 
+  // Count completed features for display
+  const completedCount = features.filter(isFeatureCompleted).length;
+
   // Filter features
-  const filteredFeatures = features.filter(f => {
-    // Type filter
-    const fType = f.type || DEFAULT_FEATURE_TYPE;
-    if (typeFilter !== 'all' && fType !== typeFilter) return false;
+  const filteredFeatures = React.useMemo(() => {
+    let result = features.filter(f => {
+      // Completion filter - hide completed unless showCompleted is true
+      if (!showCompleted && isFeatureCompleted(f)) return false;
 
-    // Apps filter
-    if (appsFilter.length > 0) {
-      const fApps = f.apps || [];
-      if (!appsFilter.some(a => fApps.includes(a))) return false;
-    }
+      // Type filter
+      const fType = f.type || DEFAULT_FEATURE_TYPE;
+      if (typeFilter !== 'all' && fType !== typeFilter) return false;
 
-    // Worktree filter
-    if (wtFilter === 'with-wt' && !f.hasWorktree) return false;
-    if (wtFilter === 'without-wt' && f.hasWorktree) return false;
+      // Apps filter
+      if (appsFilter.length > 0) {
+        const fApps = f.apps || [];
+        if (!appsFilter.some(a => fApps.includes(a))) return false;
+      }
 
-    return true;
-  });
+      // Worktree filter
+      if (wtFilter === 'with-wt' && !f.hasWorktree) return false;
+      if (wtFilter === 'without-wt' && f.hasWorktree) return false;
 
-  // Counts for type tabs
+      return true;
+    });
+
+    // Apply sorting
+    const sortOption = SORT_OPTIONS[sortKey] || SORT_OPTIONS.DATE_DESC;
+    result = sortFeatures(result, sortOption.field, sortOption.order);
+
+    return result;
+  }, [features, showCompleted, typeFilter, appsFilter, wtFilter, sortKey]);
+
+  // Counts for type tabs (exclude completed if not showing them)
+  const countBase = showCompleted ? features : features.filter(f => !isFeatureCompleted(f));
   const typeCounts = {
-    all: features.length,
-    features: features.filter(f => (f.type || DEFAULT_FEATURE_TYPE) === 'feature').length,
-    bugs: features.filter(f => f.type === 'bug').length,
+    all: countBase.length,
+    features: countBase.filter(f => (f.type || DEFAULT_FEATURE_TYPE) === 'feature').length,
+    bugs: countBase.filter(f => f.type === 'bug').length,
   };
 
   // Counts for worktree tabs
   const wtCounts = {
-    all: features.length,
-    withWt: features.filter(f => f.hasWorktree).length,
-    withoutWt: features.filter(f => !f.hasWorktree).length,
+    all: countBase.length,
+    withWt: countBase.filter(f => f.hasWorktree).length,
+    withoutWt: countBase.filter(f => !f.hasWorktree).length,
   };
 
   return React.createElement('div', { className: 'space-y-6' },
@@ -547,12 +834,27 @@ export function Dashboard() {
 
     // Filters row
     !loading && React.createElement('div', { className: 'space-y-3' },
-      // Deletion filter (Active / Deleted / All)
-      React.createElement(DeletionFilter, {
-        filter: deletionFilter,
-        onChange: setDeletionFilter,
-        deletedCount,
-      }),
+      // First row: Deletion filter + Sort + Completion toggle
+      React.createElement('div', { className: 'flex items-center justify-between flex-wrap gap-3' },
+        React.createElement(DeletionFilter, {
+          filter: deletionFilter,
+          onChange: setDeletionFilter,
+          deletedCount,
+        }),
+        React.createElement('div', { className: 'flex items-center gap-4' },
+          features.length > 0 && React.createElement(CompletionFilter, {
+            showCompleted,
+            onChange: setShowCompleted,
+          }),
+          completedCount > 0 && !showCompleted && React.createElement('span', {
+            className: 'text-xs text-slate-500',
+          }, `${completedCount} completed hidden`),
+          features.length > 0 && React.createElement(SortDropdown, {
+            sortKey,
+            onChange: setSortKey,
+          }),
+        ),
+      ),
 
       // Type filter pills (only show if there are features to filter)
       features.length > 0 && React.createElement(TypeFilterTabs, {
@@ -594,7 +896,13 @@ export function Dashboard() {
         : filteredFeatures.length === 0
           ? React.createElement('p', { className: 'text-slate-500' }, 'No features match these filters.')
           : React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' },
-              ...filteredFeatures.map(f => React.createElement(FeatureCard, { key: f.name, feature: f, availableApps: apps, onRestore: load }))
+              ...filteredFeatures.map(f => React.createElement(FeatureCard, {
+                key: f.name,
+                feature: f,
+                availableApps: apps,
+                onRestore: load,
+                lazyLoad: useLazyLoad,
+              }))
             ),
 
     // Create modal

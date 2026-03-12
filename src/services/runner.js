@@ -30,10 +30,13 @@ export async function runStep(step, feature, { description, instructions, histor
   // Start agent session for tracking
   startSession(feature, step);
 
-  // Detect worktree for this feature
-  const branch = getFeatureBranch(feature);
-  const wtPath = hasWorktree(branch, root) ? getWorktreePath(branch, root) : null;
-  const cwd = wtPath || root;
+  // Note: Claude CLI has a bug where it hangs in git worktrees
+  // So we always use the main repo root as CWD for now
+  // TODO: Re-enable worktree CWD when Claude CLI fixes this
+  // const branch = getFeatureBranch(feature);
+  // const wtPath = hasWorktree(branch, root) ? getWorktreePath(branch, root) : null;
+  // const cwd = wtPath || root;
+  const cwd = root;
 
   // Wrapper onData to buffer logs in session
   const wrappedOnData = (data) => {

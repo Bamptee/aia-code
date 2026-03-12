@@ -6,7 +6,7 @@ export async function generate(prompt, model, { verbose = false, apply = false, 
     args.push('--model', model);
   }
   if (apply) {
-    args.push('--allowedTools', 'Edit', 'Write', 'Bash', 'Read', 'Glob', 'Grep');
+    args.push('--allowedTools', 'Edit,Write,Bash,Read,Glob,Grep');
   }
   if (verbose || apply) {
     args.push('--verbose');

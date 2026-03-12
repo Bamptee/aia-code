@@ -50,23 +50,22 @@ function buildStatusYaml(name, { type = DEFAULT_FEATURE_TYPE, apps = [] } = {}) 
     steps[step] = 'pending';
   }
 
-  const flow = validType === 'bug' ? 'quick' : undefined;
+  // Bug type defaults to quick flow, feature type defaults to full flow
+  const flow = validType === 'bug' ? 'quick' : 'full';
   const currentStep = flow === 'quick' ? 'dev-plan' : 'brief';
 
   const status = {
     feature: name,
     type: validType,
+    flow,
     current_step: currentStep,
+    createdAt: new Date().toISOString(),
     steps,
     knowledge: ['backend'],
   };
 
   if (validApps.length > 0) {
     status.apps = validApps;
-  }
-
-  if (flow) {
-    status.flow = flow;
   }
 
   return yaml.stringify(status);

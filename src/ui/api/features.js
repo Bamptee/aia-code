@@ -170,30 +170,6 @@ export function registerFeatureRoutes(router) {
     res.end();
   });
 
-  // Quick ticket with SSE streaming (create + run)
-  router.post('/api/quick', async (req, res, { root, parseBody }) => {
-    const body = await parseBody();
-    sseHeaders(res);
-    sseSend(res, 'status', { status: 'started', mode: 'quick', name: body.name });
-
-    const onData = ({ type, text }) => {
-      try { sseSend(res, 'log', { type, text }); } catch {}
-    };
-
-    try {
-      await runQuick(body.name, {
-        description: body.description,
-        apply: body.apply || false,
-        root,
-        onData,
-      });
-      sseSend(res, 'done', { status: 'completed', name: body.name });
-    } catch (err) {
-      sseSend(res, 'error', { message: err.message });
-    }
-    res.end();
-  });
-
   // Iterate a step with SSE streaming (reset + re-run with instructions)
   router.post('/api/features/:name/iterate/:step', async (req, res, { params, root, parseBody }) => {
     const body = await parseBody();

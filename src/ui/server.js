@@ -99,81 +99,111 @@ export async function startServer(preferredPort, root = process.cwd()) {
   // Setup WebSocket server for terminal
   const wss = new WebSocketServer({ noServer: true });
 
+  // Helper function to setup PTY terminal with WebSocket
+  const setupPtyTerminal = (ws, command, args, options) => {
+    import('node-pty').then(({ spawn: ptySpawn }) => {
+      const ptyProcess = ptySpawn(command, args, {
+        name: 'xterm-256color',
+        cols: 80,
+        rows: 24,
+        env: process.env,
+        ...options,
+      });
+
+      // Idle timeout - close terminal after 30 minutes of inactivity
+      const IDLE_TIMEOUT = 30 * 60 * 1000;
+      let idleTimer = setTimeout(() => {
+        ws.send('\r\n\x1b[33m[Session closed due to inactivity]\x1b[0m\r\n');
+        ws.close();
+      }, IDLE_TIMEOUT);
+
+      const resetIdleTimer = () => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          ws.send('\r\n\x1b[33m[Session closed due to inactivity]\x1b[0m\r\n');
+          ws.close();
+        }, IDLE_TIMEOUT);
+      };
+
+      ws.on('message', (data) => {
+        resetIdleTimer();
+        const msg = data.toString();
+        // Limit message size to 64KB
+        if (msg.length > 65536) return;
+        // Handle resize messages
+        if (msg.startsWith('\x1b[8;')) {
+          const match = msg.match(/\x1b\[8;(\d+);(\d+)t/);
+          if (match) {
+            ptyProcess.resize(parseInt(match[2], 10), parseInt(match[1], 10));
+            return;
+          }
+        }
+        ptyProcess.write(msg);
+      });
+
+      ptyProcess.onData((data) => {
+        resetIdleTimer();
+        try {
+          ws.send(data);
+        } catch {}
+      });
+
+      ws.on('close', () => {
+        clearTimeout(idleTimer);
+        ptyProcess.kill();
+      });
+
+      ws.on('error', () => {
+        clearTimeout(idleTimer);
+        ptyProcess.kill();
+      });
+    }).catch((err) => {
+      ws.send(`\r\n\x1b[31mError: ${err.message}\x1b[0m\r\n`);
+      if (err.code === 'ERR_MODULE_NOT_FOUND') {
+        ws.send(`\x1b[33mRun: npm install node-pty\x1b[0m\r\n`);
+      }
+      ws.close();
+    });
+  };
+
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (url.pathname === '/api/terminal') {
       wss.handleUpgrade(req, socket, head, (ws) => {
         const cwd = url.searchParams.get('cwd') || root;
+        const shell = process.platform === 'win32'
+          ? 'powershell.exe'
+          : process.env.SHELL || '/bin/bash';
+        setupPtyTerminal(ws, shell, [], { cwd });
+      });
+    } else if (url.pathname === '/api/terminal/compose') {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        const service = url.searchParams.get('service');
+        const cwd = url.searchParams.get('cwd');
 
-        // Dynamically import node-pty (may not be installed)
-        import('node-pty').then(({ spawn: ptySpawn }) => {
-          // F6: Use user's preferred shell from environment
-          const shell = process.platform === 'win32'
-            ? 'powershell.exe'
-            : process.env.SHELL || '/bin/bash';
-          const ptyProcess = ptySpawn(shell, [], {
-            name: 'xterm-256color',
-            cols: 80,
-            rows: 24,
-            cwd,
-            env: process.env,
-          });
-
-          // F7: Idle timeout - close terminal after 30 minutes of inactivity
-          const IDLE_TIMEOUT = 30 * 60 * 1000;
-          let idleTimer = setTimeout(() => {
-            ws.send('\r\n\x1b[33m[Session closed due to inactivity]\x1b[0m\r\n');
-            ws.close();
-          }, IDLE_TIMEOUT);
-
-          const resetIdleTimer = () => {
-            clearTimeout(idleTimer);
-            idleTimer = setTimeout(() => {
-              ws.send('\r\n\x1b[33m[Session closed due to inactivity]\x1b[0m\r\n');
-              ws.close();
-            }, IDLE_TIMEOUT);
-          };
-
-          ws.on('message', (data) => {
-            resetIdleTimer();
-            const msg = data.toString();
-            // F5: Limit message size to 64KB
-            if (msg.length > 65536) return;
-            // Handle resize messages
-            if (msg.startsWith('\x1b[8;')) {
-              const match = msg.match(/\x1b\[8;(\d+);(\d+)t/);
-              if (match) {
-                ptyProcess.resize(parseInt(match[2], 10), parseInt(match[1], 10));
-                return;
-              }
-            }
-            ptyProcess.write(msg);
-          });
-
-          ptyProcess.onData((data) => {
-            resetIdleTimer();
-            try {
-              ws.send(data);
-            } catch {}
-          });
-
-          ws.on('close', () => {
-            clearTimeout(idleTimer);
-            ptyProcess.kill();
-          });
-
-          ws.on('error', () => {
-            clearTimeout(idleTimer);
-            ptyProcess.kill();
-          });
-        }).catch((err) => {
-          ws.send(`\r\n\x1b[31mError: ${err.message}\x1b[0m\r\n`);
-          if (err.code === 'ERR_MODULE_NOT_FOUND') {
-            ws.send(`\x1b[33mRun: npm install node-pty\x1b[0m\r\n`);
-          }
+        if (!service) {
+          ws.send('\r\n\x1b[31mError: service parameter required\x1b[0m\r\n');
           ws.close();
-        });
+          return;
+        }
+        if (!cwd) {
+          ws.send('\r\n\x1b[31mError: cwd parameter required\x1b[0m\r\n');
+          ws.close();
+          return;
+        }
+        // Validate service name (alphanumeric, dash, underscore)
+        if (!/^[a-zA-Z0-9_-]+$/.test(service)) {
+          ws.send('\r\n\x1b[31mError: invalid service name\x1b[0m\r\n');
+          ws.close();
+          return;
+        }
+        // Get shell from query param or default to sh (most compatible)
+        const shell = url.searchParams.get('shell') || 'sh';
+        const validShells = ['sh', 'bash', 'ash', 'zsh'];
+        const safeShell = validShells.includes(shell) ? shell : 'sh';
+        // Spawn docker-compose exec <service> <shell>
+        setupPtyTerminal(ws, 'docker-compose', ['-f', 'docker-compose.wt.yml', 'exec', service, safeShell], { cwd });
       });
     } else {
       socket.destroy();

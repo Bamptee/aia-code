@@ -9,8 +9,12 @@ export function WorktrunkPanel({ featureName }) {
   const [error, setError] = React.useState(null);
   const [showTerminal, setShowTerminal] = React.useState(false);
   const [terminalReady, setTerminalReady] = React.useState(false);
+
+  // Docker services state
+  const [services, setServices] = React.useState([]);
   const [servicesLoading, setServicesLoading] = React.useState(false);
-  const [servicesMessage, setServicesMessage] = React.useState(null);
+  const [serviceActionLoading, setServiceActionLoading] = React.useState(null); // service name being acted on
+  const [serviceTerminal, setServiceTerminal] = React.useState(null); // { service, name }
 
   const loadStatus = async () => {
     try {
@@ -22,9 +26,27 @@ export function WorktrunkPanel({ featureName }) {
     setLoading(false);
   };
 
+  const loadServices = async () => {
+    setServicesLoading(true);
+    try {
+      const data = await api.get(`/features/${featureName}/wt/services`);
+      setServices(data.services || []);
+    } catch {
+      setServices([]);
+    }
+    setServicesLoading(false);
+  };
+
   React.useEffect(() => {
     loadStatus();
   }, [featureName]);
+
+  // Load services when worktree is active and docker is available
+  React.useEffect(() => {
+    if (wtStatus?.hasWorktree && wtStatus?.docker?.available && wtStatus?.docker?.hasComposeFile) {
+      loadServices();
+    }
+  }, [wtStatus?.hasWorktree, wtStatus?.docker?.available, wtStatus?.docker?.hasComposeFile]);
 
   const handleCreateWorktree = async () => {
     setActionLoading(true);
@@ -47,6 +69,7 @@ export function WorktrunkPanel({ featureName }) {
     try {
       await api.delete(`/features/${featureName}/wt`);
       setShowTerminal(false);
+      setServiceTerminal(null);
       await loadStatus();
     } catch (err) {
       setError(err.message);
@@ -64,35 +87,71 @@ export function WorktrunkPanel({ featureName }) {
         return;
       }
     }
+    setServiceTerminal(null);
     setShowTerminal(true);
   };
 
-  const handleStartServices = async () => {
+  // Service actions
+  const handleStartService = async (serviceName) => {
+    setServiceActionLoading(serviceName);
+    setError(null);
+    try {
+      await api.post(`/features/${featureName}/wt/services/${serviceName}/start`);
+      await loadServices();
+    } catch (err) {
+      setError(err.message);
+    }
+    setServiceActionLoading(null);
+  };
+
+  const handleStopService = async (serviceName) => {
+    setServiceActionLoading(serviceName);
+    setError(null);
+    try {
+      await api.post(`/features/${featureName}/wt/services/${serviceName}/stop`);
+      await loadServices();
+    } catch (err) {
+      setError(err.message);
+    }
+    setServiceActionLoading(null);
+  };
+
+  const handleStartAllServices = async () => {
     setServicesLoading(true);
     setError(null);
-    setServicesMessage(null);
     try {
       await api.post(`/features/${featureName}/wt/services/start`);
-      setServicesMessage('Services started');
-      setTimeout(() => setServicesMessage(null), 3000);
+      await loadServices();
     } catch (err) {
       setError(err.message);
     }
     setServicesLoading(false);
   };
 
-  const handleStopServices = async () => {
+  const handleStopAllServices = async () => {
     setServicesLoading(true);
     setError(null);
-    setServicesMessage(null);
     try {
       await api.post(`/features/${featureName}/wt/services/stop`);
-      setServicesMessage('Services stopped');
-      setTimeout(() => setServicesMessage(null), 3000);
+      await loadServices();
     } catch (err) {
       setError(err.message);
     }
     setServicesLoading(false);
+  };
+
+  const handleOpenServiceShell = async (serviceName) => {
+    if (!terminalReady) {
+      try {
+        await loadXtermScripts();
+        setTerminalReady(true);
+      } catch {
+        setError('Failed to load terminal scripts');
+        return;
+      }
+    }
+    setShowTerminal(false);
+    setServiceTerminal({ service: serviceName });
   };
 
   if (loading) {
@@ -140,9 +199,14 @@ export function WorktrunkPanel({ featureName }) {
   }
 
   // Active worktree state
-  // F8: Use wss:// for HTTPS, ws:// for HTTP
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${wsProtocol}//${window.location.host}/api/terminal?cwd=${encodeURIComponent(wtStatus.path)}`;
+  const serviceWsUrl = serviceTerminal
+    ? `${wsProtocol}//${window.location.host}/api/terminal/compose?service=${encodeURIComponent(serviceTerminal.service)}&cwd=${encodeURIComponent(wtStatus.path)}`
+    : null;
+
+  const dockerAvailable = wtStatus.docker?.available;
+  const hasComposeFile = wtStatus.docker?.hasComposeFile;
 
   return React.createElement('div', { className: 'bg-slate-900 border border-orange-500/30 rounded p-4 space-y-4' },
     // Header
@@ -166,29 +230,115 @@ export function WorktrunkPanel({ featureName }) {
       React.createElement('p', { className: 'text-sm text-slate-400 font-mono truncate', title: wtStatus.path }, wtStatus.path),
     ),
 
-    // Actions
+    // Terminal button
     React.createElement('div', { className: 'flex flex-wrap gap-2' },
       React.createElement('button', {
         onClick: showTerminal ? () => setShowTerminal(false) : handleOpenTerminal,
         className: 'bg-slate-700 text-slate-300 border border-slate-600 rounded px-3 py-1.5 text-xs hover:bg-slate-600',
       }, showTerminal ? 'Hide Terminal' : 'Open Terminal'),
+    ),
 
-      // Docker services buttons (only if services exist)
-      wtStatus.hasServices && React.createElement(React.Fragment, null,
-        React.createElement('button', {
-          onClick: handleStartServices,
+    // Docker section
+    React.createElement('div', { className: 'border-t border-slate-700 pt-4 space-y-3' },
+      // Docker status header
+      React.createElement('div', { className: 'flex items-center justify-between' },
+        React.createElement('div', { className: 'flex items-center gap-2' },
+          React.createElement('span', { className: 'text-cyan-400 font-medium text-sm' }, 'Docker'),
+          dockerAvailable
+            ? React.createElement('span', { className: 'bg-emerald-500/20 text-emerald-400 text-xs px-2 py-0.5 rounded' }, 'running')
+            : React.createElement('span', { className: 'bg-red-500/20 text-red-400 text-xs px-2 py-0.5 rounded' }, 'not running'),
+        ),
+        hasComposeFile && dockerAvailable && React.createElement('button', {
+          onClick: loadServices,
           disabled: servicesLoading,
-          className: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded px-3 py-1.5 text-xs hover:bg-emerald-500/30 disabled:opacity-40',
-        }, servicesLoading ? '...' : 'Start Services'),
-        React.createElement('button', {
-          onClick: handleStopServices,
-          disabled: servicesLoading,
-          className: 'bg-red-500/20 text-red-400 border border-red-500/30 rounded px-3 py-1.5 text-xs hover:bg-red-500/30 disabled:opacity-40',
-        }, servicesLoading ? '...' : 'Stop Services'),
+          className: 'text-slate-500 hover:text-slate-300 text-xs',
+        }, servicesLoading ? '...' : 'Refresh'),
+      ),
+
+      // No Docker available
+      !dockerAvailable && React.createElement('p', { className: 'text-slate-500 text-xs' },
+        'Docker daemon is not running. Start Docker to manage services.'
+      ),
+
+      // Docker available but no compose file
+      dockerAvailable && !hasComposeFile && React.createElement('p', { className: 'text-slate-500 text-xs' },
+        'No docker-compose.wt.yml found in worktree. Create one to manage services.'
+      ),
+
+      // Services list
+      dockerAvailable && hasComposeFile && services.length > 0 && React.createElement('div', { className: 'space-y-2' },
+        // Start All / Stop All buttons
+        React.createElement('div', { className: 'flex gap-2' },
+          React.createElement('button', {
+            onClick: handleStartAllServices,
+            disabled: servicesLoading,
+            className: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded px-3 py-1 text-xs hover:bg-emerald-500/30 disabled:opacity-40',
+          }, servicesLoading ? '...' : 'Start All'),
+          React.createElement('button', {
+            onClick: handleStopAllServices,
+            disabled: servicesLoading,
+            className: 'bg-red-500/20 text-red-400 border border-red-500/30 rounded px-3 py-1 text-xs hover:bg-red-500/30 disabled:opacity-40',
+          }, servicesLoading ? '...' : 'Stop All'),
+        ),
+
+        // Services
+        React.createElement('div', { className: 'space-y-1' },
+          ...services.map(svc => {
+            const isRunning = svc.state === 'running';
+            const isLoading = serviceActionLoading === svc.name;
+
+            return React.createElement('div', {
+              key: svc.name,
+              className: 'flex items-center justify-between bg-slate-800 rounded px-3 py-2',
+            },
+              React.createElement('div', { className: 'flex items-center gap-2 flex-wrap' },
+                React.createElement('span', {
+                  className: `w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-400' : 'bg-slate-500'}`,
+                  title: svc.state,
+                }),
+                React.createElement('span', { className: 'text-sm text-slate-300 font-mono' }, svc.name),
+                svc.health && React.createElement('span', {
+                  className: `text-xs px-1.5 py-0.5 rounded ${svc.health === 'healthy' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'}`,
+                }, svc.health),
+                // Display ports
+                svc.ports && svc.ports.length > 0 && React.createElement('span', {
+                  className: 'text-xs text-cyan-500 font-mono',
+                }, svc.ports.map(p => `:${p.published}`).join(' ')),
+              ),
+              React.createElement('div', { className: 'flex gap-2' },
+                isRunning && React.createElement('button', {
+                  onClick: () => handleOpenServiceShell(svc.name),
+                  className: 'text-cyan-400 hover:text-cyan-300 text-xs',
+                }, 'Shell'),
+                isRunning
+                  ? React.createElement('button', {
+                      onClick: () => handleStopService(svc.name),
+                      disabled: isLoading,
+                      className: 'text-red-400 hover:text-red-300 text-xs disabled:opacity-40',
+                    }, isLoading ? '...' : 'Stop')
+                  : React.createElement('button', {
+                      onClick: () => handleStartService(svc.name),
+                      disabled: isLoading,
+                      className: 'text-emerald-400 hover:text-emerald-300 text-xs disabled:opacity-40',
+                    }, isLoading ? '...' : 'Start'),
+              ),
+            );
+          }),
+        ),
+      ),
+
+      // Loading services
+      dockerAvailable && hasComposeFile && servicesLoading && services.length === 0 && React.createElement('p', { className: 'text-slate-500 text-xs' },
+        'Loading services...'
+      ),
+
+      // No services defined
+      dockerAvailable && hasComposeFile && !servicesLoading && services.length === 0 && React.createElement('p', { className: 'text-slate-500 text-xs' },
+        'No services defined in docker-compose.wt.yml'
       ),
     ),
 
-    // Terminal
+    // Worktree Terminal
     showTerminal && terminalReady && React.createElement('div', { className: 'mt-4' },
       React.createElement(Terminal, {
         wsUrl,
@@ -196,8 +346,20 @@ export function WorktrunkPanel({ featureName }) {
       }),
     ),
 
-    // F9: Services feedback message
-    servicesMessage && React.createElement('p', { className: 'text-emerald-400 text-xs' }, servicesMessage),
+    // Service Terminal
+    serviceTerminal && terminalReady && React.createElement('div', { className: 'mt-4' },
+      React.createElement('div', { className: 'flex items-center justify-between mb-2' },
+        React.createElement('span', { className: 'text-xs text-cyan-400' }, `Shell: ${serviceTerminal.service}`),
+        React.createElement('button', {
+          onClick: () => setServiceTerminal(null),
+          className: 'text-slate-500 hover:text-slate-300 text-xs',
+        }, 'Close'),
+      ),
+      React.createElement(Terminal, {
+        wsUrl: serviceWsUrl,
+        onClose: () => setServiceTerminal(null),
+      }),
+    ),
 
     // Error
     error && React.createElement('p', { className: 'text-red-400 text-xs' }, error),

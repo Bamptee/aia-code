@@ -266,6 +266,15 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
   const [statusMsg, setStatusMsg] = React.useState('');
   const [logs, setLogs] = React.useState([]);
   const [err, setErr] = React.useState(null);
+  const [attachments, setAttachments] = React.useState([]);
+
+  const handleAttachmentUpload = (files) => {
+    setAttachments(prev => [...prev, ...files]);
+  };
+
+  const handleAttachmentRemove = (filename) => {
+    setAttachments(prev => prev.filter(a => a.filename !== filename));
+  };
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -273,7 +282,12 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
     setLogs([]);
     setStatusMsg('Structuring your description...');
 
-    const res = await streamPost(`/features/${name}/init`, { description }, {
+    // Note: Attachments are already uploaded via AttachmentZone to /api/features/:name/attachments
+    // Passing filenames here for potential future use in AI enrichment
+    const res = await streamPost(`/features/${name}/init`, {
+      description,
+      attachments: attachments.map(a => ({ filename: a.filename, path: a.path })),
+    }, {
       onLog: (text) => setLogs(prev => [...prev, text]),
       onStatus: (data) => setStatusMsg(data.message || data.status),
     });
@@ -281,6 +295,7 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
     if (res.ok) {
       setSuggestion(res.suggestion);
       setStatusMsg('');
+      setAttachments([]); // Clear attachments after successful submission
       if (onEnriched) onEnriched();
     } else {
       setErr(res.error || 'Failed to enrich description');
@@ -294,6 +309,14 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
 
   return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
     React.createElement('h3', { className: 'text-sm font-semibold text-cyan-400' }, 'Describe your feature'),
+
+    // Attachment zone (hidden when loading or has suggestion)
+    !loading && !suggestion && React.createElement(AttachmentZone, {
+      feature: name,
+      attachments,
+      onUpload: handleAttachmentUpload,
+      onRemove: handleAttachmentRemove,
+    }),
 
     // Textarea (hidden when loading or has suggestion)
     !loading && !suggestion && React.createElement('textarea', {

@@ -146,24 +146,15 @@ export function getFeatureBranch(featureName) {
 }
 
 /**
- * Start docker-compose services in a worktree
- * @param {string} wtPath - Worktree directory path
+ * Check if Docker daemon is running
+ * @returns {boolean}
  */
-export function startServices(wtPath) {
-  const composePath = path.join(wtPath, 'docker-compose.wt.yml');
-  if (fs.existsSync(composePath)) {
-    execSync('docker-compose -f docker-compose.wt.yml up -d', { cwd: wtPath, stdio: 'inherit' });
-  }
-}
-
-/**
- * Stop docker-compose services in a worktree
- * @param {string} wtPath - Worktree directory path
- */
-export function stopServices(wtPath) {
-  const composePath = path.join(wtPath, 'docker-compose.wt.yml');
-  if (fs.existsSync(composePath)) {
-    execSync('docker-compose -f docker-compose.wt.yml down', { cwd: wtPath, stdio: 'inherit' });
+export function isDockerRunning() {
+  try {
+    execSync('docker info', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -179,19 +170,142 @@ export function hasDockerServices(wtPath) {
 }
 
 /**
- * Get docker services status
+ * List services defined in docker-compose.wt.yml
  * @param {string} wtPath - Worktree directory path
- * @returns {Array} List of service objects with name and status
+ * @returns {Array<string>} List of service names
+ */
+export function listComposeServices(wtPath) {
+  if (!hasDockerServices(wtPath)) return [];
+  try {
+    const output = execSync('docker-compose -f docker-compose.wt.yml config --services', {
+      cwd: wtPath,
+      encoding: 'utf-8',
+    });
+    return output.trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get status of all services from docker-compose
+ * @param {string} wtPath - Worktree directory path
+ * @returns {Array} List of service objects with name, state, status
  */
 export function getServicesStatus(wtPath) {
   if (!hasDockerServices(wtPath)) return [];
+
+  // Get all defined services
+  const definedServices = listComposeServices(wtPath);
+  if (!definedServices.length) return [];
+
+  // Get running containers status
+  let runningServices = [];
   try {
     const output = execSync('docker-compose -f docker-compose.wt.yml ps --format json', {
       cwd: wtPath,
       encoding: 'utf-8',
     });
-    return JSON.parse(output);
+    // docker-compose ps --format json outputs one JSON per line
+    runningServices = output.trim().split('\n').filter(Boolean).map(line => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
   } catch {
-    return [];
+    // docker-compose ps failed, all services are stopped
   }
+
+  // Map defined services to their status
+  return definedServices.map(serviceName => {
+    const running = runningServices.find(s =>
+      s.Service === serviceName || s.Name?.includes(serviceName)
+    );
+
+    // Extract published ports from Publishers array
+    const ports = (running?.Publishers || [])
+      .filter(p => p.PublishedPort)
+      .map(p => ({
+        published: p.PublishedPort,
+        target: p.TargetPort,
+        protocol: p.Protocol || 'tcp',
+      }));
+
+    return {
+      name: serviceName,
+      state: running?.State || 'stopped',
+      status: running?.Status || 'Stopped',
+      health: running?.Health || null,
+      ports,
+    };
+  });
 }
+
+/**
+ * Start a docker-compose service
+ * @param {string} wtPath - Worktree directory path
+ * @param {string} serviceName - Service name to start
+ */
+export function startComposeService(wtPath, serviceName) {
+  if (!hasDockerServices(wtPath)) {
+    throw new Error('No docker-compose.wt.yml found');
+  }
+  // Validate service name
+  if (!/^[a-zA-Z0-9_-]+$/.test(serviceName)) {
+    throw new Error(`Invalid service name: "${serviceName}"`);
+  }
+  execSync(`docker-compose -f docker-compose.wt.yml up -d ${serviceName}`, {
+    cwd: wtPath,
+    stdio: 'inherit',
+  });
+}
+
+/**
+ * Stop a docker-compose service
+ * @param {string} wtPath - Worktree directory path
+ * @param {string} serviceName - Service name to stop
+ */
+export function stopComposeService(wtPath, serviceName) {
+  if (!hasDockerServices(wtPath)) {
+    throw new Error('No docker-compose.wt.yml found');
+  }
+  // Validate service name
+  if (!/^[a-zA-Z0-9_-]+$/.test(serviceName)) {
+    throw new Error(`Invalid service name: "${serviceName}"`);
+  }
+  execSync(`docker-compose -f docker-compose.wt.yml stop ${serviceName}`, {
+    cwd: wtPath,
+    stdio: 'inherit',
+  });
+}
+
+/**
+ * Start all docker-compose services
+ * @param {string} wtPath - Worktree directory path
+ */
+export function startAllComposeServices(wtPath) {
+  if (!hasDockerServices(wtPath)) {
+    throw new Error('No docker-compose.wt.yml found');
+  }
+  execSync('docker-compose -f docker-compose.wt.yml up -d', {
+    cwd: wtPath,
+    stdio: 'inherit',
+  });
+}
+
+/**
+ * Stop all docker-compose services
+ * @param {string} wtPath - Worktree directory path
+ */
+export function stopAllComposeServices(wtPath) {
+  if (!hasDockerServices(wtPath)) {
+    throw new Error('No docker-compose.wt.yml found');
+  }
+  execSync('docker-compose -f docker-compose.wt.yml stop', {
+    cwd: wtPath,
+    stdio: 'inherit',
+  });
+}
+

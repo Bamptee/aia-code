@@ -3,6 +3,7 @@ import { registerConfigRoutes } from './config.js';
 import { registerLogRoutes } from './logs.js';
 import { registerConstantsRoutes } from './constants.js';
 import { registerWorktrunkRoutes } from './worktrunk.js';
+import { registerTestQuickRoutes } from './test-quick.js';
 
 export function registerApiRoutes(router, root) {
   registerFeatureRoutes(router);
@@ -10,4 +11,5 @@ export function registerApiRoutes(router, root) {
   registerLogRoutes(router);
   registerConstantsRoutes(router);
   registerWorktrunkRoutes(router);
+  registerTestQuickRoutes(router);
 }

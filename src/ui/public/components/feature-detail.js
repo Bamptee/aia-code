@@ -99,6 +99,154 @@ const STATUS_CLASSES = {
 
 const STATUS_ICONS = { done: '\u2713', pending: '\u00b7', 'in-progress': '\u25b6', error: '\u2717' };
 
+const FEATURE_TYPES = ['feature', 'bug'];
+const DEFAULT_FEATURE_TYPE = 'feature';
+
+function TypeBadgeEditable({ name, currentType, onChanged }) {
+  const [showPopover, setShowPopover] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const type = currentType || DEFAULT_FEATURE_TYPE;
+  const isFeature = type !== 'bug';
+
+  const handleChange = async (newType) => {
+    if (newType === type) {
+      setShowPopover(false);
+      return;
+    }
+
+    // Confirm if changing to bug (will switch to quick flow)
+    if (newType === 'bug') {
+      const confirmed = window.confirm('Changing to Bug will set the flow to Quick. Continue?');
+      if (!confirmed) {
+        setShowPopover(false);
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      await api.patch(`/features/${name}/type`, { type: newType });
+      if (onChanged) onChanged(newType);
+    } catch (e) {
+      console.error('Failed to update type:', e);
+    }
+    setSaving(false);
+    setShowPopover(false);
+  };
+
+  return React.createElement('div', { className: 'relative' },
+    React.createElement('button', {
+      onClick: () => setShowPopover(!showPopover),
+      disabled: saving,
+      className: `text-xs px-2 py-1 rounded border transition-colors ${
+        isFeature ? 'type-feature' : 'type-bug'
+      } hover:brightness-110`,
+      title: 'Click to change type',
+    }, saving ? '...' : (isFeature ? '\u2728 Feature' : '\uD83D\uDC1B Bug')),
+
+    showPopover && React.createElement('div', {
+      className: 'absolute top-full left-0 mt-1 bg-aia-card border border-aia-border rounded shadow-lg z-10',
+    },
+      ...FEATURE_TYPES.map(t =>
+        React.createElement('button', {
+          key: t,
+          onClick: () => handleChange(t),
+          className: `block w-full px-3 py-1.5 text-xs text-left hover:bg-slate-700 ${
+            t === type ? 'text-aia-accent' : 'text-slate-300'
+          }`,
+        }, t === 'feature' ? '\u2728 Feature' : '\uD83D\uDC1B Bug')
+      )
+    ),
+  );
+}
+
+function ScopeEditor({ name, currentApps, availableApps, onChanged }) {
+  const [showDropdown, setShowDropdown] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const selectedApps = currentApps || [];
+
+  const enabledApps = availableApps.filter(a => a.enabled !== false);
+  const availableToAdd = enabledApps.filter(a => !selectedApps.includes(a.name));
+
+  const handleRemove = async (appName) => {
+    setSaving(true);
+    const newApps = selectedApps.filter(n => n !== appName);
+    try {
+      await api.patch(`/features/${name}/apps`, { apps: newApps });
+      if (onChanged) onChanged(newApps);
+    } catch (e) {
+      console.error('Failed to update apps:', e);
+    }
+    setSaving(false);
+  };
+
+  const handleAdd = async (appName) => {
+    setSaving(true);
+    const newApps = [...selectedApps, appName];
+    try {
+      await api.patch(`/features/${name}/apps`, { apps: newApps });
+      if (onChanged) onChanged(newApps);
+    } catch (e) {
+      console.error('Failed to update apps:', e);
+    }
+    setSaving(false);
+    setShowDropdown(false);
+  };
+
+  // Map app names to full objects for icons
+  const selectedAppObjects = selectedApps.map(appName => {
+    const found = availableApps.find(a => a.name === appName);
+    return found || { name: appName, icon: '\uD83D\uDCC1' };
+  });
+
+  if (enabledApps.length === 0) return null;
+
+  return React.createElement('div', { className: 'flex items-center gap-2 flex-wrap' },
+    React.createElement('span', { className: 'text-xs text-slate-500' }, 'Scope:'),
+
+    // Selected apps as chips with remove button
+    ...selectedAppObjects.map(app =>
+      React.createElement('span', {
+        key: app.name,
+        className: 'app-chip-selected flex items-center gap-1',
+      },
+        `${app.icon || '\uD83D\uDCC1'} ${app.name}`,
+        React.createElement('button', {
+          onClick: () => handleRemove(app.name),
+          disabled: saving,
+          className: 'text-slate-400 hover:text-red-400 ml-0.5',
+          title: 'Remove',
+        }, '\u00D7')
+      )
+    ),
+
+    // Add button with dropdown
+    availableToAdd.length > 0 && React.createElement('div', { className: 'relative' },
+      React.createElement('button', {
+        onClick: () => setShowDropdown(!showDropdown),
+        disabled: saving,
+        className: 'app-chip text-slate-400 hover:text-slate-200',
+      }, saving ? '...' : '+'),
+
+      showDropdown && React.createElement('div', {
+        className: 'absolute top-full left-0 mt-1 bg-aia-card border border-aia-border rounded shadow-lg z-10 min-w-32',
+      },
+        ...availableToAdd.map(app =>
+          React.createElement('button', {
+            key: app.name,
+            onClick: () => handleAdd(app.name),
+            className: 'block w-full px-3 py-1.5 text-xs text-left text-slate-300 hover:bg-slate-700',
+          }, `${app.icon || '\uD83D\uDCC1'} ${app.name}`)
+        )
+      ),
+    ),
+
+    selectedApps.length === 0 && React.createElement('span', {
+      className: 'text-xs text-slate-600 italic',
+    }, 'No scope defined'),
+  );
+}
+
 function StepPill({ step, status, active, onClick }) {
   return React.createElement('button', {
     onClick,
@@ -259,7 +407,7 @@ function ModelSelect({ model, onChange, disabled }) {
   );
 }
 
-function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
+function InitPanel({ name, featureType, onFlowSelected, onCancel, onEnriched }) {
   const [description, setDescription] = React.useState('');
   const [suggestion, setSuggestion] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
@@ -267,6 +415,8 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
   const [logs, setLogs] = React.useState([]);
   const [err, setErr] = React.useState(null);
   const [attachments, setAttachments] = React.useState([]);
+
+  const isBug = featureType === 'bug';
 
   const handleAttachmentUpload = (files) => {
     setAttachments(prev => [...prev, ...files]);
@@ -280,7 +430,7 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
     setLoading(true);
     setErr(null);
     setLogs([]);
-    setStatusMsg('Structuring your description...');
+    setStatusMsg(isBug ? 'Structuring your bug report...' : 'Structuring your description...');
 
     // Note: Attachments are already uploaded via AttachmentZone to /api/features/:name/attachments
     // Passing filenames here for potential future use in AI enrichment
@@ -293,10 +443,18 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
     });
 
     if (res.ok) {
-      setSuggestion(res.suggestion);
-      setStatusMsg('');
-      setAttachments([]); // Clear attachments after successful submission
-      if (onEnriched) onEnriched();
+      // For bugs, skip flow selection and go directly to quick flow
+      if (isBug) {
+        setStatusMsg('');
+        setAttachments([]);
+        if (onEnriched) onEnriched();
+        onFlowSelected('quick');
+      } else {
+        setSuggestion(res.suggestion);
+        setStatusMsg('');
+        setAttachments([]);
+        if (onEnriched) onEnriched();
+      }
     } else {
       setErr(res.error || 'Failed to enrich description');
     }
@@ -307,8 +465,10 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
     onFlowSelected(flow);
   };
 
-  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
-    React.createElement('h3', { className: 'text-sm font-semibold text-cyan-400' }, 'Describe your feature'),
+  return React.createElement('div', { className: `bg-aia-card border rounded p-4 space-y-4 ${isBug ? 'border-red-500/30' : 'border-aia-border'}` },
+    React.createElement('h3', { className: `text-sm font-semibold ${isBug ? 'text-red-400' : 'text-cyan-400'}` },
+      isBug ? '\uD83D\uDC1B Describe the bug & fix' : 'Describe your feature'
+    ),
 
     // Attachment zone (hidden when loading or has suggestion)
     !loading && !suggestion && React.createElement(AttachmentZone, {
@@ -322,9 +482,11 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
     !loading && !suggestion && React.createElement('textarea', {
       value: description,
       onChange: e => setDescription(e.target.value),
-      placeholder: 'Describe what you want to build...\n\nBe as detailed as needed. The AI will structure your description.',
+      placeholder: isBug
+        ? 'Describe the bug and how to fix it...\n\n- What is the current behavior?\n- What is the expected behavior?\n- How should it be fixed?'
+        : 'Describe what you want to build...\n\nBe as detailed as needed. The AI will structure your description.',
       rows: 8,
-      className: 'w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-aia-accent focus:outline-none resize-y max-h-96 overflow-auto',
+      className: `w-full bg-aia-card border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none resize-y max-h-96 overflow-auto ${isBug ? 'focus:border-red-400' : 'focus:border-aia-accent'}`,
     }),
 
     // Character count and buttons
@@ -338,16 +500,18 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
         React.createElement('button', {
           onClick: handleSubmit,
           disabled: !description.trim(),
-          className: 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-4 py-2 text-sm hover:bg-aia-accent/30 disabled:opacity-40',
-        }, 'Continue'),
+          className: isBug
+            ? 'bg-red-500/20 text-red-400 border border-red-500/30 rounded px-4 py-2 text-sm hover:bg-red-500/30 disabled:opacity-40'
+            : 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-4 py-2 text-sm hover:bg-aia-accent/30 disabled:opacity-40',
+        }, isBug ? 'Start Fix' : 'Continue'),
       ),
     ),
 
     // Loading state with logs
     loading && React.createElement('div', { className: 'space-y-3' },
       React.createElement('div', { className: 'flex items-center gap-2' },
-        React.createElement('div', { className: 'animate-spin w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full' }),
-        React.createElement('span', { className: 'text-sm text-cyan-400' }, statusMsg || 'Processing...'),
+        React.createElement('div', { className: `animate-spin w-4 h-4 border-2 ${isBug ? 'border-red-400' : 'border-cyan-400'} border-t-transparent rounded-full` }),
+        React.createElement('span', { className: `text-sm ${isBug ? 'text-red-400' : 'text-cyan-400'}` }, statusMsg || 'Processing...'),
       ),
       logs.length > 0 && React.createElement(LogViewer, { logs }),
     ),
@@ -355,8 +519,8 @@ function InitPanel({ name, onFlowSelected, onCancel, onEnriched }) {
     // Error
     err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
 
-    // Flow suggestion
-    suggestion && React.createElement('div', { className: 'space-y-3' },
+    // Flow suggestion (only for features, bugs go directly to quick flow)
+    !isBug && suggestion && React.createElement('div', { className: 'space-y-3' },
       React.createElement('div', { className: 'flex items-center gap-2' },
         React.createElement('span', { className: 'text-emerald-400' }, '\u2713'),
         React.createElement('span', { className: 'text-sm text-slate-300' }, 'Feature spec created in init.md'),
@@ -668,6 +832,7 @@ function RunPanel({ name, step, stepStatus, onDone }) {
 
 export function FeatureDetail({ name }) {
   const [feature, setFeature] = React.useState(null);
+  const [availableApps, setAvailableApps] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [activeFile, setActiveFile] = React.useState('init.md');
   const [activeStep, setActiveStep] = React.useState(null);
@@ -677,7 +842,11 @@ export function FeatureDetail({ name }) {
 
   async function load(checkInitPanel = true) {
     try {
-      const data = await api.get(`/features/${name}`);
+      const [data, appsData] = await Promise.all([
+        api.get(`/features/${name}`),
+        api.get('/apps'),
+      ]);
+      setAvailableApps(appsData);
       setFeature(data);
       const steps = data.steps || {};
 
@@ -691,7 +860,7 @@ export function FeatureDetail({ name }) {
         const allPending = Object.values(steps).every(s => s === 'pending');
         const persistedFlow = data.flow || selectedFlow;
 
-        if (allPending && !persistedFlow) {
+        if (allPending) {
           // Check if init.md has content (enriched)
           try {
             const initFile = await api.get(`/features/${name}/files/init.md`);
@@ -775,17 +944,36 @@ export function FeatureDetail({ name }) {
 
   const steps = feature.steps || {};
 
+  const handleTypeChanged = (newType) => {
+    setFeature(prev => ({ ...prev, type: newType }));
+    // If changed to bug, flow should switch to quick
+    if (newType === 'bug') {
+      setSelectedFlow('quick');
+    }
+    load(false);
+  };
+
+  const handleAppsChanged = (newApps) => {
+    setFeature(prev => ({ ...prev, apps: newApps }));
+  };
+
   return React.createElement('div', { className: 'space-y-6' },
     // Header
     React.createElement('div', { className: 'flex items-center gap-3' },
       React.createElement('a', { href: '#/', className: 'text-slate-500 hover:text-slate-300' }, '\u2190'),
       React.createElement('h1', { className: 'text-xl font-bold text-slate-100' }, name),
+      React.createElement(TypeBadgeEditable, {
+        name,
+        currentType: feature.type,
+        onChanged: handleTypeChanged,
+      }),
       feature.current_step && React.createElement('span', { className: 'text-xs bg-aia-accent/20 text-aia-accent px-2 py-0.5 rounded' }, feature.current_step),
     ),
 
     // Init panel (when no steps started)
     showInitPanel && React.createElement(InitPanel, {
       name,
+      featureType: feature.type || DEFAULT_FEATURE_TYPE,
       onFlowSelected: handleFlowSelected,
       onCancel: () => setShowInitPanel(false),
       onEnriched: () => {
@@ -799,6 +987,14 @@ export function FeatureDetail({ name }) {
       name,
       currentFlow: selectedFlow || 'full',
       onFlowChanged: handleFlowChanged,
+    }),
+
+    // Scope editor (only show if not showing init panel and apps are available)
+    !showInitPanel && availableApps.length > 0 && React.createElement(ScopeEditor, {
+      name,
+      currentApps: feature.apps,
+      availableApps,
+      onChanged: handleAppsChanged,
     }),
 
     // Worktrunk panel

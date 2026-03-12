@@ -2,10 +2,37 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
 import { AIA_DIR } from '../../constants.js';
-import { loadGlobalConfig, saveGlobalConfig, getGlobalConfigPath } from '../../services/config.js';
+import { loadGlobalConfig, saveGlobalConfig, getGlobalConfigPath, getApps, setApps, toggleApp } from '../../services/config.js';
+import { scanApps } from '../../services/apps.js';
 import { json, error } from '../router.js';
 
 export function registerConfigRoutes(router) {
+  // GET /api/apps - List configured apps
+  router.get('/api/apps', async (req, res, { root }) => {
+    const apps = await getApps(root);
+    json(res, apps);
+  });
+
+  // POST /api/apps/scan - Re-scan and update apps
+  router.post('/api/apps/scan', async (req, res, { root }) => {
+    const scanned = await scanApps(root);
+    const existing = await getApps(root);
+    // Merge: keep enabled status from existing apps
+    const merged = scanned.map(s => {
+      const ex = existing.find(e => e.path === s.path);
+      return ex ? { ...s, enabled: ex.enabled } : s;
+    });
+    await setApps(merged, root);
+    json(res, merged);
+  });
+
+  // PATCH /api/apps/:name - Toggle app enabled status
+  router.patch('/api/apps/:name', async (req, res, { params, root, parseBody }) => {
+    const { enabled } = await parseBody();
+    await toggleApp(params.name, enabled, root);
+    json(res, { ok: true });
+  });
+
   // Get project config
   router.get('/api/config', async (req, res, { root }) => {
     const configPath = path.join(root, AIA_DIR, 'config.yaml');

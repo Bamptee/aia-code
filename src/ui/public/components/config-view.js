@@ -245,6 +245,98 @@ function ProjectSettings({ onSaved }) {
   );
 }
 
+function ProjectScope({ onSaved }) {
+  const [apps, setApps] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [scanning, setScanning] = React.useState(false);
+  const [dirty, setDirty] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+
+  React.useEffect(() => {
+    api.get('/apps').then(setApps).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const handleToggle = async (appName, enabled) => {
+    setDirty(true);
+    setMsg(null);
+    try {
+      await api.patch(`/apps/${appName}`, { enabled });
+      setApps(prev => prev.map(a => a.name === appName ? { ...a, enabled } : a));
+      setDirty(false);
+      setMsg({ type: 'ok', text: 'Saved.' });
+      if (onSaved) onSaved();
+    } catch (e) {
+      setMsg({ type: 'err', text: e.message });
+    }
+  };
+
+  const handleScan = async () => {
+    setScanning(true);
+    setMsg(null);
+    try {
+      const scanned = await api.post('/apps/scan');
+      setApps(scanned);
+      setMsg({ type: 'ok', text: `Found ${scanned.length} app(s).` });
+      if (onSaved) onSaved();
+    } catch (e) {
+      setMsg({ type: 'err', text: e.message });
+    }
+    setScanning(false);
+  };
+
+  if (loading) return React.createElement('p', { className: 'text-slate-500 text-sm' }, 'Loading...');
+
+  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
+    React.createElement('div', { className: 'flex items-center justify-between' },
+      React.createElement('h3', { className: 'text-sm font-semibold text-amber-400' }, 'Project Scope'),
+      React.createElement('div', { className: 'flex gap-2 items-center' },
+        msg && React.createElement('span', { className: `text-xs ${msg.type === 'ok' ? 'text-emerald-400' : 'text-red-400'}` }, msg.text),
+        React.createElement('button', {
+          onClick: handleScan,
+          disabled: scanning,
+          className: 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-3 py-1 text-xs hover:bg-aia-accent/30 disabled:opacity-40',
+        }, scanning ? 'Scanning...' : 'Re-scan Project'),
+      ),
+    ),
+
+    apps.length === 0
+      ? React.createElement('p', { className: 'text-slate-500 text-sm' },
+          'No apps detected. Click "Re-scan Project" to detect apps and submodules.'
+        )
+      : React.createElement('div', { className: 'space-y-2' },
+          ...apps.map(app =>
+            React.createElement('div', {
+              key: app.name,
+              className: 'flex items-center justify-between py-2 border-b border-slate-700 last:border-0',
+            },
+              React.createElement('div', { className: 'flex items-center gap-2' },
+                React.createElement('span', { className: 'text-lg' }, app.icon || '\uD83D\uDCC1'),
+                React.createElement('div', null,
+                  React.createElement('span', { className: 'text-sm text-slate-200' }, app.name),
+                  React.createElement('p', { className: 'text-xs text-slate-500' }, app.path),
+                ),
+              ),
+              React.createElement('label', { className: 'relative inline-flex items-center cursor-pointer' },
+                React.createElement('input', {
+                  type: 'checkbox',
+                  checked: app.enabled !== false,
+                  onChange: (e) => handleToggle(app.name, e.target.checked),
+                  className: 'sr-only peer',
+                }),
+                React.createElement('div', {
+                  className: 'w-9 h-5 bg-slate-700 rounded-full peer peer-checked:bg-aia-accent peer-checked:after:translate-x-full after:content-[\'\'] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all',
+                }),
+              ),
+            )
+          )
+        ),
+
+    React.createElement('p', { className: 'text-xs text-slate-500' },
+      'Enable/disable apps to control feature scope options. Disabled apps won\'t appear in feature scope selection.'
+    ),
+  );
+}
+
 export function ConfigView() {
   const [contextFiles, setContextFiles] = React.useState([]);
   const [knowledgeCategories, setKnowledgeCategories] = React.useState([]);
@@ -292,6 +384,9 @@ export function ConfigView() {
       React.createElement(UserPreferences),
       React.createElement(ProjectSettings, { onSaved: handlePreferencesSaved }),
     ),
+
+    // Project Scope
+    React.createElement(ProjectScope, { onSaved: handlePreferencesSaved }),
 
     // config.yaml (advanced)
     React.createElement(YamlEditor, {

@@ -35,6 +35,19 @@
     .step-in-progress { @apply bg-amber-500/20 text-amber-400 border-amber-500/30; }
     .step-error { @apply bg-red-500/20 text-red-400 border-red-500/30; }
     textarea { tab-size: 2; }
+
+    /* Type badges */
+    .type-feature { @apply bg-emerald-500/20 text-emerald-400 border-emerald-500/30; }
+    .type-bug { @apply bg-red-500/20 text-red-400 border-red-500/30; }
+
+    /* App chips */
+    .app-chip { @apply bg-slate-700/50 text-slate-300 border border-slate-600 px-2 py-0.5 text-xs rounded-full; }
+    .app-chip-selected { @apply bg-aia-accent/20 text-aia-accent border border-aia-accent/30 px-2 py-0.5 text-xs rounded-full; }
+
+    /* Modal animations */
+    .modal-step-enter { opacity: 0; transform: translateX(20px); }
+    .modal-step-active { opacity: 1; transform: translateX(0); transition: all 0.2s ease-out; }
+    .modal-step-exit { opacity: 0; transform: translateX(-20px); }
   </style>
 </head>
 <body class="bg-aia-bg text-slate-200 min-h-screen">

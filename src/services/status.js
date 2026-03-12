@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
-import { AIA_DIR, FEATURE_STEPS, STEP_STATUS } from '../constants.js';
+import { AIA_DIR, FEATURE_STEPS, STEP_STATUS, FEATURE_TYPES } from '../constants.js';
 
 function statusPath(feature, root) {
   return path.join(root, AIA_DIR, 'features', feature, 'status.yaml');
@@ -78,4 +78,39 @@ export async function resetStep(feature, step, root = process.cwd()) {
   await fs.writeFile(statusPath(feature, root), content, 'utf-8');
 
   // Keep the existing output — it will be fed back as context on re-run
+}
+
+export async function updateType(feature, type, root = process.cwd()) {
+  // Validate type
+  if (!FEATURE_TYPES.includes(type)) {
+    throw new Error(`Invalid type "${type}". Valid types: ${FEATURE_TYPES.join(', ')}`);
+  }
+
+  const status = await loadStatus(feature, root);
+  status.type = type;
+
+  // Bug type forces quick flow, but only if no steps have been completed
+  if (type === 'bug') {
+    const allPending = Object.values(status.steps).every(s => s === STEP_STATUS.PENDING);
+    if (allPending) {
+      status.flow = 'quick';
+      status.current_step = 'dev-plan';
+    }
+  }
+
+  const content = yaml.stringify(status);
+  await fs.writeFile(statusPath(feature, root), content, 'utf-8');
+}
+
+export async function updateApps(feature, apps, root = process.cwd()) {
+  // Validate apps - must be an array of strings
+  if (!Array.isArray(apps)) {
+    throw new Error('apps must be an array');
+  }
+  const validApps = apps.filter(a => typeof a === 'string' && a.trim()).map(a => a.trim());
+
+  const status = await loadStatus(feature, root);
+  status.apps = validApps;
+  const content = yaml.stringify(status);
+  await fs.writeFile(statusPath(feature, root), content, 'utf-8');
 }

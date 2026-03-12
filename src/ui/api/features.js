@@ -2,7 +2,8 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import Busboy from 'busboy';
 import { AIA_DIR } from '../../constants.js';
-import { loadStatus, updateStepStatus, resetStep, updateFlowType } from '../../services/status.js';
+import { loadStatus, updateStepStatus, resetStep, updateFlowType, updateType, updateApps } from '../../services/status.js';
+import { FEATURE_TYPES } from '../../constants.js';
 import { createFeature, validateFeatureName } from '../../services/feature.js';
 import { runStep } from '../../services/runner.js';
 import { runQuick } from '../../services/quick.js';
@@ -107,9 +108,10 @@ export function registerFeatureRoutes(router) {
   router.post('/api/features', async (req, res, { root, parseBody }) => {
     const body = await parseBody();
     try {
-      validateFeatureName(body.name);
-      await createFeature(body.name, root);
-      json(res, { ok: true, name: body.name }, 201);
+      const { name, type = 'feature', apps = [] } = body;
+      validateFeatureName(name);
+      await createFeature(name, root, { type, apps });
+      json(res, { ok: true, name, type, apps }, 201);
     } catch (err) {
       error(res, err.message, 400);
     }
@@ -462,6 +464,46 @@ IMPORTANT:
     try {
       await updateFlowType(params.name, flow, root);
       json(res, { ok: true, flow });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Update feature type (feature/bug)
+  router.patch('/api/features/:name/type', async (req, res, { params, root, parseBody }) => {
+    const body = await parseBody();
+    const { type } = body;
+
+    if (!type || !FEATURE_TYPES.includes(type)) {
+      return error(res, `Invalid type. Must be one of: ${FEATURE_TYPES.join(', ')}`, 400);
+    }
+
+    try {
+      await updateType(params.name, type, root);
+      json(res, { ok: true, type });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Update feature apps/scope
+  router.patch('/api/features/:name/apps', async (req, res, { params, root, parseBody }) => {
+    const body = await parseBody();
+    const { apps } = body;
+
+    if (!Array.isArray(apps)) {
+      return error(res, 'apps must be an array', 400);
+    }
+
+    // Validate all elements are non-empty strings
+    const invalidApps = apps.filter(a => typeof a !== 'string' || !a.trim());
+    if (invalidApps.length > 0) {
+      return error(res, 'apps must contain only non-empty strings', 400);
+    }
+
+    try {
+      await updateApps(params.name, apps, root);
+      json(res, { ok: true, apps });
     } catch (err) {
       error(res, err.message, 400);
     }

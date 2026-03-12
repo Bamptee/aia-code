@@ -2,10 +2,11 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
 import { AIA_DIR } from '../../constants.js';
+import { loadGlobalConfig, saveGlobalConfig, getGlobalConfigPath } from '../../services/config.js';
 import { json, error } from '../router.js';
 
 export function registerConfigRoutes(router) {
-  // Get config
+  // Get project config
   router.get('/api/config', async (req, res, { root }) => {
     const configPath = path.join(root, AIA_DIR, 'config.yaml');
     if (!(await fs.pathExists(configPath))) {
@@ -15,12 +16,64 @@ export function registerConfigRoutes(router) {
     json(res, { content, parsed: yaml.parse(content) });
   });
 
-  // Save config
+  // Save project config
   router.put('/api/config', async (req, res, { root, parseBody }) => {
     const body = await parseBody();
     const configPath = path.join(root, AIA_DIR, 'config.yaml');
     await fs.writeFile(configPath, body.content, 'utf-8');
     json(res, { ok: true });
+  });
+
+  // Get global user config
+  router.get('/api/user-config', async (req, res) => {
+    try {
+      const config = await loadGlobalConfig();
+      const configPath = getGlobalConfigPath();
+      json(res, { parsed: config, path: configPath });
+    } catch (e) {
+      error(res, e.message, 500);
+    }
+  });
+
+  // Update global user preferences
+  router.patch('/api/user-config', async (req, res, { parseBody }) => {
+    const body = await parseBody();
+
+    try {
+      const config = await loadGlobalConfig();
+
+      // Update only user preference fields
+      if (body.user_name !== undefined) config.user_name = body.user_name;
+      if (body.communication_language !== undefined) config.communication_language = body.communication_language;
+
+      await saveGlobalConfig(config);
+
+      json(res, { ok: true, config });
+    } catch (e) {
+      error(res, e.message, 500);
+    }
+  });
+
+  // Update project preferences (partial update)
+  router.patch('/api/config/project', async (req, res, { root, parseBody }) => {
+    const body = await parseBody();
+    const configPath = path.join(root, AIA_DIR, 'config.yaml');
+
+    if (!(await fs.pathExists(configPath))) {
+      return error(res, 'config.yaml not found', 404);
+    }
+
+    const content = await fs.readFile(configPath, 'utf-8');
+    const config = yaml.parse(content);
+
+    // Update project preference fields
+    if (body.projectName !== undefined) config.projectName = body.projectName;
+    if (body.document_output_language !== undefined) config.document_output_language = body.document_output_language;
+
+    const newContent = yaml.stringify(config);
+    await fs.writeFile(configPath, newContent, 'utf-8');
+
+    json(res, { ok: true, config });
   });
 
   // List context files

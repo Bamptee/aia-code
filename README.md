@@ -162,7 +162,58 @@ Required templates (one per step you want to run):
 .aia/prompts/review.md
 ```
 
-### 6. Configure models
+### 6. Configuration (user + project)
+
+AIA uses two configuration files:
+
+| File | Scope | Content |
+|------|-------|---------|
+| `~/.aia/config.yaml` | **User (global)** | user_name, communication_language |
+| `.aia/config.yaml` | **Project** | projectName, document_output_language, models, knowledge_default, context_files |
+
+When you run AIA, both configs are merged (user preferences + project config).
+
+#### User config (`~/.aia/config.yaml`)
+
+Your personal preferences, created automatically on first use:
+
+```yaml
+# ~/.aia/config.yaml
+user_name: John Doe
+communication_language: French
+```
+
+- **user_name**: Your name (shown to the AI for context)
+- **communication_language**: Language for AI responses and questions
+
+These are stored outside the project, so they're never committed to git.
+
+#### Project config (`.aia/config.yaml`)
+
+Shared project settings:
+
+```yaml
+# .aia/config.yaml
+projectName: My Project
+document_output_language: English
+models:
+  # ...
+```
+
+- **document_output_language**: Language for generated documents (specs, plans, etc.) - shared by the whole team
+
+#### .gitignore recommendation
+
+User preferences are stored in `~/.aia/config.yaml` (outside the project), so nothing extra is needed in `.gitignore`.
+
+If you want to ignore local project overrides, add to your `.gitignore`:
+
+```gitignore
+# AIA - ignore local overrides
+.aia/local.yaml
+```
+
+### 7. Configure models (project config)
 
 In `config.yaml`, assign models to steps with probability weights:
 
@@ -210,7 +261,7 @@ Use aliases to delegate to the CLI's default model:
 | `gpt-*`, `o[0-9]*` | `codex exec` | `gpt-4.1`, `o3`, `o4-mini` |
 | `gemini-*` | `gemini` | `gemini-2.5-pro`, `gemini-2.5-flash` |
 
-### 7. Run the feature pipeline
+### 8. Run the feature pipeline
 
 #### Step by step
 
@@ -315,7 +366,7 @@ The `init.md` file serves as the sole input context for the dev-plan step. Verbo
 aia quick add-rate-limit "Add rate limiting to the /api/upload endpoint" -v
 ```
 
-### 8. Print mode vs Agent mode
+### 9. Print mode vs Agent mode
 
 By default, AIA runs in **print mode** -- the AI generates text (specs, plans, reviews) saved to `.md` files.
 
@@ -341,7 +392,7 @@ The `implement` step always runs in agent mode automatically.
 
 Idle timeout resets every time the CLI produces output, so long-running steps that stream continuously won't time out.
 
-### 9. Scan your repo
+### 10. Scan your repo
 
 ```bash
 aia repo scan

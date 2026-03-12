@@ -24,7 +24,13 @@ function FeatureCard({ feature }) {
     className: 'block bg-aia-card border border-aia-border rounded-lg p-4 hover:border-aia-accent/50 transition-colors',
   },
     React.createElement('div', { className: 'flex items-center justify-between mb-3' },
-      React.createElement('h3', { className: 'text-slate-100 font-semibold' }, feature.name),
+      React.createElement('div', { className: 'flex items-center gap-2' },
+        React.createElement('h3', { className: 'text-slate-100 font-semibold' }, feature.name),
+        feature.hasWorktree && React.createElement('span', {
+          className: 'bg-orange-500/20 text-orange-400 text-xs px-1.5 py-0.5 rounded',
+          title: 'Git worktree active',
+        }, 'wt'),
+      ),
       React.createElement('span', { className: 'text-xs text-slate-500' },
         `${doneCount}/${totalCount} steps`
       ),
@@ -167,9 +173,40 @@ function QuickTicketForm({ onDone }) {
   );
 }
 
+function FilterTabs({ filter, onChange, counts }) {
+  const tabs = [
+    { key: 'all', label: 'All', count: counts.all },
+    { key: 'with-wt', label: 'With Worktree', count: counts.withWt },
+    { key: 'without-wt', label: 'Without Worktree', count: counts.withoutWt },
+  ];
+
+  return React.createElement('div', { className: 'flex gap-1 border-b border-aia-border' },
+    ...tabs.map(tab =>
+      React.createElement('button', {
+        key: tab.key,
+        onClick: () => onChange(tab.key),
+        className: `px-3 py-1.5 text-xs border-b-2 transition-colors flex items-center gap-1.5 ${
+          filter === tab.key
+            ? 'border-aia-accent text-aia-accent'
+            : 'border-transparent text-slate-500 hover:text-slate-300'
+        }`,
+      },
+        tab.label,
+        tab.key === 'with-wt' && tab.count > 0 && React.createElement('span', {
+          className: 'bg-orange-500/20 text-orange-400 text-xs px-1.5 py-0.5 rounded',
+        }, tab.count),
+        tab.key !== 'with-wt' && React.createElement('span', {
+          className: 'text-slate-600',
+        }, `(${tab.count})`),
+      )
+    )
+  );
+}
+
 export function Dashboard() {
   const [features, setFeatures] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [filter, setFilter] = React.useState('all');
 
   async function load() {
     try {
@@ -181,6 +218,20 @@ export function Dashboard() {
 
   React.useEffect(() => { load(); }, []);
 
+  // Filter features
+  const filteredFeatures = features.filter(f => {
+    if (filter === 'with-wt') return f.hasWorktree;
+    if (filter === 'without-wt') return !f.hasWorktree;
+    return true;
+  });
+
+  // Counts for tabs
+  const counts = {
+    all: features.length,
+    withWt: features.filter(f => f.hasWorktree).length,
+    withoutWt: features.filter(f => !f.hasWorktree).length,
+  };
+
   return React.createElement('div', { className: 'space-y-6' },
     React.createElement('div', { className: 'flex items-center justify-between' },
       React.createElement('h1', { className: 'text-xl font-bold text-slate-100' }, 'Features'),
@@ -190,12 +241,21 @@ export function Dashboard() {
     // Quick ticket
     React.createElement(QuickTicketForm, { onDone: load }),
 
+    // Filter tabs
+    !loading && features.length > 0 && React.createElement(FilterTabs, {
+      filter,
+      onChange: setFilter,
+      counts,
+    }),
+
     loading
       ? React.createElement('p', { className: 'text-slate-500' }, 'Loading...')
       : features.length === 0
         ? React.createElement('p', { className: 'text-slate-500' }, 'No features yet. Create one to get started.')
-        : React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' },
-            ...features.map(f => React.createElement(FeatureCard, { key: f.name, feature: f }))
-          )
+        : filteredFeatures.length === 0
+          ? React.createElement('p', { className: 'text-slate-500' }, 'No features match this filter.')
+          : React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' },
+              ...filteredFeatures.map(f => React.createElement(FeatureCard, { key: f.name, feature: f }))
+            )
   );
 }

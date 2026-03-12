@@ -29,6 +29,28 @@ export const api = {
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
     return res.json();
   },
+  async patch(path, body = {}) {
+    const res = await fetch(`/api${path}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    return res.json();
+  },
+  async delete(path) {
+    const res = await fetch(`/api${path}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    return res.json();
+  },
+  async upload(path, formData) {
+    const res = await fetch(`/api${path}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    return res.json();
+  },
 };
 
 // --- SSE stream helper ---
@@ -56,7 +78,7 @@ export async function streamPost(path, body, { onLog, onStatus }) {
     let eventType = null;
     for (const line of lines) {
       if (line.startsWith('event: ')) {
-        eventType = line.slice(7);
+        eventType = line.slice(7).trim();
       } else if (line.startsWith('data: ') && eventType) {
         try {
           const data = JSON.parse(line.slice(6));

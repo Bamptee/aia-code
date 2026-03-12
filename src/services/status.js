@@ -46,6 +46,20 @@ export async function updateStepStatus(feature, step, value, root = process.cwd(
   await fs.writeFile(statusPath(feature, root), content, 'utf-8');
 }
 
+export async function updateFlowType(feature, flowType, root = process.cwd()) {
+  const status = await loadStatus(feature, root);
+  status.flow = flowType; // 'quick' or 'full'
+
+  // Set current_step based on flow type if not already started
+  const allPending = Object.values(status.steps).every(s => s === STEP_STATUS.PENDING);
+  if (allPending) {
+    status.current_step = flowType === 'quick' ? 'dev-plan' : 'brief';
+  }
+
+  const content = yaml.stringify(status);
+  await fs.writeFile(statusPath(feature, root), content, 'utf-8');
+}
+
 export async function resetStep(feature, step, root = process.cwd()) {
   if (!FEATURE_STEPS.includes(step)) {
     throw new Error(`Unknown step "${step}". Valid steps: ${FEATURE_STEPS.join(', ')}`);

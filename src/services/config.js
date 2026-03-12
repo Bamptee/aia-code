@@ -1,10 +1,17 @@
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'fs-extra';
 import yaml from 'yaml';
 import { AIA_DIR } from '../constants.js';
 
-const DEFAULT_CONFIG = {
+// Global user config directory
+const GLOBAL_AIA_DIR = path.join(os.homedir(), '.aia');
+const GLOBAL_CONFIG_PATH = path.join(GLOBAL_AIA_DIR, 'config.yaml');
+
+// Default config for PROJECT (.aia/config.yaml)
+const DEFAULT_PROJECT_CONFIG = {
   projectName: 'My Project',
+  document_output_language: 'English',
   models: {
     brief: [
       { model: 'claude-default', weight: 1 },
@@ -42,6 +49,12 @@ const DEFAULT_CONFIG = {
   ],
 };
 
+// Default config for USER (~/.aia/config.yaml)
+const DEFAULT_USER_CONFIG = {
+  user_name: '',
+  communication_language: 'English',
+};
+
 export async function writeDefaultConfig(root = process.cwd()) {
   const configPath = path.join(root, AIA_DIR, 'config.yaml');
 
@@ -49,6 +62,44 @@ export async function writeDefaultConfig(root = process.cwd()) {
     return;
   }
 
-  const content = yaml.stringify(DEFAULT_CONFIG);
+  const content = yaml.stringify(DEFAULT_PROJECT_CONFIG);
   await fs.writeFile(configPath, content, 'utf-8');
+}
+
+export async function ensureGlobalConfig() {
+  await fs.ensureDir(GLOBAL_AIA_DIR);
+
+  if (!(await fs.pathExists(GLOBAL_CONFIG_PATH))) {
+    const content = yaml.stringify(DEFAULT_USER_CONFIG);
+    await fs.writeFile(GLOBAL_CONFIG_PATH, content, 'utf-8');
+  }
+}
+
+export async function loadGlobalConfig() {
+  await ensureGlobalConfig();
+
+  const raw = await fs.readFile(GLOBAL_CONFIG_PATH, 'utf-8');
+  return yaml.parse(raw) || {};
+}
+
+export async function saveGlobalConfig(config) {
+  await fs.ensureDir(GLOBAL_AIA_DIR);
+  const content = yaml.stringify(config);
+  await fs.writeFile(GLOBAL_CONFIG_PATH, content, 'utf-8');
+}
+
+export async function isGlobalConfigured() {
+  const config = await loadGlobalConfig();
+  return config && config.user_name && config.user_name.trim() !== '';
+}
+
+export async function updateGlobalConfig(updates) {
+  const existing = await loadGlobalConfig();
+  const merged = { ...existing, ...updates };
+  await saveGlobalConfig(merged);
+  return merged;
+}
+
+export function getGlobalConfigPath() {
+  return GLOBAL_CONFIG_PATH;
 }

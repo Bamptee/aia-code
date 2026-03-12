@@ -90,10 +90,16 @@ function sortFeatures(features, field, order) {
 
 /**
  * Check if a feature is completed (all relevant steps are done)
- * @param {Object} feature - Feature object with steps
+ * Uses API-provided isCompleted field if available, otherwise calculates locally
+ * @param {Object} feature - Feature object with steps or isCompleted
  * @returns {boolean}
  */
 function isFeatureCompleted(feature) {
+  // Use API-provided value if available (from minimal mode)
+  if (typeof feature.isCompleted === 'boolean') {
+    return feature.isCompleted;
+  }
+  // Fallback: calculate from steps (for lazy-loaded full data)
   const steps = feature.steps || {};
   const isQuickFlow = feature.flow === 'quick';
   const relevantSteps = isQuickFlow

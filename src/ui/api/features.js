@@ -1,9 +1,25 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import Busboy from 'busboy';
-import { AIA_DIR, DELETION_FILTER } from '../../constants.js';
+import { AIA_DIR, DELETION_FILTER, QUICK_STEPS } from '../../constants.js';
 import { loadStatus, updateStepStatus, resetStep, updateFlowType, updateType, updateApps, softDeleteFeature, restoreFeature, isFeatureDeleted } from '../../services/status.js';
 import { FEATURE_TYPES } from '../../constants.js';
+
+/**
+ * Check if a feature is completed (all relevant steps are done)
+ * @param {Object} status - Feature status object with steps and flow
+ * @returns {boolean}
+ */
+function isFeatureCompleted(status) {
+  const steps = status.steps || {};
+  const isQuickFlow = status.flow === 'quick';
+  const relevantSteps = isQuickFlow
+    ? Object.entries(steps).filter(([k]) => QUICK_STEPS.includes(k))
+    : Object.entries(steps);
+
+  if (relevantSteps.length === 0) return false;
+  return relevantSteps.every(([_, s]) => s === 'done');
+}
 import { createFeature, validateFeatureName } from '../../services/feature.js';
 import { runStep } from '../../services/runner.js';
 import { runQuick } from '../../services/quick.js';
@@ -32,19 +48,6 @@ function sseSend(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   // Force flush for SSE streaming
   if (res.flush) res.flush();
-}
-
-// F6: Extracted validation helpers to avoid code duplication
-function validateHistory(rawHistory) {
-  return Array.isArray(rawHistory)
-    ? rawHistory
-        .filter(msg => msg && typeof msg === 'object' && typeof msg.content === 'string')
-        .map(msg => ({
-          role: msg.role === 'agent' ? 'agent' : 'user',
-          content: String(msg.content).slice(0, 50000),
-        }))
-        .slice(-20)
-    : [];
 }
 
 function validateAttachments(rawAttachments) {
@@ -89,8 +92,9 @@ export function registerFeatureRoutes(router) {
 
           if (minimal) {
             // Minimal mode: return basic info + essential computed fields for fast initial render
-            // Include hasWorktree since it's needed for filtering and is a fast check
+            // Include hasWorktree and isCompleted since they're needed for filtering
             const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+            const completed = isFeatureCompleted(status);
             features.push({
               name: entry.name,
               type: status.type,
@@ -99,12 +103,14 @@ export function registerFeatureRoutes(router) {
               deletedAt: status.deletedAt,
               isDeleted: deleted,
               hasWorktree: hasWt,
+              isCompleted: completed,
             });
           } else {
             // Full mode: return all data including computed states
             const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
             const running = isRunning(entry.name);
-            features.push({ name: entry.name, ...status, hasWorktree: hasWt, isDeleted: deleted, agentRunning: running });
+            const completed = isFeatureCompleted(status);
+            features.push({ name: entry.name, ...status, hasWorktree: hasWt, isDeleted: deleted, agentRunning: running, isCompleted: completed });
           }
         } catch {
           features.push({ name: entry.name, error: true, hasWorktree: false, isDeleted: false, agentRunning: false });
@@ -198,12 +204,10 @@ export function registerFeatureRoutes(router) {
     };
 
     try {
-      const validatedHistory = validateHistory(body.history || []);
       const validatedAttachments = validateAttachments(body.attachments || []);
 
       const output = await runStep(params.step, params.name, {
         description: body.description,
-        history: validatedHistory,
         attachments: validatedAttachments,
         model: body.model || undefined,
         verbose: body.verbose !== undefined ? body.verbose : true,
@@ -255,12 +259,10 @@ export function registerFeatureRoutes(router) {
         try { sseSend(res, 'log', { type, text }); } catch {}
       };
 
-      const validatedHistory = validateHistory(body.history || []);
       const validatedAttachments = validateAttachments(body.attachments || []);
 
       await runStep(params.step, params.name, {
         instructions: body.instructions,
-        history: validatedHistory,
         attachments: validatedAttachments,
         model: body.model || undefined,
         verbose: body.verbose !== undefined ? body.verbose : true,

@@ -1,6 +1,6 @@
 import { runCli } from './cli-runner.js';
 
-export async function generate(prompt, model, { verbose = false, apply = false, onData } = {}) {
+export async function generate(prompt, model, { verbose = false, apply = false, onData, cwd } = {}) {
   const args = ['exec'];
   if (model) {
     args.push('-c', `model="${model}"`);
@@ -10,5 +10,6 @@ export async function generate(prompt, model, { verbose = false, apply = false, 
   }
   args.push('-');
 
-  return runCli('codex', args, { stdin: prompt, verbose: verbose || apply, apply, onData });
+  // Note: Codex CLI does not support stream-json output format
+  return runCli('codex', args, { stdin: prompt, verbose: verbose || apply, apply, onData, cwd });
 }

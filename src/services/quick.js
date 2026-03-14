@@ -1,12 +1,14 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
-import { AIA_DIR, FEATURE_STEPS, QUICK_STEPS, STEP_STATUS } from '../constants.js';
-import { createFeature, validateFeatureName } from './feature.js';
+import { FEATURE_STEPS, QUICK_STEPS, STEP_STATUS } from '../constants.js';
+import { createFeature, validateFeatureName, getStoryDir, getStoriesDir } from './feature.js';
 import { runStep } from './runner.js';
+import { getStoryDirPath } from './status.js';
 
 export async function skipEarlySteps(feature, root) {
-  const statusFile = path.join(root, AIA_DIR, 'features', feature, 'status.yaml');
+  const storyDir = await getStoryDirPath(feature, root);
+  const statusFile = path.join(storyDir, 'status.yaml');
   const raw = await fs.readFile(statusFile, 'utf-8');
   const status = yaml.parse(raw);
 
@@ -23,8 +25,9 @@ export async function skipEarlySteps(feature, root) {
 export async function runQuick(name, { description, verbose = false, apply = false, root = process.cwd(), onData } = {}) {
   validateFeatureName(name);
 
-  const featureDir = path.join(root, AIA_DIR, 'features', name);
-  const created = !(await fs.pathExists(featureDir));
+  // Check both stories and legacy features directories
+  const existingDir = await getStoryDir(name, root);
+  const created = !existingDir;
 
   if (created) {
     await createFeature(name, root);

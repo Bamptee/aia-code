@@ -11,6 +11,7 @@ AIA structures your feature development into steps (brief, spec, tech-spec, dev-
 - [Commands](#commands)
 - [Integrate into an existing project](#integrate-into-an-existing-project)
 - [Web UI](#web-ui)
+- [Epic & Product Management](#epic--product-management)
 - [Feature workflow](#feature-workflow)
 - [Prompt assembly](#prompt-assembly)
 - [Project structure](#project-structure)
@@ -443,6 +444,173 @@ The UI includes a full terminal emulator (xterm.js + node-pty). Open a shell dir
 ### Config editor
 
 Edit your `.aia/config.yaml` directly in the UI with syntax highlighting and validation.
+
+## Epic & Product Management
+
+AIA includes a complete product management system for organizing work into Epics and Stories, with QA workflows and roadmap planning.
+
+### Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Epic** | Large initiative grouping multiple stories (e.g., "User Authentication", "Payment System") |
+| **Story** | Individual work item (feature or bug) with a defined workflow |
+| **Space** | Workflow phase: `experimentation` (idea validation) or `development` (implementation) |
+| **QA** | Approval workflow for stories in testing status |
+| **Roadmap** | Visual planning of Epics by time period (weekly, monthly, quarterly) |
+
+### CLI Commands
+
+```bash
+# Epic management
+aia epic list                           # List all epics
+aia epic create "Epic Name"             # Create a new epic
+aia epic show <epic-id>                 # Show epic details
+aia epic update <epic-id> --status active   # Update epic status
+
+# Story management
+aia story list                          # List all stories
+aia story create <epic-id> "Story Title" --type feature   # Create story
+aia story show <story-id>               # Show story details
+aia story promote <story-id>            # Move from experimentation to development
+aia story move <story-id> <target-epic-id>  # Move to different epic
+
+# QA workflow
+aia qa queue                            # List stories in testing
+aia qa approve <story-id>               # Approve story (moves to done)
+aia qa reject <story-id> "Reason"       # Reject with reason (creates linked bug)
+
+# Roadmap
+aia roadmap show                        # Show roadmap
+aia roadmap assign <epic-id> 2026-Q2    # Assign epic to period
+aia roadmap stats                       # Show planning statistics
+
+# System
+aia system diagnose                     # Check system health
+aia system migrate                      # Run data migrations
+```
+
+### Web UI
+
+The Epic system is fully integrated into the Web UI with dedicated views:
+
+#### Epic Dashboard (`#/epics`)
+
+- View all Epics with status and progress
+- Create new Epics
+- Filter by status (Draft, Active, Done)
+- View stories grouped by Epic
+
+#### Epic Detail (`#/epics/:id`)
+
+- Full Epic details with story list
+- Create and manage stories
+- Track progress across spaces (Experimentation/Development)
+- Status management and archiving
+
+#### Story Detail (`#/stories/:id`)
+
+- Step completion tracking (Brief, BA Spec, Questions)
+- Status flow visualization
+- Promote from experimentation to development
+- Move between Epics
+- QA history
+
+#### Roadmap (`#/roadmap`)
+
+- Visual timeline with drag-and-drop
+- Granularity toggle (Weekly, Monthly, Quarterly)
+- Backlog section for unplanned Epics
+- Progress indicators per period
+
+#### QA Dashboard (`#/qa`)
+
+- Testing queue with approval/rejection workflow
+- One-click approve or reject with reason
+- Automatic bug creation on rejection
+- Activity statistics
+
+### Story Workflow
+
+Stories follow a structured workflow through spaces and statuses:
+
+```
+EXPERIMENTATION SPACE                DEVELOPMENT SPACE
+┌─────────────────────────┐         ┌─────────────────────────────────────┐
+│  draft → in_progress   │  ──→    │  ready_for_dev → in_progress →     │
+│         ↓              │ promote │                    testing → done   │
+│   (complete steps)     │         │                                     │
+└─────────────────────────┘         └─────────────────────────────────────┘
+```
+
+**Experimentation Steps:**
+1. **Brief** - Product brief describing the feature
+2. **BA Spec** - Business analysis specification
+3. **Questions** - Clarifying questions for requirements
+
+To promote a story to development, all steps must be completed or explicitly skipped.
+
+### QA Workflow
+
+When a story reaches `testing` status:
+
+1. **Approve** - Story moves to `done`
+2. **Reject** - Story returns to `in_progress`, a linked bug is automatically created
+
+The QA history is preserved on each story, showing all approval/rejection actions.
+
+### Data Storage
+
+Epic data is stored in `.aia/epics/` as JSON files:
+
+```
+.aia/
+├── epics/
+│   ├── general.json      # General epic for unassigned stories
+│   ├── epic-abc123.json  # Epic with embedded stories
+│   └── index.json        # Story-to-Epic lookup index
+```
+
+All data is Git-tracked for version control and collaboration.
+
+### API Endpoints
+
+The Epic system exposes a REST API:
+
+```
+# Epics
+GET    /api/epics                    # List epics
+POST   /api/epics                    # Create epic
+GET    /api/epics/:id                # Get epic
+PATCH  /api/epics/:id                # Update epic
+DELETE /api/epics/:id                # Delete epic
+
+# Stories
+GET    /api/stories                  # List stories (with filters)
+POST   /api/epics/:epicId/stories    # Create story in epic
+GET    /api/stories/:id              # Get story
+PATCH  /api/stories/:id              # Update story
+DELETE /api/stories/:id              # Delete story
+POST   /api/stories/:id/promote      # Promote to development
+POST   /api/stories/:id/move         # Move to different epic
+PATCH  /api/stories/:id/steps/:step  # Update step completion
+
+# QA
+GET    /api/qa/queue                 # Get testing queue
+GET    /api/qa/stats                 # Get QA statistics
+POST   /api/qa/:storyId/approve      # Approve story
+POST   /api/qa/:storyId/reject       # Reject story
+
+# Roadmap
+GET    /api/roadmap                  # Get roadmap data
+GET    /api/roadmap/stats            # Get roadmap statistics
+POST   /api/roadmap/epics/:id/assign # Assign epic to period
+POST   /api/roadmap/epics/:id/unassign # Remove period assignment
+
+# System
+GET    /api/epic-system/diagnose     # System diagnostics
+POST   /api/epic-system/migrate      # Run migrations
+```
 
 ## Feature workflow
 

@@ -1,29 +1,154 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import chalk from 'chalk';
-import { AIA_DIR, FEATURE_STEPS, APPLY_STEPS, STEP_STATUS } from '../constants.js';
+import { FEATURE_STEPS, APPLY_STEPS, STEP_STATUS } from '../constants.js';
 import { resolveModel } from '../models.js';
-import { buildPrompt } from '../prompt-builder.js';
+import { buildPrompt, buildTaskPrompt } from '../prompt-builder.js';
 import { callModel } from './model-call.js';
-import { loadStatus, updateStepStatus } from './status.js';
+import { loadStatus, updateStepStatus, updatePhaseStatus, getPhaseByNumber, initializePhasesFromDevPlan, getStoryDirPath } from './status.js';
 import { logExecution } from '../logger.js';
 import { startSession, endSession, appendLog } from './agent-sessions.js';
 import { hasWorktree, getWorktreePath, getFeatureBranch } from './worktrunk.js';
 
-export async function runStep(step, feature, { description, instructions, history, attachments, model: modelOverride, verbose = false, apply = false, root = process.cwd(), onData } = {}) {
+/**
+ * Runs implementation with task context for task-scoped execution
+ * @param {Object} task - Task object with title, details, files, etc.
+ * @param {Object} story - Parent story object
+ * @param {Object} options - Execution options
+ * @returns {Promise<Object>} Implementation result
+ */
+export async function runWithTaskContext(task, story, options = {}) {
+  const {
+    model: modelOverride,
+    verbose = false,
+    apply = true,
+    root = process.cwd(),
+    onData,
+  } = options;
+
+  const sessionId = `task-${task.id.slice(0, 8)}`;
+  startSession(sessionId, 'task-implement');
+
+  const wrappedOnData = (data) => {
+    appendLog(sessionId, data.text, data.type);
+    if (onData) onData(data);
+  };
+
+  const cwd = root;
+
+  try {
+    const model = modelOverride || await resolveModel('implement', root);
+    const prompt = await buildTaskPrompt(task, story, { root });
+
+    const start = performance.now();
+    const output = await callModel(model, prompt, { verbose, apply, onData: wrappedOnData, cwd });
+    const duration = performance.now() - start;
+
+    await logExecution({
+      feature: `task-${task.id.slice(0, 8)}`,
+      step: 'task-implement',
+      model,
+      duration,
+      taskId: task.id,
+      taskTitle: task.title,
+    }, root);
+
+    // Parse output for modified files if possible
+    const filesModified = extractModifiedFiles(output, task.files);
+
+    return {
+      output,
+      filesModified,
+      success: true,
+      error: null,
+      completedAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    return {
+      output: '',
+      filesModified: [],
+      success: false,
+      error: err.message,
+      completedAt: new Date().toISOString(),
+    };
+  } finally {
+    endSession(sessionId);
+  }
+}
+
+/**
+ * Extracts modified files from output or uses task's file list
+ * @private
+ */
+function extractModifiedFiles(output, taskFiles) {
+  // Try to find file modification markers in output
+  const filePatterns = [
+    /(?:Created|Modified|Updated|Wrote to|Writing to):\s*[`"]?([^\s`"]+)[`"]?/gi,
+    /^[-+]{3}\s+(?:a|b)\/(.+)$/gm,
+  ];
+
+  const foundFiles = new Set();
+
+  for (const pattern of filePatterns) {
+    const matches = output.matchAll(pattern);
+    for (const match of matches) {
+      if (match[1]) {
+        foundFiles.add(match[1]);
+      }
+    }
+  }
+
+  // If no files detected, use task's file list
+  if (foundFiles.size === 0) {
+    return taskFiles || [];
+  }
+
+  return Array.from(foundFiles);
+}
+
+export async function runStep(step, feature, { description, instructions, history, attachments, model: modelOverride, verbose = false, apply = false, phase = null, task = null, root = process.cwd(), onData } = {}) {
   if (!FEATURE_STEPS.includes(step)) {
     throw new Error(`Unknown step "${step}". Valid steps: ${FEATURE_STEPS.join(', ')}`);
   }
 
   const status = await loadStatus(feature, root);
 
-  if (status.steps[step] === STEP_STATUS.DONE) {
+  // Phase mode: only for implement step
+  let phaseData = null;
+  if (phase !== null && step === 'implement') {
+    // Initialize phases from dev-plan if not already done
+    if (!status.phases || status.phases.length === 0) {
+      await initializePhasesFromDevPlan(feature, root);
+      // Reload status after initialization
+      const updatedStatus = await loadStatus(feature, root);
+      phaseData = getPhaseByNumber(updatedStatus, parseInt(phase, 10));
+    } else {
+      phaseData = getPhaseByNumber(status, parseInt(phase, 10));
+    }
+
+    if (!phaseData) {
+      throw new Error(`Phase ${phase} not found for feature "${feature}". Check dev-plan.md for available tasks.`);
+    }
+
+    if (phaseData.status === 'done') {
+      throw new Error(`Phase ${phase} already done for feature "${feature}".`);
+    }
+
+    console.log(chalk.cyan(`Running phase ${phase}: ${phaseData.title}`));
+  }
+
+  if (status.steps[step] === STEP_STATUS.DONE && phase === null) {
     throw new Error(
       `Step "${step}" already done for feature "${feature}". Use "aia reset ${step} ${feature}" to re-run.`,
     );
   }
 
   await updateStepStatus(feature, step, STEP_STATUS.IN_PROGRESS, root);
+
+  // Update phase status if running in phase mode
+  if (phaseData) {
+    await updatePhaseStatus(feature, phaseData.id, 'in-progress', root);
+  }
 
   const shouldApply = apply || APPLY_STEPS.has(step);
 
@@ -46,22 +171,35 @@ export async function runStep(step, feature, { description, instructions, histor
 
   try {
     const model = modelOverride || await resolveModel(step, root);
-    const prompt = await buildPrompt(feature, step, { description, instructions, history, attachments, root });
+    const prompt = await buildPrompt(feature, step, { description, instructions, history, attachments, phase: phaseData, root });
 
     const start = performance.now();
     const output = await callModel(model, prompt, { verbose, apply: shouldApply, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
 
-    const outputPath = path.join(root, AIA_DIR, 'features', feature, `${step}.md`);
-    await fs.writeFile(outputPath, output, 'utf-8');
+    // In phase mode, append to implement.md instead of overwriting
+    const storyDir = await getStoryDirPath(feature, root);
+    const outputPath = path.join(storyDir, `${step}.md`);
+    if (phaseData) {
+      const existingContent = await fs.pathExists(outputPath) ? await fs.readFile(outputPath, 'utf-8') : '';
+      const phaseHeader = `\n\n## Phase ${phaseData.number}: ${phaseData.title}\n\n`;
+      await fs.writeFile(outputPath, existingContent + phaseHeader + output, 'utf-8');
+      await updatePhaseStatus(feature, phaseData.id, 'done', root);
+      console.log(chalk.green(`Phase ${phaseData.number} completed for feature "${feature}".`));
+    } else {
+      await fs.writeFile(outputPath, output, 'utf-8');
+      await updateStepStatus(feature, step, STEP_STATUS.DONE, root);
+      console.log(chalk.green(`Step "${step}" completed for feature "${feature}".`));
+    }
 
-    await updateStepStatus(feature, step, STEP_STATUS.DONE, root);
-    await logExecution({ feature, step, model, duration }, root);
+    await logExecution({ feature, step, model, duration, phase: phaseData?.number }, root);
 
-    console.log(chalk.green(`Step "${step}" completed for feature "${feature}".`));
     return output;
   } catch (err) {
     await updateStepStatus(feature, step, STEP_STATUS.ERROR, root);
+    if (phaseData) {
+      await updatePhaseStatus(feature, phaseData.id, 'pending', root);
+    }
     throw err;
   } finally {
     // End session regardless of success or failure

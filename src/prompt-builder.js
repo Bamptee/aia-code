@@ -185,6 +185,109 @@ function execGit(args, root) {
   });
 }
 
+/**
+ * Detect the project's tech stack from common config files
+ * @param {string} root - Project root directory
+ * @returns {Promise<Object>} Detected tech stack info
+ */
+async function detectTechStack(root) {
+  const techStack = [];
+  const database = [];
+
+  // Check package.json for Node.js projects
+  const packageJsonPath = path.join(root, 'package.json');
+  if (await fs.pathExists(packageJsonPath)) {
+    try {
+      const pkg = await fs.readJson(packageJsonPath);
+      techStack.push('Node.js');
+
+      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+      // Frameworks
+      if (allDeps.react) techStack.push('React');
+      if (allDeps.vue) techStack.push('Vue');
+      if (allDeps['@angular/core']) techStack.push('Angular');
+      if (allDeps.svelte) techStack.push('Svelte');
+      if (allDeps.express) techStack.push('Express');
+      if (allDeps.fastify) techStack.push('Fastify');
+      if (allDeps['@nestjs/core']) techStack.push('NestJS');
+      if (allDeps.koa) techStack.push('Koa');
+      if (allDeps.hono) techStack.push('Hono');
+      if (allDeps.next) techStack.push('Next.js');
+      if (allDeps.nuxt) techStack.push('Nuxt');
+
+      // Database
+      if (allDeps.prisma || allDeps['@prisma/client']) database.push('Prisma');
+      if (allDeps.mongoose) database.push('MongoDB/Mongoose');
+      if (allDeps.sequelize) database.push('Sequelize');
+      if (allDeps.pg) database.push('PostgreSQL');
+      if (allDeps.mysql2) database.push('MySQL');
+      if (allDeps.sqlite3) database.push('SQLite');
+
+      // Testing
+      if (allDeps.jest) techStack.push('Jest');
+      if (allDeps.vitest) techStack.push('Vitest');
+      if (allDeps.mocha) techStack.push('Mocha');
+
+      // TypeScript
+      if (allDeps.typescript) techStack.push('TypeScript');
+    } catch {
+      // Ignore JSON parse errors
+    }
+  }
+
+  // Check for Python projects
+  const requirementsPath = path.join(root, 'requirements.txt');
+  const pyprojectPath = path.join(root, 'pyproject.toml');
+  if (await fs.pathExists(requirementsPath) || await fs.pathExists(pyprojectPath)) {
+    techStack.push('Python');
+  }
+
+  // Check for Go projects
+  const goModPath = path.join(root, 'go.mod');
+  if (await fs.pathExists(goModPath)) {
+    techStack.push('Go');
+  }
+
+  // Check for Rust projects
+  const cargoPath = path.join(root, 'Cargo.toml');
+  if (await fs.pathExists(cargoPath)) {
+    techStack.push('Rust');
+  }
+
+  return {
+    techStack: techStack.length > 0 ? techStack : ['Unknown'],
+    database: database.length > 0 ? database : ['none detected'],
+  };
+}
+
+/**
+ * Build codebase context section for grounded prompts
+ * @param {string} root - Project root directory
+ * @returns {Promise<string>} Context section
+ */
+async function buildCodebaseContext(root) {
+  const { techStack, database } = await detectTechStack(root);
+
+  // Detect common directory patterns
+  const patterns = [];
+  const dirsToCheck = ['src', 'lib', 'app', 'pages', 'components', 'api', 'routes', 'services', 'utils'];
+  for (const dir of dirsToCheck) {
+    if (await fs.pathExists(path.join(root, dir))) {
+      patterns.push(dir);
+    }
+  }
+
+  return `
+=== CODEBASE CONTEXT (Auto-detected) ===
+Tech Stack: ${techStack.join(', ')}
+Database: ${database.join(', ')}
+Project Structure: ${patterns.length > 0 ? patterns.join(', ') : 'flat structure'}
+
+IMPORTANT: Base your specification on these detected technologies. Do NOT invent technologies or patterns not present in this project.
+`;
+}
+
 async function getGitDiff(root) {
   // 1. Try uncommitted changes (staged + unstaged), excluding .aia
   const uncommitted = await execGit(['diff', 'HEAD', '--', '.', ':!.aia'], root);
@@ -205,19 +308,45 @@ async function getGitDiff(root) {
   return execGit(['diff', 'HEAD~1', 'HEAD', '--', '.', ':!.aia'], root);
 }
 
+/**
+ * Parse YAML front matter from a markdown file
+ * @param {string} content - Markdown content with optional front matter
+ * @returns {{ frontMatter: Object|null, body: string }}
+ */
+function parseFrontMatter(content) {
+  const frontMatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
+  const match = content.match(frontMatterRegex);
+
+  if (match) {
+    try {
+      const frontMatter = yaml.parse(match[1]);
+      const body = content.slice(match[0].length);
+      return { frontMatter, body };
+    } catch {
+      // Invalid YAML, treat as no front matter
+      return { frontMatter: null, body: content };
+    }
+  }
+
+  return { frontMatter: null, body: content };
+}
+
 async function loadPromptTemplate(step, root) {
   const templatePath = path.join(root, AIA_DIR, 'prompts', `${step}.md`);
   const content = await readIfExists(templatePath);
   if (!content) {
     throw new Error(`Prompt template not found: prompts/${step}.md`);
   }
-  return content;
+
+  // Parse front matter and return both metadata and body
+  const { frontMatter, body } = parseFrontMatter(content);
+  return { content: body, metadata: frontMatter };
 }
 
 export async function buildPrompt(feature, step, { description, instructions, history, attachments, root = process.cwd() } = {}) {
   const config = await loadConfig(root);
 
-  const [context, knowledgeCategories, initSpecs, featureContent, previousOutput, task] = await Promise.all([
+  const [context, knowledgeCategories, initSpecs, featureContent, previousOutput, taskResult] = await Promise.all([
     loadContextFiles(config, root),
     resolveKnowledgeCategories(feature, config, root),
     loadInitSpecs(feature, root),
@@ -225,6 +354,10 @@ export async function buildPrompt(feature, step, { description, instructions, hi
     loadPreviousOutput(feature, step, root),
     loadPromptTemplate(step, root),
   ]);
+
+  // Extract task content and metadata from parsed prompt template
+  const task = taskResult.content;
+  const taskMetadata = taskResult.metadata;
 
   const knowledge = await loadKnowledge(knowledgeCategories, root);
 
@@ -272,6 +405,12 @@ export async function buildPrompt(feature, step, { description, instructions, hi
     parts.push(context);
   }
 
+  // Inject codebase context if prompt requires scan (scan_required: true in front matter)
+  if (taskMetadata?.scan_required) {
+    const codebaseContext = await buildCodebaseContext(root);
+    parts.push(codebaseContext);
+  }
+
   if (knowledge) {
     parts.push('\n\n=== KNOWLEDGE ===\n');
     parts.push(knowledge);
@@ -290,12 +429,19 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   // For the review step, include actual code changes so the reviewer can see the code
   if (step === 'review') {
     const diff = await getGitDiff(root);
+    parts.push('\n\n=== CODE CHANGES (git diff) ===\n');
     if (diff) {
-      parts.push('\n\n=== CODE CHANGES (git diff) ===\n');
       parts.push('Below is the actual git diff of the implementation. Review this code:\n');
       parts.push('```diff');
       parts.push(diff);
       parts.push('```');
+    } else {
+      parts.push('**NO CHANGES DETECTED**\n');
+      parts.push('No git diff was found. This could mean:\n');
+      parts.push('- No changes have been made yet\n');
+      parts.push('- Changes are not staged or committed\n');
+      parts.push('- You are on the main/master branch with no feature commits\n');
+      parts.push('\nPlease ensure code changes exist before requesting a review.');
     }
   }
 

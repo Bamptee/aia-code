@@ -2,10 +2,39 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import fs from 'fs-extra';
 import yaml from 'yaml';
-import { AIA_DIR, FEATURE_STEPS, LEGACY_FEATURES_DIR } from './constants.js';
+import {
+  AIA_DIR,
+  FEATURE_STEPS,
+  STEP_ORDER,
+  LEGACY_FEATURES_DIR,
+  LEGACY_STEP_MAP,
+  getSkippedSteps,
+} from './constants.js';
 import { loadConfig } from './models.js';
 import { loadKnowledge } from './knowledge-loader.js';
 import { readIfExists } from './utils.js';
+
+// V3 step file name mapping (kebab-case)
+const STEP_FILE_MAP = {
+  'init': 'init',
+  'brainstorming': 'brainstorming',
+  'specFunc': 'spec-func',
+  'spec-func': 'spec-func',
+  'specTech': 'spec-tech',
+  'spec-tech': 'spec-tech',
+  'devPlan': 'dev-plan',
+  'dev-plan': 'dev-plan',
+  'implement': 'implement',
+  'review': 'review',
+  // Legacy mappings
+  'brief': 'init',
+  'baSpec': 'spec-func',
+  'ba-spec': 'spec-func',
+  'questions': 'brainstorming',
+  'techSpec': 'spec-tech',
+  'tech-spec': 'spec-tech',
+  'challenge': 'review',
+};
 
 /**
  * Get story directory path (stories first, then legacy features fallback)
@@ -36,10 +65,18 @@ async function loadContextFiles(config, root) {
   return sections.join('\n\n');
 }
 
-async function loadFeatureFiles(feature, step, root) {
-  const stepIndex = FEATURE_STEPS.indexOf(step);
+async function loadFeatureFiles(feature, step, root, options = {}) {
+  // Support both v3 STEP_ORDER and legacy FEATURE_STEPS
+  const stepOrder = STEP_ORDER || FEATURE_STEPS;
+  const normalizedStep = STEP_FILE_MAP[step] || step;
+
+  const stepIndex = stepOrder.indexOf(normalizedStep);
   if (stepIndex === -1) {
-    throw new Error(`Unknown step "${step}".`);
+    // Try legacy mapping
+    const legacyStep = LEGACY_STEP_MAP?.[step];
+    if (!legacyStep || stepOrder.indexOf(legacyStep) === -1) {
+      throw new Error(`Unknown step "${step}".`);
+    }
   }
 
   const featureDir = await getStoryDir(feature, root);
@@ -48,21 +85,108 @@ async function loadFeatureFiles(feature, step, root) {
   }
 
   // For review step, use optimized loading to reduce prompt size
-  if (step === 'review') {
+  if (normalizedStep === 'review') {
     return loadFeatureFilesForReview(featureDir);
   }
 
-  const priorSteps = FEATURE_STEPS.slice(0, stepIndex);
+  const priorSteps = stepOrder.slice(0, stepIndex);
   const sections = [];
 
   for (const s of priorSteps) {
-    const content = await readIfExists(path.join(featureDir, `${s}.md`));
+    const fileName = STEP_FILE_MAP[s] || s;
+    const content = await readIfExists(path.join(featureDir, `${fileName}.md`));
     if (content) {
       sections.push(content);
     }
   }
 
-  return sections.join('\n\n');
+  return { content: sections.join('\n\n'), priorSteps };
+}
+
+/**
+ * Load auto-analysis context when spec-tech is skipped
+ * @param {string} root - Project root
+ * @returns {Promise<Object>} Auto-analysis context
+ */
+async function loadAutoAnalysisContext(root) {
+  const context = {
+    knowledge: '',
+    contextFiles: '',
+    techStack: null,
+  };
+
+  // Load knowledge files
+  try {
+    const knowledgeDir = path.join(root, AIA_DIR, 'knowledge');
+    if (await fs.pathExists(knowledgeDir)) {
+      const files = await fs.readdir(knowledgeDir);
+      const sections = [];
+      for (const file of files) {
+        if (file.endsWith('.md')) {
+          const content = await readIfExists(path.join(knowledgeDir, file));
+          if (content) {
+            sections.push(`## ${file}\n${content}`);
+          }
+        }
+      }
+      context.knowledge = sections.join('\n\n');
+    }
+  } catch (err) {
+    console.warn('[AutoAnalysis] Failed to load knowledge files:', err.message);
+  }
+
+  // Load context files
+  try {
+    const contextDir = path.join(root, AIA_DIR, 'context');
+    if (await fs.pathExists(contextDir)) {
+      const files = await fs.readdir(contextDir);
+      const sections = [];
+      for (const file of files) {
+        if (file.endsWith('.md') || file.endsWith('.txt')) {
+          const content = await readIfExists(path.join(contextDir, file));
+          if (content) {
+            sections.push(`## ${file}\n${content}`);
+          }
+        }
+      }
+      context.contextFiles = sections.join('\n\n');
+    }
+  } catch (err) {
+    console.warn('[AutoAnalysis] Failed to load context files:', err.message);
+  }
+
+  // Detect tech stack
+  context.techStack = await detectTechStack(root);
+
+  return context;
+}
+
+/**
+ * Check if spec-tech was skipped for a story
+ * @param {string} feature - Story slug
+ * @param {string} root - Project root
+ * @returns {Promise<boolean>}
+ */
+async function isSpecTechSkipped(feature, root) {
+  const featureDir = await getStoryDir(feature, root);
+  const statusFile = path.join(featureDir, 'status.yaml');
+  const raw = await readIfExists(statusFile);
+
+  if (raw) {
+    const status = yaml.parse(raw);
+    // Check v3 skippedSteps array
+    if (status?.skippedSteps?.includes('spec-tech') || status?.skippedSteps?.includes('specTech')) {
+      return true;
+    }
+    // Check step status
+    if (status?.steps?.['spec-tech']?.skipped || status?.steps?.specTech?.skipped) {
+      return true;
+    }
+  }
+
+  // Also check if spec-tech.md file is missing but implement is being requested
+  const specTechFile = path.join(featureDir, 'spec-tech.md');
+  return !(await fs.pathExists(specTechFile));
 }
 
 /**
@@ -346,7 +470,10 @@ async function loadPromptTemplate(step, root) {
 export async function buildPrompt(feature, step, { description, instructions, history, attachments, root = process.cwd() } = {}) {
   const config = await loadConfig(root);
 
-  const [context, knowledgeCategories, initSpecs, featureContent, previousOutput, taskResult] = await Promise.all([
+  // Check if spec-tech was skipped (for implement step auto-analysis)
+  const specTechSkipped = (step === 'implement') ? await isSpecTechSkipped(feature, root) : false;
+
+  const [context, knowledgeCategories, initSpecs, featureResult, previousOutput, taskResult] = await Promise.all([
     loadContextFiles(config, root),
     resolveKnowledgeCategories(feature, config, root),
     loadInitSpecs(feature, root),
@@ -355,9 +482,18 @@ export async function buildPrompt(feature, step, { description, instructions, hi
     loadPromptTemplate(step, root),
   ]);
 
+  // Handle both old string return and new object return from loadFeatureFiles
+  const featureContent = typeof featureResult === 'string' ? featureResult : featureResult?.content;
+
   // Extract task content and metadata from parsed prompt template
   const task = taskResult.content;
   const taskMetadata = taskResult.metadata;
+
+  // Load auto-analysis context if spec-tech was skipped
+  let autoAnalysisContext = null;
+  if (specTechSkipped && step === 'implement') {
+    autoAnalysisContext = await loadAutoAnalysisContext(root);
+  }
 
   const knowledge = await loadKnowledge(knowledgeCategories, root);
 
@@ -424,6 +560,35 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   if (featureContent) {
     parts.push('\n\n=== FEATURE ===\n');
     parts.push(featureContent);
+  }
+
+  // V3: Auto-analysis context when spec-tech was skipped
+  if (autoAnalysisContext && specTechSkipped) {
+    parts.push('\n\n=== AUTO-ANALYSE (spec-tech skippe) ===\n');
+    parts.push('ATTENTION: La spec technique a ete skippee. Tu dois effectuer une analyse automatique.\n');
+
+    if (autoAnalysisContext.techStack) {
+      parts.push('\n## Tech Stack Detecte\n');
+      if (autoAnalysisContext.techStack.length > 0) {
+        parts.push(autoAnalysisContext.techStack.map(t => `- ${t}`).join('\n'));
+      }
+    }
+
+    if (autoAnalysisContext.knowledge) {
+      parts.push('\n## Knowledge (from .aia/knowledge/)\n');
+      parts.push(autoAnalysisContext.knowledge);
+    }
+
+    if (autoAnalysisContext.contextFiles) {
+      parts.push('\n## Context (from .aia/context/)\n');
+      parts.push(autoAnalysisContext.contextFiles);
+    }
+
+    parts.push('\n## Instructions Auto-Analyse\n');
+    parts.push('1. Scanne le codebase pour identifier les patterns existants');
+    parts.push('2. Identifie les fichiers similaires a modifier');
+    parts.push('3. Propose ton approche AVANT de coder');
+    parts.push('4. Suis les conventions detectees\n');
   }
 
   // For the review step, include actual code changes so the reviewer can see the code

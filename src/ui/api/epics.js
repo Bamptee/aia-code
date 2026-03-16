@@ -21,7 +21,8 @@ import { StoryToFeatureService } from '../../epic/services/story-to-feature-serv
 import { FigmaDiscoveryService } from '../../epic/services/figma-discovery-service.js';
 import { FigmaProvider } from '../../epic/providers/figma-provider.js';
 import { AIProvider } from '../../epic/providers/ai-provider.js';
-import { isValidFigmaUrl, STORY_STEPS } from '../../epic/models/validators.js';
+import { isValidFigmaUrl, STORY_STEPS, normalizeStepName } from '../../epic/models/validators.js';
+import { CODE_STEPS } from '../../constants.js';
 import { loadConfig } from '../../models.js';
 import { callModel } from '../../services/model-call.js';
 
@@ -1956,6 +1957,113 @@ Regenerate the ${params.stepName} document incorporating all the user's feedback
         error(res, err.message, 400);
       } else if (err.code === 'EXTERNAL_SERVICE_ERROR') {
         error(res, err.message, 502);
+      } else {
+        error(res, err.message, 500);
+      }
+    }
+  });
+
+  // ============== V3 PHASE ENDPOINTS ==============
+
+  /**
+   * GET /api/stories/:id/phase - Get current phase of a story
+   */
+  router.get('/api/stories/:id/phase', async (req, res, { params, root }) => {
+    try {
+      const { storyService } = await getServices(root);
+      const phase = await storyService.getCurrentPhase(params.id);
+      const skippedSteps = await storyService.getSkippedSteps(params.id);
+
+      json(res, { phase, skippedSteps });
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') {
+        error(res, err.message, 404);
+      } else {
+        error(res, err.message, 500);
+      }
+    }
+  });
+
+  /**
+   * POST /api/stories/:id/skip-to/:step - Skip to a target step
+   * Marks intermediate steps as skipped
+   */
+  router.post('/api/stories/:id/skip-to/:step', async (req, res, { params, root }) => {
+    try {
+      const { storyService } = await getServices(root);
+      const result = await storyService.skipToStep(params.id, params.step);
+
+      json(res, {
+        story: result.story,
+        warning: result.warning,
+        skippedSteps: result.skippedSteps || [],
+      });
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') {
+        error(res, err.message, 404);
+      } else if (err.code === 'VALIDATION_ERROR') {
+        error(res, err.message, 400);
+      } else {
+        error(res, err.message, 500);
+      }
+    }
+  });
+
+  /**
+   * GET /api/stories/:id/can-skip-to/:step - Check if skip is allowed
+   */
+  router.get('/api/stories/:id/can-skip-to/:step', async (req, res, { params, root }) => {
+    try {
+      const { storyService } = await getServices(root);
+      const result = await storyService.canSkipTo(params.id, params.step);
+
+      json(res, result);
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') {
+        error(res, err.message, 404);
+      } else {
+        error(res, err.message, 500);
+      }
+    }
+  });
+
+  /**
+   * POST /api/stories/:id/review/:step - Start adversarial review on a step
+   * Uses review-universal.md prompt
+   */
+  router.post('/api/stories/:id/review/:step', async (req, res, { params, root, parseBody }) => {
+    try {
+      const body = await parseBody();
+      const { storyService, aiProvider } = await getServices(root);
+
+      if (!aiProvider.isConfigured()) {
+        return error(res, 'AI provider not configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.', 400);
+      }
+
+      const { story } = await storyService.findStoryWithEpic(params.id);
+      if (!story) {
+        return error(res, `Story ${params.id} not found`, 404);
+      }
+
+      // Determine review target - normalize step name from API (kebab-case) to internal (camelCase)
+      const normalizedStep = normalizeStepName(params.step);
+      const isCodeStep = CODE_STEPS.has(normalizedStep);
+
+      const stepContent = story.steps?.[normalizedStep]?.content;
+      if (!stepContent) {
+        return error(res, `Step ${params.step} has no content to review`, 400);
+      }
+
+      // Response will be handled by conversation system
+      json(res, {
+        reviewMode: isCodeStep ? 'code' : 'file',
+        targetStep: params.step,
+        targetContent: stepContent,
+        message: 'Use the chat endpoint to continue the review conversation',
+      });
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') {
+        error(res, err.message, 404);
       } else {
         error(res, err.message, 500);
       }

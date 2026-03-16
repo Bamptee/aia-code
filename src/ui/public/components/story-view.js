@@ -2,52 +2,116 @@ import React from 'react';
 import { api, streamPost } from '/main.js';
 import { EpicSelector } from '/components/epic-selector.js';
 
-// ============== Constants ==============
+// ============== Constants v3 ==============
 
-const ALL_STEPS = ['brief', 'baSpec', 'questions', 'techSpec', 'challenge', 'devPlan', 'implement', 'review'];
-const PRODUCT_STEPS = ['brief', 'baSpec', 'questions'];
-const DEV_STEPS = ['techSpec', 'challenge', 'devPlan', 'implement', 'review'];
+// V3: 7 steps with Product/Dev phases
+const ALL_STEPS = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', 'review'];
+const PRODUCT_STEPS = ['init', 'brainstorming', 'specFunc'];
+const DEV_STEPS = ['specTech', 'devPlan', 'implement', 'review'];
 
-// Steps that can be skipped (not init, dev-plan, implement)
-const SKIPPABLE_STEPS = ['brief', 'baSpec', 'questions', 'techSpec', 'challenge', 'review'];
+// Steps that can be skipped (all except init)
+const SKIPPABLE_STEPS = ['brainstorming', 'specFunc', 'specTech', 'devPlan', 'review'];
+
+// Steps that produce code changes
+const CODE_STEPS = ['implement', 'review'];
 
 // Map kebab-case from API to camelCase
 const STEP_KEY_MAP = {
-  'brief': 'brief',
-  'ba-spec': 'baSpec',
-  'baSpec': 'baSpec',
-  'questions': 'questions',
-  'tech-spec': 'techSpec',
-  'techSpec': 'techSpec',
-  'challenge': 'challenge',
+  'init': 'init',
+  'brainstorming': 'brainstorming',
+  'spec-func': 'specFunc',
+  'specFunc': 'specFunc',
+  'spec-tech': 'specTech',
+  'specTech': 'specTech',
   'dev-plan': 'devPlan',
   'devPlan': 'devPlan',
   'implement': 'implement',
   'review': 'review',
+  // Legacy v1 mappings for backward compatibility
+  'brief': 'init',
+  'ba-spec': 'specFunc',
+  'baSpec': 'specFunc',
+  'questions': 'brainstorming',
+  'tech-spec': 'specTech',
+  'techSpec': 'specTech',
+  'challenge': 'review',
 };
 
 // Map camelCase to kebab-case for API calls
 const STEP_API_MAP = {
-  'brief': 'brief',
-  'baSpec': 'ba-spec',
-  'questions': 'questions',
-  'techSpec': 'tech-spec',
-  'challenge': 'challenge',
+  'init': 'init',
+  'brainstorming': 'brainstorming',
+  'specFunc': 'spec-func',
+  'specTech': 'spec-tech',
   'devPlan': 'dev-plan',
   'implement': 'implement',
   'review': 'review',
 };
 
+// V3 Step configuration with phases
 const STEP_CONFIG = {
-  brief: { name: 'Brief', icon: '📋', color: 'emerald', description: 'High-level summary and requirements' },
-  baSpec: { name: 'BA Spec', icon: '📊', color: 'blue', description: 'Business analysis and specifications' },
-  questions: { name: 'Questions', icon: '❓', color: 'amber', description: 'Open questions and clarifications' },
-  techSpec: { name: 'Tech Spec', icon: '🛠️', color: 'violet', description: 'Technical architecture' },
-  challenge: { name: 'Challenge', icon: '⚠️', color: 'red', description: 'Risks and blockers' },
-  devPlan: { name: 'Dev Plan', icon: '📝', color: 'cyan', description: 'Implementation plan' },
-  implement: { name: 'Implement', icon: '💻', color: 'green', description: 'Implementation notes' },
-  review: { name: 'Review', icon: '✅', color: 'purple', description: 'Code review' },
+  init: { name: 'Init', icon: '📋', color: 'emerald', phase: 'product', description: 'Story context and requirements', type: 'generate' },
+  brainstorming: { name: 'Brainstorming', icon: '💡', color: 'amber', phase: 'product', description: 'Discovery and ideation', type: 'chat-only' },
+  specFunc: { name: 'Spec Func', icon: '📊', color: 'blue', phase: 'product', description: 'Functional specification', type: 'generate' },
+  specTech: { name: 'Spec Tech', icon: '🛠️', color: 'violet', phase: 'dev', description: 'Technical specification', type: 'generate' },
+  devPlan: { name: 'Dev Plan', icon: '📝', color: 'cyan', phase: 'dev', description: 'Implementation tasks', type: 'generate' },
+  implement: { name: 'Implement', icon: '💻', color: 'green', phase: 'dev', description: 'Code implementation', type: 'generate' },
+  review: { name: 'Review', icon: '✅', color: 'purple', phase: 'dev', description: 'Code review', type: 'generate' },
+  // Legacy aliases for backward compatibility
+  brief: { name: 'Brief', icon: '📋', color: 'emerald', phase: 'product', description: 'High-level summary', type: 'generate', legacy: true },
+  baSpec: { name: 'BA Spec', icon: '📊', color: 'blue', phase: 'product', description: 'Business analysis', type: 'generate', legacy: true },
+  questions: { name: 'Questions', icon: '❓', color: 'amber', phase: 'product', description: 'Open questions', type: 'chat-only', legacy: true },
+  techSpec: { name: 'Tech Spec', icon: '🛠️', color: 'violet', phase: 'dev', description: 'Technical architecture', type: 'generate', legacy: true },
+  challenge: { name: 'Challenge', icon: '⚠️', color: 'red', phase: 'dev', description: 'Risks and blockers', type: 'generate', legacy: true },
 };
+
+// Actions per step type
+const STEP_ACTIONS = {
+  'chat-only': ['chat', 'review'],
+  'generate': ['generate', 'chat', 'review'],
+};
+
+// Phase filters for dashboard
+const PHASE_FILTERS = {
+  'all': () => true,
+  'product': (step) => STEP_CONFIG[step]?.phase === 'product',
+  'dev': (step) => STEP_CONFIG[step]?.phase === 'dev',
+};
+
+// Get skip warning based on skipped steps
+function getSkipWarning(fromStep, toStep) {
+  const fromIndex = ALL_STEPS.indexOf(fromStep);
+  const toIndex = ALL_STEPS.indexOf(toStep);
+
+  if (fromIndex === -1 || toIndex === -1 || toIndex <= fromIndex) {
+    return null;
+  }
+
+  const skipped = ALL_STEPS.slice(fromIndex + 1, toIndex);
+
+  if (skipped.includes('specFunc') && skipped.includes('specTech')) {
+    return {
+      level: 'high',
+      message: 'Contexte tres limite - Pas de spec fonctionnelle ni technique',
+      autoAnalysis: true,
+    };
+  }
+  if (skipped.includes('specTech')) {
+    return {
+      level: 'medium',
+      message: 'Pas de spec technique - Analyse automatique du codebase',
+      autoAnalysis: true,
+    };
+  }
+  if (skipped.includes('specFunc')) {
+    return {
+      level: 'low',
+      message: 'Pas de spec fonctionnelle - Contexte limite',
+      autoAnalysis: false,
+    };
+  }
+  return null;
+}
 
 const CONTEXT_CONFIG = {
   product: { label: 'Product', icon: '🔍', gradient: 'from-purple-500/10 to-fuchsia-500/10', border: 'border-purple-500/30', text: 'text-purple-400' },
@@ -56,10 +120,14 @@ const CONTEXT_CONFIG = {
 };
 
 const PHASE_CONFIG = {
-  discovery: { label: 'Discovery', color: 'purple' },
-  development: { label: 'Development', color: 'violet' },
-  qa: { label: 'QA', color: 'sky' },
-  done: { label: 'Done', color: 'emerald' },
+  // V3 phases
+  product: { label: 'Product', color: 'purple', icon: '🔍' },
+  dev: { label: 'Dev', color: 'violet', icon: '🚀' },
+  // Legacy phases
+  discovery: { label: 'Discovery', color: 'purple', icon: '🔍' },
+  development: { label: 'Development', color: 'violet', icon: '🚀' },
+  qa: { label: 'QA', color: 'sky', icon: '✅' },
+  done: { label: 'Done', color: 'emerald', icon: '✓' },
 };
 
 // ============== Access Control ==============
@@ -119,6 +187,134 @@ function AccessDenied({ phase, context }) {
     )
   );
 }
+
+// ============== V3 UI Components ==============
+
+function SkipWarning({ skippedSteps, warning }) {
+  if (!warning) return null;
+
+  const levelColors = {
+    high: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', icon: '🚨' },
+    medium: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', icon: '⚠️' },
+    low: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', icon: 'ℹ️' },
+  };
+  const colors = levelColors[warning.level] || levelColors.medium;
+
+  return React.createElement('div', {
+    className: `${colors.bg} ${colors.border} border rounded-lg p-3 flex items-start gap-3`,
+  },
+    React.createElement('span', { className: 'text-xl' }, colors.icon),
+    React.createElement('div', { className: 'flex-1' },
+      React.createElement('p', { className: `${colors.text} text-sm font-medium` }, warning.message),
+      warning.autoAnalysis && React.createElement('p', { className: 'text-slate-400 text-xs mt-1' },
+        'L\'agent effectuera une auto-analyse du codebase pour compenser le contexte manquant.'
+      ),
+      skippedSteps?.length > 0 && React.createElement('p', { className: 'text-slate-500 text-xs mt-1' },
+        `Steps ignores: ${skippedSteps.join(', ')}`
+      )
+    )
+  );
+}
+
+function PhaseFilter({ current, onChange }) {
+  const phases = [
+    { key: 'all', label: 'All', icon: '📋' },
+    { key: 'product', label: 'Product', icon: '🔍' },
+    { key: 'dev', label: 'Dev', icon: '🚀' },
+  ];
+
+  return React.createElement('div', { className: 'flex items-center gap-1 bg-slate-800 rounded-lg p-1' },
+    ...phases.map(phase =>
+      React.createElement('button', {
+        key: phase.key,
+        onClick: () => onChange(phase.key),
+        className: `flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg transition-colors ${
+          current === phase.key
+            ? 'bg-violet-500/30 text-violet-300'
+            : 'text-slate-400 hover:text-slate-200'
+        }`,
+      },
+        React.createElement('span', null, phase.icon),
+        React.createElement('span', null, phase.label)
+      )
+    )
+  );
+}
+
+function ActionBar({ step, stepKey, onGenerate, onChat, onReview, generating, readonly }) {
+  const config = STEP_CONFIG[stepKey];
+  if (!config) return null;
+
+  const stepType = config.type || 'generate';
+  const actions = STEP_ACTIONS[stepType] || STEP_ACTIONS.generate;
+
+  return React.createElement('div', { className: 'flex items-center gap-2' },
+    actions.includes('generate') && React.createElement('button', {
+      onClick: onGenerate,
+      disabled: generating || readonly,
+      className: 'flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-violet-500/20 text-violet-400 border border-violet-500/30 hover:bg-violet-500/30 disabled:opacity-50 transition-colors',
+    }, generating ? '⏳ Generating...' : '✨ Generate'),
+    actions.includes('chat') && React.createElement('button', {
+      onClick: onChat,
+      disabled: generating || readonly,
+      className: 'flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-50 transition-colors',
+    }, '💬 Chat'),
+    actions.includes('review') && React.createElement('button', {
+      onClick: onReview,
+      disabled: generating || readonly,
+      className: 'flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50 transition-colors',
+    }, '🔍 Review')
+  );
+}
+
+function StepPills({ steps, storySteps, currentStep, onStepClick }) {
+  // Group steps by phase for visual separation
+  const productSteps = steps.filter(s => STEP_CONFIG[s]?.phase === 'product');
+  const devSteps = steps.filter(s => STEP_CONFIG[s]?.phase === 'dev');
+
+  const renderStep = (stepKey) => {
+    const config = STEP_CONFIG[stepKey];
+    const stepData = storySteps?.[stepKey];
+    const isCompleted = stepData?.completed;
+    const isSkipped = stepData?.skipped;
+    const isCurrent = currentStep === stepKey;
+
+    return React.createElement('button', {
+      key: stepKey,
+      onClick: () => onStepClick(stepKey),
+      className: `flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+        isCurrent
+          ? 'bg-violet-500/30 text-violet-300 border border-violet-500/50'
+          : isSkipped
+            ? 'bg-slate-700/50 text-slate-500 line-through'
+            : isCompleted
+              ? 'bg-emerald-500/20 text-emerald-400'
+              : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+      }`,
+    },
+      React.createElement('span', null, isSkipped ? '⏭️' : config?.icon || '📄'),
+      React.createElement('span', null, config?.name || stepKey)
+    );
+  };
+
+  return React.createElement('div', { className: 'flex items-center gap-2 flex-wrap' },
+    // Product phase steps
+    productSteps.length > 0 && React.createElement('div', { className: 'flex items-center gap-1' },
+      React.createElement('span', { className: 'text-xs text-purple-400 mr-1' }, '🔍'),
+      ...productSteps.map(renderStep)
+    ),
+    // Separator
+    productSteps.length > 0 && devSteps.length > 0 &&
+      React.createElement('span', { className: 'text-slate-600 mx-1' }, '|'),
+    // Dev phase steps
+    devSteps.length > 0 && React.createElement('div', { className: 'flex items-center gap-1' },
+      React.createElement('span', { className: 'text-xs text-violet-400 mr-1' }, '🚀'),
+      ...devSteps.map(renderStep)
+    )
+  );
+}
+
+// ============== Original Helper Components ==============
 
 function ModelSelect({ model, onChange, disabled }) {
   const [models, setModels] = React.useState([]);

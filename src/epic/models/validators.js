@@ -82,34 +82,87 @@ export const ROADMAP_GRANULARITY = Object.freeze({
 });
 
 /**
- * Step names for story workflow (full 8 steps)
+ * Step names for story workflow v3 (7 steps, camelCase for JS)
  * @readonly
  * @type {string[]}
  */
 export const STORY_STEPS = Object.freeze([
-  'brief',
-  'baSpec',
-  'questions',
-  'techSpec',
-  'challenge',
+  'init',
+  'brainstorming',
+  'specFunc',
+  'specTech',
   'devPlan',
   'implement',
   'review',
 ]);
 
 /**
- * Steps visible in Product context (discovery)
+ * Kebab-case step names (for API/files)
  * @readonly
  * @type {string[]}
  */
-export const PRODUCT_STEPS = Object.freeze(['brief', 'baSpec', 'questions']);
+export const STORY_STEPS_KEBAB = Object.freeze([
+  'init',
+  'brainstorming',
+  'spec-func',
+  'spec-tech',
+  'dev-plan',
+  'implement',
+  'review',
+]);
 
 /**
- * Steps visible in Dev context (all steps)
+ * Map kebab-case to camelCase
+ * @type {Object<string, string>}
+ */
+export const STEP_KEY_MAP = Object.freeze({
+  'init': 'init',
+  'brainstorming': 'brainstorming',
+  'spec-func': 'specFunc',
+  'specFunc': 'specFunc',
+  'spec-tech': 'specTech',
+  'specTech': 'specTech',
+  'dev-plan': 'devPlan',
+  'devPlan': 'devPlan',
+  'implement': 'implement',
+  'review': 'review',
+  // Legacy v1 mappings
+  'brief': 'init',
+  'ba-spec': 'specFunc',
+  'baSpec': 'specFunc',
+  'questions': 'brainstorming',
+  'tech-spec': 'specTech',
+  'techSpec': 'specTech',
+  'challenge': 'review', // Deprecated, redirect to review
+});
+
+/**
+ * Map camelCase to kebab-case (for API calls)
+ * @type {Object<string, string>}
+ */
+export const STEP_API_MAP = Object.freeze({
+  'init': 'init',
+  'brainstorming': 'brainstorming',
+  'specFunc': 'spec-func',
+  'specTech': 'spec-tech',
+  'devPlan': 'dev-plan',
+  'implement': 'implement',
+  'review': 'review',
+});
+
+/**
+ * Steps visible in Product context (product phase)
  * @readonly
  * @type {string[]}
  */
-export const DEV_STEPS = STORY_STEPS;
+export const PRODUCT_STEPS = Object.freeze(['init', 'brainstorming', 'specFunc']);
+
+/**
+ * Steps visible in Dev context (dev phase)
+ * @readonly
+ * @type {string[]}
+ */
+export const DEV_STEPS = Object.freeze(['specTech', 'devPlan', 'implement', 'review']);
 
 /**
  * HTML tag pattern to prevent XSS in user input
@@ -356,12 +409,35 @@ export function isValidFigmaUrl(url) {
 }
 
 /**
- * Validates step name
+ * Validates step name (accepts both kebab-case and camelCase)
  * @param {string} stepName - Step name to validate
  * @returns {boolean} True if valid step name
  */
 export function isValidStepName(stepName) {
-  return STORY_STEPS.includes(stepName);
+  // Direct match in camelCase
+  if (STORY_STEPS.includes(stepName)) {
+    return true;
+  }
+  // Check if it's a valid kebab-case or legacy step
+  return stepName in STEP_KEY_MAP;
+}
+
+/**
+ * Normalizes step name to camelCase
+ * @param {string} stepName - Step name (kebab-case or camelCase)
+ * @returns {string} Normalized camelCase step name
+ */
+export function normalizeStepName(stepName) {
+  return STEP_KEY_MAP[stepName] || stepName;
+}
+
+/**
+ * Converts camelCase step name to kebab-case for API
+ * @param {string} stepName - Step name in camelCase
+ * @returns {string} Kebab-case step name
+ */
+export function stepToApiName(stepName) {
+  return STEP_API_MAP[stepName] || stepName;
 }
 
 /**

@@ -10,8 +10,12 @@ import {
   STORY_STATUS,
   STORY_SPACE,
   STORY_STEPS,
+  STEP_KEY_MAP,
+  STEP_API_MAP,
+  PRODUCT_STEPS,
   isValidStoryStatus,
   isValidStepName,
+  normalizeStepName,
   normalizeStoryStatus,
 } from '../models/validators.js';
 import {
@@ -745,6 +749,210 @@ export class StoryService {
     }
 
     return story.steps[stepName]?.history || [];
+  }
+
+  // ============== V3 Phase Methods ==============
+
+  /**
+   * Gets the current phase of a story based on its current step
+   * @param {string} storyId - Story ID
+   * @returns {Promise<string>} Phase: 'product' or 'dev'
+   * @throws {NotFoundError} If Story not found
+   */
+  async getCurrentPhase(storyId) {
+    const { story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    // Determine current step (first incomplete step)
+    for (const stepName of STORY_STEPS) {
+      const step = story.steps[stepName];
+      if (!step?.completed && !step?.skipped) {
+        return PRODUCT_STEPS.includes(stepName) ? 'product' : 'dev';
+      }
+    }
+
+    // All steps completed - dev phase
+    return 'dev';
+  }
+
+  /**
+   * Gets list of skipped steps for a story
+   * @param {string} storyId - Story ID
+   * @returns {Promise<string[]>} List of skipped step names
+   * @throws {NotFoundError} If Story not found
+   */
+  async getSkippedSteps(storyId) {
+    const { story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    const skipped = [];
+    for (const stepName of STORY_STEPS) {
+      if (story.steps[stepName]?.skipped) {
+        skipped.push(stepName);
+      }
+    }
+    return skipped;
+  }
+
+  /**
+   * Skips to a target step, marking intermediate steps as skipped
+   * @param {string} storyId - Story ID
+   * @param {string} targetStep - Target step name
+   * @returns {Promise<{story: Object, warning: Object|null}>} Updated story and skip warning
+   * @throws {NotFoundError} If Story not found
+   * @throws {ValidationError} If step name is invalid
+   */
+  async skipToStep(storyId, targetStep) {
+    // Normalize step name
+    const normalizedTarget = normalizeStepName(targetStep);
+
+    if (!STORY_STEPS.includes(normalizedTarget)) {
+      throw new ValidationError(`Invalid step name: ${targetStep}. Must be one of: ${STORY_STEPS.join(', ')}`);
+    }
+
+    const { epic, story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    // Find current step (first non-completed, non-skipped)
+    let currentStepIndex = -1;
+    for (let i = 0; i < STORY_STEPS.length; i++) {
+      const stepName = STORY_STEPS[i];
+      const step = story.steps[stepName];
+      if (!step?.completed && !step?.skipped) {
+        currentStepIndex = i;
+        break;
+      }
+    }
+
+    const targetIndex = STORY_STEPS.indexOf(normalizedTarget);
+
+    // Can't skip backwards
+    if (targetIndex <= currentStepIndex) {
+      return { story, warning: null };
+    }
+
+    // Mark intermediate steps as skipped
+    const skippedSteps = [];
+    for (let i = currentStepIndex; i < targetIndex; i++) {
+      if (i >= 0) {
+        const stepName = STORY_STEPS[i];
+        // init cannot be skipped
+        if (stepName === 'init') continue;
+
+        if (!story.steps[stepName]) {
+          story.steps[stepName] = {
+            completed: false,
+            skipped: false,
+            content: null,
+            history: [],
+            currentVersion: 0,
+          };
+        }
+        story.steps[stepName].skipped = true;
+        story.steps[stepName].completed = false;
+        skippedSteps.push(stepName);
+      }
+    }
+
+    // Track skipped steps in story metadata
+    story.skippedSteps = story.skippedSteps || [];
+    story.skippedSteps = [...new Set([...story.skippedSteps, ...skippedSteps])];
+
+    story.updatedAt = new Date().toISOString();
+    epic.updatedAt = new Date().toISOString();
+
+    await this.storage.writeEpic(epic);
+
+    // Calculate warning
+    let warning = null;
+    if (skippedSteps.includes('specFunc') && skippedSteps.includes('specTech')) {
+      warning = {
+        level: 'high',
+        message: 'Contexte tres limite - Pas de spec fonctionnelle ni technique',
+        autoAnalysis: true,
+      };
+    } else if (skippedSteps.includes('specTech')) {
+      warning = {
+        level: 'medium',
+        message: 'Pas de spec technique - Analyse automatique du codebase',
+        autoAnalysis: true,
+      };
+    } else if (skippedSteps.includes('specFunc')) {
+      warning = {
+        level: 'low',
+        message: 'Pas de spec fonctionnelle - Contexte limite',
+        autoAnalysis: false,
+      };
+    }
+
+    return { story, warning, skippedSteps };
+  }
+
+  /**
+   * Checks if skip to target step is allowed
+   * @param {string} storyId - Story ID
+   * @param {string} targetStep - Target step name
+   * @returns {Promise<{canSkip: boolean, warning: Object|null}>}
+   */
+  async canSkipTo(storyId, targetStep) {
+    const normalizedTarget = normalizeStepName(targetStep);
+
+    if (!STORY_STEPS.includes(normalizedTarget)) {
+      return { canSkip: false, warning: null };
+    }
+
+    // init cannot be the target of a skip
+    if (normalizedTarget === 'init') {
+      return { canSkip: false, warning: null };
+    }
+
+    const { story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      return { canSkip: false, warning: null };
+    }
+
+    // Check if init is completed (required before any skip)
+    if (!story.steps?.init?.completed) {
+      return { canSkip: false, warning: { level: 'error', message: 'Init must be completed first' } };
+    }
+
+    // Calculate warning for what would be skipped
+    let currentStepIndex = -1;
+    for (let i = 0; i < STORY_STEPS.length; i++) {
+      const stepName = STORY_STEPS[i];
+      const step = story.steps[stepName];
+      if (!step?.completed && !step?.skipped) {
+        currentStepIndex = i;
+        break;
+      }
+    }
+
+    const targetIndex = STORY_STEPS.indexOf(normalizedTarget);
+
+    if (targetIndex <= currentStepIndex) {
+      return { canSkip: false, warning: null };
+    }
+
+    const wouldSkip = STORY_STEPS.slice(currentStepIndex + 1, targetIndex).filter(s => s !== 'init');
+
+    let warning = null;
+    if (wouldSkip.includes('specFunc') && wouldSkip.includes('specTech')) {
+      warning = { level: 'high', message: 'Contexte tres limite', autoAnalysis: true };
+    } else if (wouldSkip.includes('specTech')) {
+      warning = { level: 'medium', message: 'Pas de spec technique', autoAnalysis: true };
+    }
+
+    return { canSkip: true, warning, wouldSkip };
   }
 
   /**

@@ -9,7 +9,7 @@ const STATUS_CLASSES = {
 };
 
 // Duplicated from constants.js to avoid async fetch on initial render
-const QUICK_STEPS = ['dev-plan', 'implement', 'review'];
+const DEVELOPMENT_STEPS = ['tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
 const FEATURE_TYPES = ['feature', 'bug'];
 const DEFAULT_FEATURE_TYPE = 'feature';
 const DELETION_FILTER = { ACTIVE: 'active', DELETED: 'deleted', ALL: 'all' };
@@ -30,6 +30,7 @@ const STORAGE_KEYS = {
   APPS_FILTER: 'aia-feature-list-apps-filter',
   WT_FILTER: 'aia-feature-list-wt-filter',
   DELETION_FILTER: 'aia-feature-list-deletion-filter',
+  EPIC_FILTER: 'aia-feature-list-epic-filter',
 };
 
 /**
@@ -89,9 +90,9 @@ function sortFeatures(features, field, order) {
 }
 
 /**
- * Check if a feature is completed (all relevant steps are done)
+ * Check if a feature is completed (all relevant steps are done or skipped)
  * Uses API-provided isCompleted field if available, otherwise calculates locally
- * @param {Object} feature - Feature object with steps or isCompleted
+ * @param {Object} feature - Feature object with steps, skippedSteps, or isCompleted
  * @returns {boolean}
  */
 function isFeatureCompleted(feature) {
@@ -101,13 +102,18 @@ function isFeatureCompleted(feature) {
   }
   // Fallback: calculate from steps (for lazy-loaded full data)
   const steps = feature.steps || {};
-  const isQuickFlow = feature.flow === 'quick';
-  const relevantSteps = isQuickFlow
-    ? Object.entries(steps).filter(([k]) => QUICK_STEPS.includes(k))
-    : Object.entries(steps);
+  const skippedSteps = feature.skippedSteps || [];
+
+  // All stories use DEVELOPMENT_STEPS in the dev dashboard
+  const stepList = DEVELOPMENT_STEPS;
+  const relevantSteps = stepList.map(k => [k, steps[k] || 'pending']);
 
   if (relevantSteps.length === 0) return false;
-  return relevantSteps.every(([_, status]) => status === 'done');
+
+  // A step is "complete" if it's done OR skipped
+  return relevantSteps.every(([stepKey, status]) => {
+    return status === 'done' || skippedSteps.includes(stepKey);
+  });
 }
 
 function StepBadge({ step, status }) {
@@ -211,7 +217,6 @@ function FeatureCard({ feature, availableApps, onRestore, lazyLoad = false }) {
   const effectiveFeature = lazyLoad && lazyState ? { ...feature, ...lazyState } : feature;
 
   const steps = effectiveFeature.steps || {};
-  const isQuickFlow = effectiveFeature.flow === 'quick';
   const featureType = effectiveFeature.type || DEFAULT_FEATURE_TYPE;
   const featureApps = effectiveFeature.apps || [];
   const isDeleted = effectiveFeature.isDeleted || effectiveFeature.deletedAt != null;
@@ -232,12 +237,13 @@ function FeatureCard({ feature, availableApps, onRestore, lazyLoad = false }) {
     );
   }
 
-  // Filter steps based on flow type
-  const relevantSteps = isQuickFlow
-    ? Object.entries(steps).filter(([k]) => QUICK_STEPS.includes(k))
-    : Object.entries(steps);
+  // All stories use DEVELOPMENT_STEPS in the dev dashboard
+  const stepList = DEVELOPMENT_STEPS;
+  const skippedSteps = effectiveFeature.skippedSteps || [];
+  const relevantSteps = stepList.map(k => [k, steps[k] || 'pending']);
 
-  const doneCount = relevantSteps.filter(([_, s]) => s === 'done').length;
+  // Count done + skipped as completed
+  const doneCount = relevantSteps.filter(([stepKey, s]) => s === 'done' || skippedSteps.includes(stepKey)).length;
   const totalCount = relevantSteps.length;
 
   // Map app names to full app objects for icons
@@ -259,8 +265,12 @@ function FeatureCard({ feature, availableApps, onRestore, lazyLoad = false }) {
     setRestoring(false);
   };
 
+  // Determine route based on phase
+  const featurePhase = effectiveFeature.phase || 'discovery';
+  const routeContext = featurePhase === 'discovery' ? 'product' : featurePhase === 'qa' ? 'qa' : 'dev';
+
   return React.createElement('a', {
-    href: `#/features/${feature.name}`,
+    href: `#/${routeContext}/${feature.name}`,
     className: `block bg-aia-card border rounded-lg p-4 transition-colors ${
       isDeleted
         ? 'border-red-500/30 opacity-75 hover:border-red-500/50'
@@ -284,13 +294,9 @@ function FeatureCard({ feature, availableApps, onRestore, lazyLoad = false }) {
       }, restoring ? 'Restoring...' : 'Restore'),
     ),
 
-    // Feature name row with Quick/wt badges
+    // Feature name row with wt badges
     React.createElement('div', { className: 'flex items-center gap-2 mb-2' },
       React.createElement('h3', { className: `font-semibold ${isDeleted ? 'text-slate-500 line-through' : 'text-slate-100'}` }, effectiveFeature.name),
-      !isDeleted && isQuickFlow && React.createElement('span', {
-        className: 'bg-amber-500/20 text-amber-400 text-xs px-1.5 py-0.5 rounded',
-        title: 'Quick Flow',
-      }, 'QUICK'),
       !isDeleted && effectiveFeature.hasWorktree && React.createElement('span', {
         className: 'bg-orange-500/20 text-orange-400 text-xs px-1.5 py-0.5 rounded',
         title: 'Git worktree active',
@@ -412,6 +418,36 @@ function WorktreeFilter({ filter, onChange, counts }) {
         }, `(${tab.count})`),
       )
     )
+  );
+}
+
+function EpicFilter({ epics, selected, onChange, unlinkedCount, onLinkAll }) {
+  if (!epics || epics.length === 0) return null;
+
+  return React.createElement('div', { className: 'flex items-center gap-2' },
+    React.createElement('span', { className: 'text-xs text-slate-500' }, 'Epic:'),
+    React.createElement('select', {
+      value: selected || 'all',
+      onChange: (e) => onChange(e.target.value === 'all' ? null : e.target.value),
+      className: 'bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-300 focus:border-aia-accent focus:outline-none',
+    },
+      React.createElement('option', { value: 'all' }, 'All Epics'),
+      React.createElement('option', { value: 'unlinked' }, `\u2014 Unlinked${unlinkedCount > 0 ? ` (${unlinkedCount})` : ''}`),
+      ...epics.map(epic =>
+        React.createElement('option', { key: epic.id, value: epic.id },
+          `${epic.isGeneral ? '\uD83D\uDCC1 ' : ''}${epic.name}`
+        )
+      )
+    ),
+    selected && React.createElement('button', {
+      onClick: () => onChange(null),
+      className: 'text-xs text-slate-500 hover:text-slate-300',
+    }, '\u2715'),
+    unlinkedCount > 0 && onLinkAll && React.createElement('button', {
+      onClick: onLinkAll,
+      className: 'text-xs bg-violet-500/20 text-violet-400 border border-violet-500/30 px-2 py-1 rounded hover:bg-violet-500/30',
+      title: `Link ${unlinkedCount} unlinked features to General Epic`,
+    }, `Link ${unlinkedCount} to General`)
   );
 }
 
@@ -565,7 +601,7 @@ function CreateFeatureModal({ apps, onCreated, onClose }) {
       });
       onClose();
       // Navigate directly to the edit page for the new feature
-      window.location.hash = `#/features/${encodeURIComponent(result.name || cleanName)}`;
+      window.location.hash = `#/dev/${encodeURIComponent(result.name || cleanName)}`;
     } catch (e) {
       setErr(e.message);
       setLoading(false);
@@ -635,7 +671,7 @@ function CreateFeatureModal({ apps, onCreated, onClose }) {
           },
             React.createElement('span', { className: 'text-3xl block mb-2' }, '\uD83D\uDC1B'),
             React.createElement('span', { className: 'text-sm font-medium text-slate-200' }, 'Bug'),
-            React.createElement('p', { className: 'text-xs text-slate-500 mt-1' }, 'Quick flow'),
+            React.createElement('p', { className: 'text-xs text-slate-500 mt-1' }, 'Fix an issue'),
           ),
         ),
       ),
@@ -719,11 +755,29 @@ function CreateFeatureModal({ apps, onCreated, onClose }) {
   );
 }
 
-export function Dashboard() {
+// Phase visibility mapping
+const PHASE_BY_CONTEXT = {
+  dev: ['development'],      // Dev dashboard shows development phase only
+  qa: ['qa'],               // QA dashboard shows qa phase only
+  product: ['discovery'],   // Product shows discovery (but product uses EpicDashboard)
+  all: null,                // Show all phases (default)
+};
+
+const CONTEXT_CONFIG = {
+  dev: { title: 'Dev Dashboard', icon: '🚀', route: 'dev' },
+  qa: { title: 'QA Dashboard', icon: '✅', route: 'qa' },
+  all: { title: 'Features', icon: '📋', route: '' },
+};
+
+export function Dashboard({ context = 'dev' }) {
   const [features, setFeatures] = React.useState([]);
   const [deletedCount, setDeletedCount] = React.useState(0);
   const [apps, setApps] = React.useState([]);
+  const [epics, setEpics] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+
+  const contextConfig = CONTEXT_CONFIG[context] || CONTEXT_CONFIG.all;
+  const allowedPhases = PHASE_BY_CONTEXT[context] || null;
 
   // Filter states with localStorage persistence
   const [typeFilter, setTypeFilter] = React.useState(() => loadFromStorage(STORAGE_KEYS.TYPE_FILTER, 'all'));
@@ -731,6 +785,7 @@ export function Dashboard() {
   const [wtFilter, setWtFilter] = React.useState(() => loadFromStorage(STORAGE_KEYS.WT_FILTER, 'all'));
   const [deletionFilter, setDeletionFilter] = React.useState(() => loadFromStorage(STORAGE_KEYS.DELETION_FILTER, DELETION_FILTER.ACTIVE));
   const [showCompleted, setShowCompleted] = React.useState(() => loadFromStorage(STORAGE_KEYS.SHOW_COMPLETED, false));
+  const [epicFilter, setEpicFilter] = React.useState(() => loadFromStorage(STORAGE_KEYS.EPIC_FILTER, null));
 
   // Sort state with localStorage persistence
   const [sortKey, setSortKey] = React.useState(() => loadFromStorage(STORAGE_KEYS.SORT, 'DATE_DESC'));
@@ -745,6 +800,7 @@ export function Dashboard() {
   React.useEffect(() => { saveToStorage(STORAGE_KEYS.DELETION_FILTER, deletionFilter); }, [deletionFilter]);
   React.useEffect(() => { saveToStorage(STORAGE_KEYS.SHOW_COMPLETED, showCompleted); }, [showCompleted]);
   React.useEffect(() => { saveToStorage(STORAGE_KEYS.SORT, sortKey); }, [sortKey]);
+  React.useEffect(() => { saveToStorage(STORAGE_KEYS.EPIC_FILTER, epicFilter); }, [epicFilter]);
 
   // Track whether to use lazy loading for card states
   const [useLazyLoad, setUseLazyLoad] = React.useState(true);
@@ -755,16 +811,19 @@ export function Dashboard() {
     try {
       // Fetch minimal features data for fast initial render
       // Card states will be loaded asynchronously per-card
-      const [featuresData, appsData, deletedData] = await Promise.all([
+      const [featuresData, appsData, deletedData, epicsData] = await Promise.all([
         api.get(`/features?filter=${deletionFilter}&minimal=true`),
         api.get('/apps'),
         // Also fetch deleted count for the filter badge (minimal mode)
         deletionFilter !== DELETION_FILTER.DELETED
           ? api.get(`/features?filter=${DELETION_FILTER.DELETED}&minimal=true`)
           : Promise.resolve([]),
+        // Fetch epics for filtering
+        api.get('/epics').catch(() => []),
       ]);
       setFeatures(featuresData);
       setApps(appsData);
+      setEpics(epicsData);
       setUseLazyLoad(true); // Enable lazy loading for new data
       // Set deleted count
       if (deletionFilter === DELETION_FILTER.DELETED) {
@@ -786,6 +845,12 @@ export function Dashboard() {
   // Filter features
   const filteredFeatures = React.useMemo(() => {
     let result = features.filter(f => {
+      // Phase filter (based on context)
+      if (allowedPhases) {
+        const featurePhase = f.phase || 'discovery';
+        if (!allowedPhases.includes(featurePhase)) return false;
+      }
+
       // Completion filter - hide completed unless showCompleted is true
       if (!showCompleted && isFeatureCompleted(f)) return false;
 
@@ -803,6 +868,15 @@ export function Dashboard() {
       if (wtFilter === 'with-wt' && !f.hasWorktree) return false;
       if (wtFilter === 'without-wt' && f.hasWorktree) return false;
 
+      // Epic filter
+      if (epicFilter) {
+        if (epicFilter === 'unlinked') {
+          if (f.epicId) return false;
+        } else {
+          if (f.epicId !== epicFilter) return false;
+        }
+      }
+
       return true;
     });
 
@@ -811,10 +885,25 @@ export function Dashboard() {
     result = sortFeatures(result, sortOption.field, sortOption.order);
 
     return result;
-  }, [features, showCompleted, typeFilter, appsFilter, wtFilter, sortKey]);
+  }, [features, showCompleted, typeFilter, appsFilter, wtFilter, epicFilter, sortKey]);
 
-  // Counts for type tabs (exclude completed if not showing them)
-  const countBase = showCompleted ? features : features.filter(f => !isFeatureCompleted(f));
+  // Counts for type tabs (exclude completed if not showing them, and filter by phase)
+  const countBase = React.useMemo(() => {
+    let base = features;
+    // Apply phase filter
+    if (allowedPhases) {
+      base = base.filter(f => {
+        const featurePhase = f.phase || 'discovery';
+        return allowedPhases.includes(featurePhase);
+      });
+    }
+    // Apply completion filter
+    if (!showCompleted) {
+      base = base.filter(f => !isFeatureCompleted(f));
+    }
+    return base;
+  }, [features, allowedPhases, showCompleted]);
+
   const typeCounts = {
     all: countBase.length,
     features: countBase.filter(f => (f.type || DEFAULT_FEATURE_TYPE) === 'feature').length,
@@ -828,11 +917,30 @@ export function Dashboard() {
     withoutWt: countBase.filter(f => !f.hasWorktree).length,
   };
 
+  // Count unlinked features (use isDeleted property from API response)
+  const unlinkedCount = features.filter(f => !f.epicId && !f.isDeleted).length;
+
+  // Handle linking all unlinked features to General Epic
+  const handleLinkAll = async () => {
+    try {
+      await api.post('/features/link-to-general');
+      load(); // Reload to show updated epic assignments
+    } catch (e) {
+      setLoadError(e.message || 'Failed to link features');
+    }
+  };
+
   return React.createElement('div', { className: 'space-y-6' },
     // Header
     React.createElement('div', { className: 'flex items-center justify-between' },
-      React.createElement('h1', { className: 'text-xl font-bold text-slate-100' }, 'Features'),
-      React.createElement('button', {
+      React.createElement('div', { className: 'flex items-center gap-3' },
+        React.createElement('span', { className: 'text-2xl' }, contextConfig.icon),
+        React.createElement('h1', { className: 'text-xl font-bold text-slate-100' }, contextConfig.title),
+        allowedPhases && React.createElement('span', { className: 'text-xs px-2 py-1 rounded-full bg-slate-700 text-slate-400' },
+          `${filteredFeatures.length} stories`
+        )
+      ),
+      context !== 'qa' && React.createElement('button', {
         onClick: () => setShowCreateModal(true),
         className: 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-3 py-1.5 text-sm hover:bg-aia-accent/30',
       }, '+ New'),
@@ -874,6 +982,15 @@ export function Dashboard() {
         apps,
         selected: appsFilter,
         onChange: setAppsFilter,
+      }),
+
+      // Epic filter
+      features.length > 0 && epics.length > 0 && React.createElement(EpicFilter, {
+        epics,
+        selected: epicFilter,
+        onChange: setEpicFilter,
+        unlinkedCount,
+        onLinkAll: handleLinkAll,
       }),
 
       // Worktree filter tabs

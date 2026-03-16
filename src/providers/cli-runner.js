@@ -2,11 +2,14 @@ import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
 import chalk from 'chalk';
 
-const DEFAULT_IDLE_TIMEOUT_MS = 180_000;
-const AGENT_IDLE_TIMEOUT_MS = 1_800_000; // 30 minutes pour éviter les timeouts sur les tâches complexes
+const DEFAULT_IDLE_TIMEOUT_MS = 1_800_000;
+const AGENT_IDLE_TIMEOUT_MS = 1_800_000;
 
 /**
  * Parse stream-json events from Claude CLI and extract human-readable output
+ * @param {string} line - JSON line from CLI
+ * @param {Function} onData - Callback for output
+ * @param {Object} state - Parsing state (tracks if we've seen streaming events)
  */
 function parseStreamJsonEvent(line, onData, state = {}) {
   try {
@@ -22,6 +25,9 @@ function parseStreamJsonEvent(line, onData, state = {}) {
     // Stream events (partial messages) - token by token streaming
     if (event.type === 'stream_event' && event.event) {
       const streamEvent = event.event;
+
+      // Mark that we're receiving streaming events (to avoid duplicates from 'assistant' events)
+      state.hasStreamedContent = true;
 
       // Content block delta - actual text tokens
       if (streamEvent.type === 'content_block_delta' && streamEvent.delta) {
@@ -56,15 +62,21 @@ function parseStreamJsonEvent(line, onData, state = {}) {
     }
 
     // Complete assistant message (non-streaming)
+    // Skip if we already received this content via streaming events
     if (event.type === 'assistant' && event.message?.content) {
-      for (const block of event.message.content) {
-        if (block.type === 'text' && block.text) {
-          if (onData) onData({ type: 'stdout', text: block.text });
-        } else if (block.type === 'tool_use') {
-          const toolMsg = `\n[tool] ${block.name}\n`;
-          if (onData) onData({ type: 'stdout', text: toolMsg });
+      if (!state.hasStreamedContent) {
+        // Only output if we haven't been streaming (fallback for non-streaming mode)
+        for (const block of event.message.content) {
+          if (block.type === 'text' && block.text) {
+            if (onData) onData({ type: 'stdout', text: block.text });
+          } else if (block.type === 'tool_use') {
+            const toolMsg = `\n[tool] ${block.name}\n`;
+            if (onData) onData({ type: 'stdout', text: toolMsg });
+          }
         }
       }
+      // Reset for next message
+      state.hasStreamedContent = false;
       return { result: null, state };
     }
 

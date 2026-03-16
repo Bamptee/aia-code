@@ -39,7 +39,12 @@
     "test:delete:api": "node --test tests/feature-delete.api.test.js",
     "test:ux": "node --test tests/feature-list-ux.*.test.js",
     "test:ux:unit": "node --test tests/feature-list-ux.unit.test.js",
-    "test:ux:api": "node --test tests/feature-list-ux.api.test.js"
+    "test:ux:api": "node --test tests/feature-list-ux.api.test.js",
+    "test:epic": "node --test tests/epic/*.test.js",
+    "test:epic:validators": "node --test tests/epic/validators.test.js",
+    "test:epic:services": "node --test tests/epic/*-service.test.js",
+    "test:epic:providers": "node --test tests/epic/*-provider.test.js",
+    "test:epic:e2e": "node --test tests/epic/e2e-workflow.test.js"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

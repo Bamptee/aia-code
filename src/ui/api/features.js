@@ -1,26 +1,84 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import Busboy from 'busboy';
-import { AIA_DIR, DELETION_FILTER, QUICK_STEPS } from '../../constants.js';
-import { loadStatus, updateStepStatus, resetStep, updateFlowType, updateType, updateApps, softDeleteFeature, restoreFeature, isFeatureDeleted } from '../../services/status.js';
+import { AIA_DIR, DELETION_FILTER, QUICK_STEPS, LEGACY_FEATURES_DIR } from '../../constants.js';
+import { loadStatus, updateStepStatus, resetStep, updateFlowType, updateType, updateApps, softDeleteFeature, restoreFeature, isFeatureDeleted, updateEpicId, getFeatureEpicId, getStoryDirPath } from '../../services/status.js';
 import { FEATURE_TYPES } from '../../constants.js';
 
 /**
- * Check if a feature is completed (all relevant steps are done)
- * @param {Object} status - Feature status object with steps and flow
+ * Get stories directory (with legacy fallback check)
+ */
+function getStoriesDir(root) {
+  return path.join(root, AIA_DIR, 'stories');
+}
+
+function getLegacyFeaturesDir(root) {
+  return path.join(root, AIA_DIR, LEGACY_FEATURES_DIR);
+}
+
+/**
+ * List all stories from both stories/ and legacy features/ directories
+ */
+async function listAllStories(root) {
+  const stories = [];
+
+  // Check stories directory
+  const storiesDir = getStoriesDir(root);
+  if (await fs.pathExists(storiesDir)) {
+    const entries = await fs.readdir(storiesDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        stories.push({ name: entry.name, source: 'stories' });
+      }
+    }
+  }
+
+  // Check legacy features directory
+  const legacyDir = getLegacyFeaturesDir(root);
+  if (await fs.pathExists(legacyDir)) {
+    const entries = await fs.readdir(legacyDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        // Only add if not already in stories
+        if (!stories.some(s => s.name === entry.name)) {
+          stories.push({ name: entry.name, source: 'features' });
+        }
+      }
+    }
+  }
+
+  return stories;
+}
+
+/**
+ * Check if a feature is completed (all relevant steps are done or skipped)
+ * @param {Object} status - Feature status object with steps, skippedSteps
  * @returns {boolean}
  */
 function isFeatureCompleted(status) {
   const steps = status.steps || {};
-  const isQuickFlow = status.flow === 'quick';
-  const relevantSteps = isQuickFlow
-    ? Object.entries(steps).filter(([k]) => QUICK_STEPS.includes(k))
-    : Object.entries(steps);
+  const skippedSteps = status.skippedSteps || [];
+
+  // Relevant steps depend on phase:
+  // - discovery phase: DISCOVERY_STEPS (brief, ba-spec, questions)
+  // - development phase: DEVELOPMENT_STEPS (tech-spec, challenge, dev-plan, implement, review)
+  const phase = status.phase || 'discovery';
+  const relevantStepKeys = phase === 'discovery'
+    ? ['brief', 'ba-spec', 'questions']
+    : ['tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
+
+  // Filter to only the relevant steps
+  const relevantSteps = relevantStepKeys.map(k => [k, steps[k] || 'pending']);
 
   if (relevantSteps.length === 0) return false;
-  return relevantSteps.every(([_, s]) => s === 'done');
+
+  // A step is "complete" if it's done OR skipped
+  return relevantSteps.every(([stepKey, stepStatus]) => {
+    return stepStatus === 'done' || skippedSteps.includes(stepKey);
+  });
 }
-import { createFeature, validateFeatureName } from '../../services/feature.js';
+import { createStory, skipStep, unskipStep } from '../../services/feature.js';
+import { STORY_PHASES } from '../../constants.js';
 import { runStep } from '../../services/runner.js';
 import { runQuick } from '../../services/quick.js';
 import { suggestFlowType } from '../../services/flow-analyzer.js';
@@ -59,16 +117,15 @@ function validateAttachments(rawAttachments) {
 }
 
 export function registerFeatureRoutes(router) {
-  // List all features
+  // List all stories (from both stories/ and legacy features/)
   // Query params:
   //   ?filter=active|deleted|all (default: active)
   //   ?minimal=true - Return minimal data for faster initial load (name, type, flow, createdAt, deletedAt only)
   router.get('/api/features', async (req, res, { root, query }) => {
-    const featuresDir = path.join(root, AIA_DIR, 'features');
-    if (!(await fs.pathExists(featuresDir))) {
+    const entries = await listAllStories(root);
+    if (entries.length === 0) {
       return json(res, []);
     }
-    const entries = await fs.readdir(featuresDir, { withFileTypes: true });
     const features = [];
     const wtInstalled = isWtInstalled();
 
@@ -80,53 +137,71 @@ export function registerFeatureRoutes(router) {
     const minimal = query?.minimal === 'true';
 
     for (const entry of entries) {
-      if (entry.isDirectory()) {
-        try {
-          const status = await loadStatus(entry.name, root);
-          const deleted = isFeatureDeleted(status);
+      try {
+        const status = await loadStatus(entry.name, root);
+        const deleted = isFeatureDeleted(status);
 
-          // Apply deletion filter
-          if (filter === DELETION_FILTER.ACTIVE && deleted) continue;
-          if (filter === DELETION_FILTER.DELETED && !deleted) continue;
-          // DELETION_FILTER.ALL shows everything
+        // Apply deletion filter
+        if (filter === DELETION_FILTER.ACTIVE && deleted) continue;
+        if (filter === DELETION_FILTER.DELETED && !deleted) continue;
+        // DELETION_FILTER.ALL shows everything
 
-          if (minimal) {
-            // Minimal mode: return basic info + essential computed fields for fast initial render
-            // Include hasWorktree and isCompleted since they're needed for filtering
-            const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
-            const completed = isFeatureCompleted(status);
-            features.push({
-              name: entry.name,
-              type: status.type,
-              flow: status.flow,
-              createdAt: status.createdAt,
-              deletedAt: status.deletedAt,
-              isDeleted: deleted,
-              hasWorktree: hasWt,
-              isCompleted: completed,
-            });
-          } else {
-            // Full mode: return all data including computed states
-            const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
-            const running = isRunning(entry.name);
-            const completed = isFeatureCompleted(status);
-            features.push({ name: entry.name, ...status, hasWorktree: hasWt, isDeleted: deleted, agentRunning: running, isCompleted: completed });
-          }
-        } catch {
-          features.push({ name: entry.name, error: true, hasWorktree: false, isDeleted: false, agentRunning: false });
+        if (minimal) {
+          // Minimal mode: return basic info + essential computed fields for fast initial render
+          // Include hasWorktree and isCompleted since they're needed for filtering
+          const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+          const completed = isFeatureCompleted(status);
+          features.push({
+            name: entry.name,
+            slug: status.slug || entry.name,
+            displayName: status.name || entry.name,
+            type: status.type,
+            flow: status.flow,
+            phase: status.phase || 'development',
+            createdAt: status.createdAt,
+            deletedAt: status.deletedAt,
+            isDeleted: deleted,
+            hasWorktree: hasWt,
+            isCompleted: completed,
+            epicId: getFeatureEpicId(status),
+          });
+        } else {
+          // Full mode: return all data including computed states
+          const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+          const running = isRunning(entry.name);
+          const completed = isFeatureCompleted(status);
+          features.push({
+            name: entry.name,
+            slug: status.slug || entry.name,
+            displayName: status.name || entry.name,
+            ...status,
+            hasWorktree: hasWt,
+            isDeleted: deleted,
+            agentRunning: running,
+            isCompleted: completed,
+            epicId: getFeatureEpicId(status),
+          });
         }
+      } catch {
+        features.push({ name: entry.name, error: true, hasWorktree: false, isDeleted: false, agentRunning: false });
       }
     }
     json(res, features);
   });
 
-  // Get a single feature
+  // Get a single story
   router.get('/api/features/:name', async (req, res, { params, root }) => {
     try {
       const status = await loadStatus(params.name, root);
-      const featureDir = path.join(root, AIA_DIR, 'features', params.name);
-      const files = await fs.readdir(featureDir);
-      json(res, { name: params.name, ...status, files });
+      const storyDir = await getStoryDirPath(params.name, root);
+      const files = await fs.readdir(storyDir);
+      json(res, {
+        name: params.name,
+        slug: status.slug || params.name,
+        displayName: status.name || params.name,
+        ...status,
+        files,
+      });
     } catch (err) {
       error(res, err.message, 404);
     }
@@ -162,9 +237,10 @@ export function registerFeatureRoutes(router) {
     req.on('close', () => removeSseClient(params.name, res));
   });
 
-  // Read a feature file
+  // Read a story file
   router.get('/api/features/:name/files/:filename', async (req, res, { params, root }) => {
-    const filePath = path.join(root, AIA_DIR, 'features', params.name, params.filename);
+    const storyDir = await getStoryDirPath(params.name, root);
+    const filePath = path.join(storyDir, params.filename);
     if (!(await fs.pathExists(filePath))) {
       return error(res, 'File not found', 404);
     }
@@ -172,22 +248,37 @@ export function registerFeatureRoutes(router) {
     json(res, { filename: params.filename, content });
   });
 
-  // Save a feature file
+  // Save a story file
   router.put('/api/features/:name/files/:filename', async (req, res, { params, root, parseBody }) => {
     const body = await parseBody();
-    const filePath = path.join(root, AIA_DIR, 'features', params.name, params.filename);
+    const storyDir = await getStoryDirPath(params.name, root);
+    const filePath = path.join(storyDir, params.filename);
     await fs.writeFile(filePath, body.content, 'utf-8');
     json(res, { ok: true });
   });
 
   // Create a new feature
+  // Uses createStory with auto-generated slug from name (same as product flow)
   router.post('/api/features', async (req, res, { root, parseBody }) => {
     const body = await parseBody();
     try {
       const { name, type = 'feature', apps = [] } = body;
-      validateFeatureName(name);
-      await createFeature(name, root, { type, apps });
-      json(res, { ok: true, name, type, apps }, 201);
+
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return error(res, 'name is required', 400);
+      }
+
+      // Use createStory which generates a unique slug from the name
+      // This ensures consistency with product flow (/api/stories endpoint)
+      const story = await createStory(name.trim(), root, {
+        type,
+        apps,
+        phase: STORY_PHASES.DEVELOPMENT,  // Dev-created stories start in development
+        createdFrom: 'dev',
+      });
+
+      // Return with name = slug for backwards compatibility with existing frontend
+      json(res, { ok: true, name: story.slug, type, apps, slug: story.slug }, 201);
     } catch (err) {
       error(res, err.message, 400);
     }
@@ -357,7 +448,8 @@ IMPORTANT:
       });
 
       // Save enriched content to init.md
-      const initPath = path.join(root, AIA_DIR, 'features', params.name, 'init.md');
+      const storyDir = await getStoryDirPath(params.name, root);
+      const initPath = path.join(storyDir, 'init.md');
       await fs.writeFile(initPath, enrichedContent.trim(), 'utf-8');
 
       // Analyze and suggest flow type based on enriched content
@@ -383,7 +475,8 @@ IMPORTANT:
 
   // Upload attachments (multipart/form-data)
   router.post('/api/features/:name/attachments', async (req, res, { params, root }) => {
-    const attachDir = path.join(root, AIA_DIR, 'features', params.name, 'attachments');
+    const storyDir = await getStoryDirPath(params.name, root);
+    const attachDir = path.join(storyDir, 'attachments');
     await fs.ensureDir(attachDir);
 
     const busboy = Busboy({
@@ -488,7 +581,8 @@ IMPORTANT:
 
   // List attachments
   router.get('/api/features/:name/attachments', async (req, res, { params, root }) => {
-    const attachDir = path.join(root, AIA_DIR, 'features', params.name, 'attachments');
+    const storyDir = await getStoryDirPath(params.name, root);
+    const attachDir = path.join(storyDir, 'attachments');
     if (!(await fs.pathExists(attachDir))) {
       return json(res, []);
     }
@@ -516,7 +610,8 @@ IMPORTANT:
       return error(res, 'Invalid filename', 400);
     }
 
-    const filepath = path.join(root, AIA_DIR, 'features', params.name, 'attachments', filename);
+    const storyDir = await getStoryDirPath(params.name, root);
+    const filepath = path.join(storyDir, 'attachments', filename);
     if (!(await fs.pathExists(filepath))) {
       return error(res, 'Attachment not found', 404);
     }
@@ -596,6 +691,73 @@ IMPORTANT:
     try {
       await restoreFeature(params.name, root);
       json(res, { ok: true });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Update feature epic assignment
+  router.patch('/api/features/:name/epic', async (req, res, { params, root, parseBody }) => {
+    const body = await parseBody();
+    const { epicId } = body;
+
+    // epicId can be null to unlink from epic, or a string to link
+    if (epicId !== null && typeof epicId !== 'string') {
+      return error(res, 'epicId must be a string or null', 400);
+    }
+
+    try {
+      await updateEpicId(params.name, epicId, root);
+      json(res, { ok: true, epicId });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Link all unlinked stories to General Epic
+  router.post('/api/features/link-to-general', async (req, res, { root }) => {
+    const entries = await listAllStories(root);
+    if (entries.length === 0) {
+      return json(res, { ok: true, linked: 0 });
+    }
+
+    const GENERAL_EPIC_ID = '00000000-0000-0000-0000-000000000000';
+    let linked = 0;
+
+    for (const entry of entries) {
+      try {
+        const status = await loadStatus(entry.name, root);
+        const epicId = getFeatureEpicId(status);
+        const deleted = isFeatureDeleted(status);
+
+        // Only link active (non-deleted) stories that have no epicId
+        if (!deleted && !epicId) {
+          await updateEpicId(entry.name, GENERAL_EPIC_ID, root);
+          linked++;
+        }
+      } catch {
+        // Skip stories with errors
+      }
+    }
+
+    json(res, { ok: true, linked });
+  });
+
+  // Skip a step
+  router.post('/api/features/:name/skip/:step', async (req, res, { params, root }) => {
+    try {
+      const updated = await skipStep(params.name, params.step, root);
+      json(res, { ok: true, story: updated });
+    } catch (err) {
+      error(res, err.message, 400);
+    }
+  });
+
+  // Unskip (restore) a step
+  router.delete('/api/features/:name/skip/:step', async (req, res, { params, root }) => {
+    try {
+      const updated = await unskipStep(params.name, params.step, root);
+      json(res, { ok: true, story: updated });
     } catch (err) {
       error(res, err.message, 400);
     }

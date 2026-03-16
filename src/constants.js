@@ -4,9 +4,13 @@ export const AIA_FOLDERS = [
   'context',
   'knowledge',
   'prompts',
-  'features',
+  'epics',
+  'stories',
   'logs',
 ];
+
+// Legacy support
+export const LEGACY_FEATURES_DIR = 'features';
 
 export const SCAN_IGNORE = new Set([
   'node_modules',
@@ -40,6 +44,7 @@ export const QUICK_STEPS = ['dev-plan', 'implement', 'review'];
 
 export const APPLY_STEPS = new Set([
   'implement',
+  'review',
 ]);
 
 export const STEP_STATUS = {
@@ -49,8 +54,23 @@ export const STEP_STATUS = {
   ERROR: 'error',
 };
 
-export const FEATURE_TYPES = Object.freeze(['feature', 'bug']);
+export const FEATURE_TYPES = Object.freeze(['feature', 'bug', 'chore', 'spike']);
 export const DEFAULT_FEATURE_TYPE = 'feature';
+
+// Story phases
+export const STORY_PHASES = Object.freeze({
+  DISCOVERY: 'discovery',
+  DEVELOPMENT: 'development',
+});
+
+// Discovery steps (first 3)
+export const DISCOVERY_STEPS = ['brief', 'ba-spec', 'questions'];
+
+// Development steps (remaining)
+export const DEVELOPMENT_STEPS = ['tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
+
+// Steps that can be skipped (not init, dev-plan, implement)
+export const SKIPPABLE_STEPS = ['brief', 'ba-spec', 'questions', 'tech-spec', 'challenge', 'review'];
 
 /**
  * Feature deletion status filter options

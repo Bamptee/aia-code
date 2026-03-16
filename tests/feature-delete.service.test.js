@@ -79,7 +79,7 @@ describe('feature soft-delete service', () => {
       await softDeleteFeature('test-preserve', testRoot);
 
       const status = await loadStatus('test-preserve', testRoot);
-      assert.strictEqual(status.feature, 'test-preserve');
+      assert.strictEqual(status.slug, 'test-preserve');
       assert.strictEqual(status.type, 'bug');
       assert.ok(status.steps, 'steps should be preserved');
     });
@@ -116,7 +116,7 @@ describe('feature soft-delete service', () => {
       await restoreFeature('test-restore-preserve', testRoot);
 
       const status = await loadStatus('test-restore-preserve', testRoot);
-      assert.strictEqual(status.feature, 'test-restore-preserve');
+      assert.strictEqual(status.slug, 'test-restore-preserve');
       assert.strictEqual(status.type, 'feature');
       assert.deepStrictEqual(status.apps, ['app1']);
     });

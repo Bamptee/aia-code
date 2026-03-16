@@ -109,6 +109,10 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
     idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
   }
   return new Promise((resolve, reject) => {
+    // Log command for manual replay when debugging
+    const safeArgs = args.map(a => /[\s"']/.test(a) ? `'${a.replace(/'/g, "'\\''")}'` : a);
+    console.error(chalk.gray(`[AI] $ ${command} ${safeArgs.join(' ')}${stdinData ? ` (stdin ${(stdinData.length / 1024).toFixed(1)}KB)` : ''}`));
+
     // Remove CLAUDECODE from env to avoid conflicts
     const { CLAUDECODE: _, ...cleanEnv } = process.env;
     const child = spawn(command, args, {
@@ -200,7 +204,10 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
       }
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
+      if (code !== 0 || signal) {
+        console.error(chalk.gray(`[AI] Exited: code=${code} signal=${signal || 'none'}`));
+      }
       // Process any remaining data in the buffer
       if (streamJson && jsonBuffer.trim()) {
         const { result } = parseStreamJsonEvent(jsonBuffer, onData, parserState);

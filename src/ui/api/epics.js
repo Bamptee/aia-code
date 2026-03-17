@@ -680,7 +680,7 @@ export function registerEpicRoutes(router) {
         let config;
         try {
           config = await loadConfig(root);
-          selectedModel = body.model || config.models?.brief?.[0]?.model || 'claude-default';
+          selectedModel = body.model || config.models?.init?.[0]?.model || 'claude-default';
         } catch {
           return error(res, 'AI not configured. Run "aia init" to set up your project.', 400);
         }
@@ -792,8 +792,8 @@ IMPORTANT:
       let selectedModel;
       try {
         config = await loadConfig(root);
-        // Use provided model or get from config (brief step is a good default)
-        selectedModel = body.model || config.models?.brief?.[0]?.model || 'claude-default';
+        // Use provided model or get from config (init step is a good default)
+        selectedModel = body.model || config.models?.init?.[0]?.model || 'claude-default';
       } catch {
         return error(res, 'AI not configured. Run "aia init" to set up your project.', 400);
       }
@@ -1265,23 +1265,23 @@ IMPORTANT:
     }
 
     switch (stepName) {
-      case 'brief':
-        return aiProvider.generateBrief(input, context);
-      case 'baSpec':
-        if (story.steps?.brief?.content) {
-          input = `${input}\nExisting Brief:\n${story.steps.brief.content}`;
+      case 'init':
+        return aiProvider.generateInit(input, context);
+      case 'specFunc':
+        if (story.steps?.init?.content) {
+          input = `${input}\nExisting Init:\n${story.steps.init.content}`;
         }
-        return aiProvider.generateBASpec(input, context);
-      case 'questions':
-        if (story.steps?.brief?.content) {
-          input = `${input}\nBrief:\n${story.steps.brief.content}`;
+        return aiProvider.generateSpecFunc(input, context);
+      case 'brainstorming':
+        if (story.steps?.init?.content) {
+          input = `${input}\nInit:\n${story.steps.init.content}`;
         }
-        if (story.steps?.baSpec?.content) {
-          input = `${input}\nBA Specification:\n${story.steps.baSpec.content}`;
+        if (story.steps?.specFunc?.content) {
+          input = `${input}\nFunctional Specification:\n${story.steps.specFunc.content}`;
         }
-        return aiProvider.generateQuestions(input, context);
+        return aiProvider.generateBrainstorming(input, context);
       default:
-        throw new Error(`No legacy generator for step: ${stepName}`);
+        throw new Error(`No generator for step: ${stepName}`);
     }
   }
 

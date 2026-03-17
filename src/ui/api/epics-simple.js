@@ -470,7 +470,7 @@ IMPORTANT:
 - Write in ${config.document_output_language || 'English'}`;
 
       // Call model to enrich
-      const model = body.model || config.models?.brief?.[0]?.model || 'claude-default';
+      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
 
       sseSend('status', { status: 'generating', message: 'AI is structuring the story...' });
 
@@ -483,8 +483,10 @@ IMPORTANT:
       // Save enriched content to init.md
       await fs.writeFile(initPath, enrichedContent.trim(), 'utf-8');
 
-      // Mark as enriched in status.yaml
+      // Mark as enriched in status.yaml and step as done
       status.initEnriched = true;
+      status.steps = status.steps || {};
+      status.steps.init = 'done';
       status.updatedAt = new Date().toISOString();
       await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
@@ -522,7 +524,7 @@ IMPORTANT:
       // If enrich is requested, use AI
       if (body.enrich) {
         const config = await loadConfig(root);
-        const model = body.model || config.models?.brief?.[0]?.model || 'claude-default';
+        const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
 
         const enrichPrompt = `You are a product discovery assistant helping to structure a story/feature idea.
 
@@ -563,8 +565,10 @@ IMPORTANT:
         const enrichedContent = await callModel(model, enrichPrompt, { verbose: false, apply: false });
         await fs.writeFile(initPath, enrichedContent.trim(), 'utf-8');
 
-        // Mark as enriched in status.yaml
+        // Mark as enriched in status.yaml and step as done
         status.initEnriched = true;
+        status.steps = status.steps || {};
+        status.steps.init = 'done';
         status.updatedAt = new Date().toISOString();
         await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
@@ -582,8 +586,10 @@ ${inputText}
 `;
         await fs.writeFile(initPath, initContent, 'utf-8');
 
-        // Keep initEnriched as false
+        // Mark step as done even if not enriched (content exists)
         status.initEnriched = false;
+        status.steps = status.steps || {};
+        status.steps.init = 'done';
         status.updatedAt = new Date().toISOString();
         await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
@@ -630,6 +636,8 @@ ${inputText}
       const rawStatus = await fs.readFile(statusPath, 'utf-8');
       const status = yaml.parse(rawStatus);
       status.initEnriched = true; // Mark as having content
+      status.steps = status.steps || {};
+      status.steps.init = 'done';
       status.updatedAt = new Date().toISOString();
       await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
@@ -683,7 +691,7 @@ IMPORTANT:
 DOCUMENT TO TRANSLATE:
 ${content}`;
 
-      const model = config.models?.brief?.[0]?.model || 'claude-default';
+      const model = config.models?.init?.[0]?.model || 'claude-default';
       const translated = await callModel(model, translatePrompt, { verbose: false, apply: false });
 
       json(res, {
@@ -951,7 +959,7 @@ INSTRUCTIONS:
 - Keep responses concise but helpful`;
 
       // Use model from request body, or fall back to config
-      const model = body.model || config.models?.brief?.[0]?.model || 'claude-default';
+      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
       const aiResponse = await callModel(model, chatPrompt, { verbose: false, apply: false });
 
       // Save messages
@@ -1010,7 +1018,7 @@ IMPORTANT:
 DOCUMENT TO TRANSLATE:
 ${content}`;
 
-      const model = config.models?.brief?.[0]?.model || 'claude-default';
+      const model = config.models?.init?.[0]?.model || 'claude-default';
       const translated = await callModel(model, translatePrompt, { verbose: false, apply: false });
 
       json(res, {
@@ -1068,7 +1076,7 @@ ${content}`;
 
         // Load config for model selection
         const config = await loadConfig(root);
-        const model = config.models?.implement?.[0]?.model || config.models?.brief?.[0]?.model || 'claude-sonnet-4-20250514';
+        const model = config.models?.implement?.[0]?.model || config.models?.init?.[0]?.model || 'claude-sonnet-4-20250514';
 
         // Load current step content for context
         let stepContent = '';

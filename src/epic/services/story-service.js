@@ -260,7 +260,7 @@ export class StoryService {
   /**
    * Updates a Story step
    * @param {string} storyId - Story ID
-   * @param {string} stepName - Step name: 'brief', 'baSpec', or 'questions'
+   * @param {string} stepName - Step name: 'init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', or 'review'
    * @param {Object} stepData - Step data
    * @param {boolean} [stepData.completed] - Mark as completed
    * @param {boolean} [stepData.skipped] - Mark as skipped

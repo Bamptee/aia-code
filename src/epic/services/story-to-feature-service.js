@@ -83,18 +83,18 @@ export class StoryToFeatureService {
     await fs.writeFile(path.join(featureDir, 'init.md'), initContent, 'utf-8');
 
     // Copy story step contents to feature step files
-    if (story.steps.brief?.content) {
-      await fs.writeFile(path.join(featureDir, 'brief.md'), story.steps.brief.content, 'utf-8');
+    if (story.steps.init?.content) {
+      await fs.writeFile(path.join(featureDir, 'init.md'), story.steps.init.content, 'utf-8');
     }
-    if (story.steps.baSpec?.content) {
-      await fs.writeFile(path.join(featureDir, 'ba-spec.md'), story.steps.baSpec.content, 'utf-8');
+    if (story.steps.specFunc?.content) {
+      await fs.writeFile(path.join(featureDir, 'spec-func.md'), story.steps.specFunc.content, 'utf-8');
     }
-    if (story.steps.questions?.content) {
-      await fs.writeFile(path.join(featureDir, 'questions.md'), story.steps.questions.content, 'utf-8');
+    if (story.steps.brainstorming?.content) {
+      await fs.writeFile(path.join(featureDir, 'brainstorming.md'), story.steps.brainstorming.content, 'utf-8');
     }
 
     // Create empty files for remaining steps
-    const remainingSteps = FEATURE_STEPS.filter(s => !['brief', 'ba-spec', 'questions'].includes(s));
+    const remainingSteps = FEATURE_STEPS.filter(s => !['init', 'spec-func', 'brainstorming'].includes(s));
     for (const step of remainingSteps) {
       await fs.writeFile(path.join(featureDir, `${step}.md`), '', 'utf-8');
     }
@@ -125,9 +125,9 @@ export class StoryToFeatureService {
   _buildStatusYaml(featureName, story) {
     const steps = {};
     for (const step of FEATURE_STEPS) {
-      if (['brief', 'ba-spec', 'questions'].includes(step)) {
+      if (['init', 'spec-func', 'brainstorming'].includes(step)) {
         // Mark product steps as done if content exists, pending otherwise
-        const storyStep = step === 'ba-spec' ? 'baSpec' : step;
+        const storyStep = step === 'spec-func' ? 'specFunc' : step;
         const hasContent = story.steps[storyStep]?.content || story.steps[storyStep]?.completed;
         steps[step] = hasContent ? 'done' : 'pending';
       } else {

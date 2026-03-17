@@ -54,25 +54,7 @@ export const STEP_ORDER = Object.freeze([
   'spec-tech', 'dev-plan', 'implement', 'review'
 ]);
 
-/**
- * Legacy step names mapping to v3
- * @type {Object<string, string>}
- */
-export const LEGACY_STEP_MAP = Object.freeze({
-  'brief': 'init',
-  'ba-spec': 'spec-func',
-  'baSpec': 'spec-func',
-  'questions': 'brainstorming',
-  'tech-spec': 'spec-tech',
-  'techSpec': 'spec-tech',
-  'challenge': 'review', // Deprecated, merged into review
-  'dev-plan': 'dev-plan',
-  'devPlan': 'dev-plan',
-  'implement': 'implement',
-  'review': 'review',
-});
-
-// Legacy export for backward compatibility
+// V3 steps - No legacy mapping needed
 export const FEATURE_STEPS = Object.freeze([
   'init',
   'brainstorming',

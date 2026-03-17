@@ -60,12 +60,12 @@ function isFeatureCompleted(status) {
   const skippedSteps = status.skippedSteps || [];
 
   // Relevant steps depend on phase:
-  // - discovery phase: DISCOVERY_STEPS (brief, ba-spec, questions)
-  // - development phase: DEVELOPMENT_STEPS (tech-spec, challenge, dev-plan, implement, review)
+  // - discovery phase: DISCOVERY_STEPS (init, brainstorming, spec-func)
+  // - development phase: DEVELOPMENT_STEPS (spec-tech, dev-plan, implement, review)
   const phase = status.phase || 'discovery';
   const relevantStepKeys = phase === 'discovery'
-    ? ['brief', 'ba-spec', 'questions']
-    : ['tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
+    ? ['init', 'brainstorming', 'spec-func']
+    : ['spec-tech', 'dev-plan', 'implement', 'review'];
 
   // Filter to only the relevant steps
   const relevantSteps = relevantStepKeys.map(k => [k, steps[k] || 'pending']);
@@ -436,8 +436,8 @@ IMPORTANT:
 - Output ONLY the markdown document, no explanations
 - Write the ENTIRE document in ${config.document_output_language || 'English'} regardless of the input language`;
 
-      // Call model to enrich (use brief model config or default)
-      const model = config.models?.brief?.[0]?.model || 'claude-default';
+      // Call model to enrich (use init model config or default)
+      const model = config.models?.init?.[0]?.model || 'claude-default';
 
       sseSend(res, 'status', { status: 'generating', message: 'AI is structuring the feature...' });
 

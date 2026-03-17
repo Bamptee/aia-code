@@ -169,7 +169,7 @@ function StoryRow({ story, onClick, onStatusChange }) {
 
   // Step progress
   const steps = story.steps || {};
-  const stepKeys = ['brief', 'baSpec', 'questions'];
+  const stepKeys = ['init', 'brainstorming', 'specFunc'];
   const completedSteps = stepKeys.filter(k => steps[k]?.completed || steps[k]?.skipped).length;
 
   return React.createElement('div', {

@@ -19,26 +19,29 @@ export const EPIC_STATUS = Object.freeze({
 });
 
 /**
- * Story status enum values (simplified)
+ * Story status enum values
  * @readonly
  * @enum {string}
  */
 export const STORY_STATUS = Object.freeze({
   DRAFT: 'draft',
   PENDING: 'pending',
+  READY_FOR_DEV: 'ready_for_dev',
+  IN_PROGRESS: 'in_progress',
+  TESTING: 'testing',
   QA: 'qa',
   DONE: 'done',
 });
 
 /**
  * Mapping for legacy status values (backwards compatibility)
+ * These are truly deprecated statuses that should be normalized.
+ * Active statuses (ready_for_dev, in_progress, testing) are NOT legacy.
  * @readonly
  * @type {Object<string, string>}
  */
 export const LEGACY_STATUS_MAP = Object.freeze({
-  ready_for_dev: 'pending',
-  in_progress: 'pending',
-  testing: 'qa',
+  // Add truly legacy statuses here if any exist
 });
 
 /**
@@ -112,7 +115,7 @@ export const STORY_STEPS_KEBAB = Object.freeze([
 ]);
 
 /**
- * Map kebab-case to camelCase
+ * Map kebab-case to camelCase (V3 only)
  * @type {Object<string, string>}
  */
 export const STEP_KEY_MAP = Object.freeze({
@@ -126,14 +129,6 @@ export const STEP_KEY_MAP = Object.freeze({
   'devPlan': 'devPlan',
   'implement': 'implement',
   'review': 'review',
-  // Legacy v1 mappings
-  'brief': 'init',
-  'ba-spec': 'specFunc',
-  'baSpec': 'specFunc',
-  'questions': 'brainstorming',
-  'tech-spec': 'specTech',
-  'techSpec': 'specTech',
-  'challenge': 'review', // Deprecated, redirect to review
 });
 
 /**

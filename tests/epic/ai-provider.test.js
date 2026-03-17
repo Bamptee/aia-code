@@ -192,8 +192,8 @@ describe('AIProvider', () => {
     });
   });
 
-  describe('generateBrief', () => {
-    test('generates brief from input', async () => {
+  describe('generateInit', () => {
+    test('generates init from input', async () => {
       let capturedPrompt;
       const provider = new AIProvider({
         provider: AI_PROVIDER_TYPE.ANTHROPIC,
@@ -203,22 +203,22 @@ describe('AIProvider', () => {
           return {
             ok: true,
             json: async () => ({
-              content: [{ text: 'Feature brief content' }],
+              content: [{ text: 'Feature init content' }],
             }),
           };
         },
       });
 
-      const result = await provider.generateBrief('User authentication feature');
+      const result = await provider.generateInit('User authentication feature');
 
       assert.ok(capturedPrompt.includes('User authentication feature'));
-      assert.ok(capturedPrompt.includes('feature brief'));
-      assert.strictEqual(result, 'Feature brief content');
+      assert.ok(capturedPrompt.includes('feature init'));
+      assert.strictEqual(result, 'Feature init content');
     });
   });
 
-  describe('generateBASpec', () => {
-    test('generates BA spec from brief', async () => {
+  describe('generateSpecFunc', () => {
+    test('generates spec-func from init', async () => {
       let capturedPrompt;
       const provider = new AIProvider({
         provider: AI_PROVIDER_TYPE.ANTHROPIC,
@@ -228,22 +228,22 @@ describe('AIProvider', () => {
           return {
             ok: true,
             json: async () => ({
-              content: [{ text: 'BA specification content' }],
+              content: [{ text: 'Functional specification content' }],
             }),
           };
         },
       });
 
-      const result = await provider.generateBASpec('Feature brief here');
+      const result = await provider.generateSpecFunc('Feature init here');
 
-      assert.ok(capturedPrompt.includes('Feature brief here'));
+      assert.ok(capturedPrompt.includes('Feature init here'));
       assert.ok(capturedPrompt.includes('acceptance criteria'));
-      assert.strictEqual(result, 'BA specification content');
+      assert.strictEqual(result, 'Functional specification content');
     });
   });
 
-  describe('generateQuestions', () => {
-    test('generates questions from spec', async () => {
+  describe('generateBrainstorming', () => {
+    test('generates brainstorming questions from spec', async () => {
       let capturedPrompt;
       const provider = new AIProvider({
         provider: AI_PROVIDER_TYPE.ANTHROPIC,
@@ -259,7 +259,7 @@ describe('AIProvider', () => {
         },
       });
 
-      const result = await provider.generateQuestions('Specification text');
+      const result = await provider.generateBrainstorming('Specification text');
 
       assert.ok(capturedPrompt.includes('Specification text'));
       assert.ok(capturedPrompt.includes('clarifying questions'));

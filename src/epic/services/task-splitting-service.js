@@ -247,14 +247,14 @@ export class TaskSplittingService {
 
     // Add step content if available
     if (story.steps) {
-      if (story.steps.brief?.content) {
-        parts.push(`\n## Brief\n${story.steps.brief.content}`);
+      if (story.steps.init?.content) {
+        parts.push(`\n## Init\n${story.steps.init.content}`);
       }
-      if (story.steps.baSpec?.content) {
-        parts.push(`\n## BA Specification\n${story.steps.baSpec.content}`);
+      if (story.steps.specFunc?.content) {
+        parts.push(`\n## Functional Specification\n${story.steps.specFunc.content}`);
       }
-      if (story.steps.questions?.content) {
-        parts.push(`\n## Questions & Answers\n${story.steps.questions.content}`);
+      if (story.steps.brainstorming?.content) {
+        parts.push(`\n## Brainstorming\n${story.steps.brainstorming.content}`);
       }
     }
 

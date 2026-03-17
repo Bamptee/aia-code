@@ -244,16 +244,32 @@ describe('validators', () => {
   });
 
   describe('isValidStepName', () => {
-    test('accepts brief', () => {
-      assert.strictEqual(isValidStepName('brief'), true);
+    test('accepts init', () => {
+      assert.strictEqual(isValidStepName('init'), true);
     });
 
-    test('accepts baSpec', () => {
-      assert.strictEqual(isValidStepName('baSpec'), true);
+    test('accepts brainstorming', () => {
+      assert.strictEqual(isValidStepName('brainstorming'), true);
     });
 
-    test('accepts questions', () => {
-      assert.strictEqual(isValidStepName('questions'), true);
+    test('accepts specFunc', () => {
+      assert.strictEqual(isValidStepName('specFunc'), true);
+    });
+
+    test('accepts specTech', () => {
+      assert.strictEqual(isValidStepName('specTech'), true);
+    });
+
+    test('accepts devPlan', () => {
+      assert.strictEqual(isValidStepName('devPlan'), true);
+    });
+
+    test('accepts implement', () => {
+      assert.strictEqual(isValidStepName('implement'), true);
+    });
+
+    test('accepts review', () => {
+      assert.strictEqual(isValidStepName('review'), true);
     });
 
     test('rejects invalid step name', () => {
@@ -262,6 +278,13 @@ describe('validators', () => {
 
     test('rejects empty step name', () => {
       assert.strictEqual(isValidStepName(''), false);
+    });
+
+    test('rejects legacy step names', () => {
+      assert.strictEqual(isValidStepName('brief'), false);
+      assert.strictEqual(isValidStepName('baSpec'), false);
+      assert.strictEqual(isValidStepName('questions'), false);
+      assert.strictEqual(isValidStepName('challenge'), false);
     });
   });
 

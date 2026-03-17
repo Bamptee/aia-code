@@ -133,7 +133,7 @@ async function callRoute(method, url, body = null) {
 async function markFeatureCompleted(featureName, isQuick = false) {
   const steps = isQuick
     ? ['dev-plan', 'implement', 'review']
-    : ['brief', 'ba-spec', 'questions', 'tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
+    : ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
 
   for (const step of steps) {
     await updateStepStatus(featureName, step, 'done', testRoot);

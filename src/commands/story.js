@@ -219,7 +219,7 @@ export function registerStoryCommand(program) {
   // story step
   story
     .command('step <id> <stepName>')
-    .description('Update a story step (brief|baSpec|questions)')
+    .description('Update a story step (init|brainstorming|specFunc|specTech|devPlan|implement|review)')
     .option('-c, --complete', 'Mark as completed')
     .option('-s, --skip', 'Mark as skipped')
     .option('--content <content>', 'Step content')
@@ -351,14 +351,14 @@ export function registerStoryCommand(program) {
   story
     .command('generate-step <id> <stepName>')
     .alias('gen')
-    .description('Generate step content with AI (brief|baSpec|questions)')
+    .description('Generate step content with AI (init|brainstorming|specFunc)')
     .option('--context <context>', 'Additional context for AI')
     .action(async (id, stepName, options) => {
       try {
         const { storyService, aiProvider } = createServices();
 
         // Validate step name
-        const validSteps = ['brief', 'baSpec', 'questions'];
+        const validSteps = ['init', 'brainstorming', 'specFunc'];
         if (!validSteps.includes(stepName)) {
           console.error(chalk.red(`Invalid step name. Must be one of: ${validSteps.join(', ')}`));
           process.exit(1);
@@ -398,23 +398,23 @@ export function registerStoryCommand(program) {
         // Generate based on step type
         let generatedContent;
         switch (stepName) {
-          case 'brief':
-            generatedContent = await aiProvider.generateBrief(input, context);
+          case 'init':
+            generatedContent = await aiProvider.generateInit(input, context);
             break;
-          case 'baSpec':
-            if (story.steps?.brief?.content) {
-              input = `${input}\nExisting Brief:\n${story.steps.brief.content}`;
+          case 'specFunc':
+            if (story.steps?.init?.content) {
+              input = `${input}\nExisting Init:\n${story.steps.init.content}`;
             }
-            generatedContent = await aiProvider.generateBASpec(input, context);
+            generatedContent = await aiProvider.generateSpecFunc(input, context);
             break;
-          case 'questions':
-            if (story.steps?.brief?.content) {
-              input = `${input}\nBrief:\n${story.steps.brief.content}`;
+          case 'brainstorming':
+            if (story.steps?.init?.content) {
+              input = `${input}\nInit:\n${story.steps.init.content}`;
             }
-            if (story.steps?.baSpec?.content) {
-              input = `${input}\nBA Specification:\n${story.steps.baSpec.content}`;
+            if (story.steps?.specFunc?.content) {
+              input = `${input}\nFunctional Specification:\n${story.steps.specFunc.content}`;
             }
-            generatedContent = await aiProvider.generateQuestions(input, context);
+            generatedContent = await aiProvider.generateBrainstorming(input, context);
             break;
         }
 
@@ -449,7 +449,7 @@ export function registerStoryCommand(program) {
         const { storyService, aiProvider } = createServices();
 
         // Validate step name
-        const validSteps = ['brief', 'baSpec', 'questions'];
+        const validSteps = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', 'review'];
         if (!validSteps.includes(stepName)) {
           console.error(chalk.red(`Invalid step name. Must be one of: ${validSteps.join(', ')}`));
           process.exit(1);
@@ -512,7 +512,7 @@ export function registerStoryCommand(program) {
       try {
         const { storyService } = createServices();
 
-        const validSteps = ['brief', 'baSpec', 'questions'];
+        const validSteps = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', 'review'];
         if (!validSteps.includes(stepName)) {
           console.error(chalk.red(`Invalid step name. Must be one of: ${validSteps.join(', ')}`));
           process.exit(1);
@@ -550,7 +550,7 @@ export function registerStoryCommand(program) {
       try {
         const { storyService } = createServices();
 
-        const validSteps = ['brief', 'baSpec', 'questions'];
+        const validSteps = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', 'review'];
         if (!validSteps.includes(stepName)) {
           console.error(chalk.red(`Invalid step name. Must be one of: ${validSteps.join(', ')}`));
           process.exit(1);
@@ -574,7 +574,7 @@ export function registerStoryCommand(program) {
   story
     .command('generate-all <id>')
     .alias('gen-all')
-    .description('Generate all steps content with AI (brief, baSpec, questions)')
+    .description('Generate all steps content with AI (init, brainstorming, specFunc)')
     .option('--context <context>', 'Additional context for AI')
     .action(async (id, options) => {
       try {
@@ -611,39 +611,39 @@ export function registerStoryCommand(program) {
           baseInput += `Additional context: ${options.context}\n`;
         }
 
-        // Generate Brief
-        console.log(chalk.bold('1. Generating Brief...'));
-        const brief = await aiProvider.generateBrief(baseInput, context);
-        await storyService.addStepVersion(id, 'brief', brief, 'Generate all - Brief', aiProvider.getModel());
+        // Generate Init
+        console.log(chalk.bold('1. Generating Init...'));
+        const init = await aiProvider.generateInit(baseInput, context);
+        await storyService.addStepVersion(id, 'init', init, 'Generate all - Init', aiProvider.getModel());
         console.log(chalk.dim('   Done (v1 saved)'));
 
-        // Generate BA-Spec (using brief)
-        console.log(chalk.bold('2. Generating BA-Spec...'));
-        const baSpecInput = `${baseInput}\nExisting Brief:\n${brief}`;
-        const baSpec = await aiProvider.generateBASpec(baSpecInput, context);
-        await storyService.addStepVersion(id, 'baSpec', baSpec, 'Generate all - BA-Spec', aiProvider.getModel());
+        // Generate Spec-Func (using init)
+        console.log(chalk.bold('2. Generating Spec-Func...'));
+        const specFuncInput = `${baseInput}\nExisting Init:\n${init}`;
+        const specFunc = await aiProvider.generateSpecFunc(specFuncInput, context);
+        await storyService.addStepVersion(id, 'specFunc', specFunc, 'Generate all - Spec-Func', aiProvider.getModel());
         console.log(chalk.dim('   Done (v1 saved)'));
 
-        // Generate Questions (using brief + baSpec)
-        console.log(chalk.bold('3. Generating Questions...'));
-        const questionsInput = `${baseInput}\nBrief:\n${brief}\nBA Specification:\n${baSpec}`;
-        const questions = await aiProvider.generateQuestions(questionsInput, context);
-        await storyService.addStepVersion(id, 'questions', questions, 'Generate all - Questions', aiProvider.getModel());
+        // Generate Brainstorming (using init + specFunc)
+        console.log(chalk.bold('3. Generating Brainstorming...'));
+        const brainstormingInput = `${baseInput}\nInit:\n${init}\nFunctional Specification:\n${specFunc}`;
+        const brainstorming = await aiProvider.generateBrainstorming(brainstormingInput, context);
+        await storyService.addStepVersion(id, 'brainstorming', brainstorming, 'Generate all - Brainstorming', aiProvider.getModel());
         console.log(chalk.dim('   Done (v1 saved)'));
 
         console.log();
 
         // Display generated content
-        console.log(chalk.bold.underline('Generated Brief:'));
-        console.log(chalk.white(brief));
+        console.log(chalk.bold.underline('Generated Init:'));
+        console.log(chalk.white(init));
         console.log();
 
-        console.log(chalk.bold.underline('Generated BA-Spec:'));
-        console.log(chalk.white(baSpec));
+        console.log(chalk.bold.underline('Generated Spec-Func:'));
+        console.log(chalk.white(specFunc));
         console.log();
 
-        console.log(chalk.bold.underline('Generated Questions:'));
-        console.log(chalk.white(questions));
+        console.log(chalk.bold.underline('Generated Brainstorming:'));
+        console.log(chalk.white(brainstorming));
         console.log();
 
         console.log(chalk.green('✓ All steps generated and saved with version history'));

@@ -316,9 +316,9 @@ export class POCEnvironmentService {
 ${story.description || 'No description'}
 
 ## Steps Completed
-- Brief: ${story.steps.brief.completed ? 'Yes' : 'No'}
-- BA Spec: ${story.steps.baSpec.completed ? 'Yes' : 'No'}
-- Questions: ${story.steps.questions.completed ? 'Yes' : 'No'}
+- Init: ${story.steps.init.completed ? 'Yes' : 'No'}
+- Spec-Func: ${story.steps.specFunc.completed ? 'Yes' : 'No'}
+- Brainstorming: ${story.steps.brainstorming.completed ? 'Yes' : 'No'}
 `;
     await fs.writeFile(path.join(envDir, 'STORY_CONTEXT.md'), contextContent);
   }

@@ -9,7 +9,7 @@ const STATUS_CLASSES = {
 };
 
 // Duplicated from constants.js to avoid async fetch on initial render
-const DEVELOPMENT_STEPS = ['tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
+const DEVELOPMENT_STEPS = ['spec-tech', 'dev-plan', 'implement', 'review'];
 const FEATURE_TYPES = ['feature', 'bug'];
 const DEFAULT_FEATURE_TYPE = 'feature';
 const DELETION_FILTER = { ACTIVE: 'active', DELETED: 'deleted', ALL: 'all' };

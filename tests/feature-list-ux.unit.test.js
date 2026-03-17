@@ -170,11 +170,10 @@ describe('isFeatureCompleted utility', () => {
       const feature = {
         flow: 'full',
         steps: {
-          brief: 'done',
-          'ba-spec': 'done',
-          questions: 'done',
-          'tech-spec': 'done',
-          challenge: 'done',
+          init: 'done',
+          brainstorming: 'done',
+          'spec-func': 'done',
+          'spec-tech': 'done',
           'dev-plan': 'done',
           implement: 'done',
           review: 'done',
@@ -188,11 +187,10 @@ describe('isFeatureCompleted utility', () => {
       const feature = {
         flow: 'full',
         steps: {
-          brief: 'done',
-          'ba-spec': 'done',
-          questions: 'pending',
-          'tech-spec': 'pending',
-          challenge: 'pending',
+          init: 'done',
+          brainstorming: 'done',
+          'spec-func': 'pending',
+          'spec-tech': 'pending',
           'dev-plan': 'pending',
           implement: 'pending',
           review: 'pending',
@@ -206,11 +204,10 @@ describe('isFeatureCompleted utility', () => {
       const feature = {
         flow: 'full',
         steps: {
-          brief: 'done',
-          'ba-spec': 'in-progress',
-          questions: 'pending',
-          'tech-spec': 'pending',
-          challenge: 'pending',
+          init: 'done',
+          brainstorming: 'in-progress',
+          'spec-func': 'pending',
+          'spec-tech': 'pending',
           'dev-plan': 'pending',
           implement: 'pending',
           review: 'pending',
@@ -224,11 +221,10 @@ describe('isFeatureCompleted utility', () => {
       const feature = {
         flow: 'full',
         steps: {
-          brief: 'done',
-          'ba-spec': 'error',
-          questions: 'done',
-          'tech-spec': 'done',
-          challenge: 'done',
+          init: 'done',
+          brainstorming: 'error',
+          'spec-func': 'done',
+          'spec-tech': 'done',
           'dev-plan': 'done',
           implement: 'done',
           review: 'done',

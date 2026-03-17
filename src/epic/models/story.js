@@ -26,11 +26,10 @@ import { STORY_STATUS, STORY_SPACE, STORY_TYPE } from './validators.js';
 
 /**
  * @typedef {Object} StorySteps
- * @property {StepState} brief - Brief step state
- * @property {StepState} baSpec - BA-spec step state
- * @property {StepState} questions - Questions step state
- * @property {StepState} techSpec - Tech-spec step state
- * @property {StepState} challenge - Challenge step state
+ * @property {StepState} init - Init step state
+ * @property {StepState} brainstorming - Brainstorming step state
+ * @property {StepState} specFunc - Spec-func step state
+ * @property {StepState} specTech - Spec-tech step state
  * @property {StepState} devPlan - Dev plan step state
  * @property {StepState} implement - Implementation step state
  * @property {StepState} review - Review step state
@@ -145,11 +144,10 @@ export function createStory(data) {
       figmaLinks: [],
     },
     steps: {
-      brief: createStepState(),
-      baSpec: createStepState(),
-      questions: createStepState(),
-      techSpec: createStepState(),
-      challenge: createStepState(),
+      init: createStepState(),
+      brainstorming: createStepState(),
+      specFunc: createStepState(),
+      specTech: createStepState(),
       devPlan: createStepState(),
       implement: createStepState(),
       review: createStepState(),
@@ -191,35 +189,28 @@ export function createBugFromRejection(feature, reason) {
       figmaLinks: [],
     },
     steps: {
-      brief: {
+      init: {
         completed: true,
         skipped: false,
         content: reason.trim(),
         history: [],
         currentVersion: 0,
       },
-      baSpec: {
+      brainstorming: {
         completed: false,
         skipped: true,
         content: null,
         history: [],
         currentVersion: 0,
       },
-      questions: {
+      specFunc: {
         completed: false,
         skipped: true,
         content: null,
         history: [],
         currentVersion: 0,
       },
-      techSpec: {
-        completed: false,
-        skipped: true,
-        content: null,
-        history: [],
-        currentVersion: 0,
-      },
-      challenge: {
+      specTech: {
         completed: false,
         skipped: true,
         content: null,
@@ -296,15 +287,23 @@ export function updateTaskSummary(story, summary) {
 }
 
 /**
+ * Product steps that must be completed before promotion to development
+ * @type {string[]}
+ */
+const PRODUCT_STEPS_FOR_PROMOTION = ['init', 'brainstorming', 'specFunc'];
+
+/**
  * Checks if a Story can be promoted to development
+ * Only checks product steps (init, brainstorming, specFunc), not dev steps
  * @param {Story} story - Story to check
  * @returns {{canPromote: boolean, missingSteps: string[]}} Result
  */
 export function canPromoteStory(story) {
   const missingSteps = [];
 
-  for (const [stepName, stepState] of Object.entries(story.steps)) {
-    if (!stepState.completed && !stepState.skipped) {
+  for (const stepName of PRODUCT_STEPS_FOR_PROMOTION) {
+    const stepState = story.steps[stepName];
+    if (stepState && !stepState.completed && !stepState.skipped) {
       missingSteps.push(stepName);
     }
   }

@@ -209,14 +209,14 @@ Generate the updated POC:`;
 
     const issues = [];
 
-    // Check if brief is completed
-    if (!story.steps.brief.completed && !story.steps.brief.skipped) {
-      issues.push('Brief step is not completed or skipped');
+    // Check if init is completed
+    if (!story.steps.init.completed && !story.steps.init.skipped) {
+      issues.push('Init step is not completed or skipped');
     }
 
-    // BA spec is recommended
-    if (!story.steps.baSpec.completed && !story.steps.baSpec.skipped) {
-      issues.push('BA Spec step is not completed or skipped (recommended for better POC)');
+    // Spec-func is recommended
+    if (!story.steps.specFunc.completed && !story.steps.specFunc.skipped) {
+      issues.push('Spec-Func step is not completed or skipped (recommended for better POC)');
     }
 
     // Check AI provider
@@ -243,16 +243,16 @@ Generate the updated POC:`;
     }
 
     // Add step contents
-    if (story.steps.brief.completed && story.steps.brief.content) {
-      parts.push(`\n## Feature Brief\n${story.steps.brief.content}`);
+    if (story.steps.init.completed && story.steps.init.content) {
+      parts.push(`\n## Feature Init\n${story.steps.init.content}`);
     }
 
-    if (story.steps.baSpec.completed && story.steps.baSpec.content) {
-      parts.push(`\n## BA Specification\n${story.steps.baSpec.content}`);
+    if (story.steps.specFunc.completed && story.steps.specFunc.content) {
+      parts.push(`\n## Functional Specification\n${story.steps.specFunc.content}`);
     }
 
-    if (story.steps.questions.completed && story.steps.questions.content) {
-      parts.push(`\n## Clarifying Questions & Answers\n${story.steps.questions.content}`);
+    if (story.steps.brainstorming.completed && story.steps.brainstorming.content) {
+      parts.push(`\n## Brainstorming & Questions\n${story.steps.brainstorming.content}`);
     }
 
     return parts.join('\n');

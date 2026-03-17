@@ -7,7 +7,6 @@ import {
   FEATURE_STEPS,
   STEP_ORDER,
   LEGACY_FEATURES_DIR,
-  LEGACY_STEP_MAP,
   getSkippedSteps,
 } from './constants.js';
 import { loadConfig } from './models.js';
@@ -26,14 +25,6 @@ const STEP_FILE_MAP = {
   'dev-plan': 'dev-plan',
   'implement': 'implement',
   'review': 'review',
-  // Legacy mappings
-  'brief': 'init',
-  'baSpec': 'spec-func',
-  'ba-spec': 'spec-func',
-  'questions': 'brainstorming',
-  'techSpec': 'spec-tech',
-  'tech-spec': 'spec-tech',
-  'challenge': 'review',
 };
 
 /**
@@ -72,11 +63,7 @@ async function loadFeatureFiles(feature, step, root, options = {}) {
 
   const stepIndex = stepOrder.indexOf(normalizedStep);
   if (stepIndex === -1) {
-    // Try legacy mapping
-    const legacyStep = LEGACY_STEP_MAP?.[step];
-    if (!legacyStep || stepOrder.indexOf(legacyStep) === -1) {
-      throw new Error(`Unknown step "${step}".`);
-    }
+    throw new Error(`Unknown step "${step}".`);
   }
 
   const featureDir = await getStoryDir(feature, root);
@@ -200,11 +187,11 @@ async function isSpecTechSkipped(feature, root) {
 async function loadFeatureFilesForReview(featureDir) {
   const sections = [];
 
-  // Include tech-spec summary (key decisions only)
-  const techSpec = await readIfExists(path.join(featureDir, 'tech-spec.md'));
-  if (techSpec) {
-    const summary = extractTechSpecSummary(techSpec);
-    sections.push('## Tech Spec Summary\n' + summary);
+  // Include spec-tech summary (key decisions only)
+  const specTech = await readIfExists(path.join(featureDir, 'spec-tech.md'));
+  if (specTech) {
+    const summary = extractTechSpecSummary(specTech);
+    sections.push('## Spec Tech Summary\n' + summary);
   }
 
   // Include dev-plan task list only
@@ -214,7 +201,7 @@ async function loadFeatureFilesForReview(featureDir) {
     sections.push('## Implementation Tasks\n' + taskList);
   }
 
-  // Skip: brief, ba-spec, questions, challenge (already incorporated in tech-spec and dev-plan)
+  // Skip: init, brainstorming, spec-func (already incorporated in spec-tech and dev-plan)
 
   return sections.join('\n\n');
 }
@@ -710,11 +697,11 @@ export async function buildTaskPrompt(task, story, { root = process.cwd() } = {}
 
   // Include step content if available
   if (story.steps) {
-    if (story.steps.brief?.content) {
-      parts.push('\n## Brief\n' + story.steps.brief.content);
+    if (story.steps.init?.content) {
+      parts.push('\n## Init\n' + story.steps.init.content);
     }
-    if (story.steps.baSpec?.content) {
-      parts.push('\n## BA Specification\n' + story.steps.baSpec.content);
+    if (story.steps.specFunc?.content) {
+      parts.push('\n## Functional Specification\n' + story.steps.specFunc.content);
     }
   }
 

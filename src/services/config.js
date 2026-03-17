@@ -18,23 +18,20 @@ const DEFAULT_PROJECT_CONFIG = {
   projectName: 'My Project',
   document_output_language: 'English',
   models: {
-    brief: [
+    init: [
       { model: 'claude-default', weight: 1 },
     ],
-    'ba-spec': [
+    brainstorming: [
       { model: 'claude-default', weight: 0.5 },
       { model: 'openai-default', weight: 0.5 },
     ],
-    questions: [
+    'spec-func': [
       { model: 'claude-default', weight: 0.5 },
       { model: 'openai-default', weight: 0.5 },
     ],
-    'tech-spec': [
+    'spec-tech': [
       { model: 'claude-default', weight: 0.5 },
       { model: 'openai-default', weight: 0.5 },
-    ],
-    challenge: [
-      { model: 'openai-default', weight: 1 },
     ],
     'dev-plan': [
       { model: 'claude-default', weight: 0.5 },

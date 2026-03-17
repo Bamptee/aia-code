@@ -86,10 +86,10 @@ export class FigmaDiscoveryService {
           space: 'experimentation',
         });
 
-        // Pre-fill brief with design context if available
+        // Pre-fill init with design context if available
         if (suggestion.description) {
-          await this.storyService.updateStep(story.id, 'brief', {
-            content: this._generateBriefFromSuggestion(suggestion),
+          await this.storyService.updateStep(story.id, 'init', {
+            content: this._generateInitFromSuggestion(suggestion),
             completed: false,
           });
         }
@@ -229,10 +229,10 @@ Only output the JSON array, no other text.`;
   }
 
   /**
-   * Generate brief content from suggestion
+   * Generate init content from suggestion
    * @private
    */
-  _generateBriefFromSuggestion(suggestion) {
+  _generateInitFromSuggestion(suggestion) {
     const lines = [];
     lines.push(`# ${suggestion.name}`);
     lines.push('');

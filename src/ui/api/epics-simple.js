@@ -751,7 +751,7 @@ ${content}`;
     };
 
     try {
-      const output = await runStep(params.step, params.slug, {
+      const result = await runStep(params.step, params.slug, {
         description: body.instructions || body.description || '',
         model: body.model || undefined,
         verbose: true,
@@ -760,8 +760,16 @@ ${content}`;
         onData,
       });
 
-      // Return without story to force frontend to reload via GET
-      sseSend(res, 'done', { step: params.step, output: output?.slice(0, 500) });
+      // runStep now returns { output, filesUsed }
+      const output = typeof result === 'string' ? result : result?.output;
+      const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+
+      // Return with filesUsed for UI transparency
+      sseSend(res, 'done', {
+        step: params.step,
+        output: output?.slice(0, 500),
+        filesUsed,
+      });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
     }
@@ -791,7 +799,7 @@ ${content}`;
 
       // Run step with iteration instructions
       const instructions = body.instructions?.trim() || 'Please review and improve this content. Fix any issues, clarify unclear sections, and enhance overall quality.';
-      const output = await runStep(params.step, params.slug, {
+      const result = await runStep(params.step, params.slug, {
         description: instructions,
         iterateOn: currentContent,
         model: body.model || undefined,
@@ -801,8 +809,16 @@ ${content}`;
         onData,
       });
 
-      // Return without story to force frontend to reload via GET
-      sseSend(res, 'done', { step: params.step, output: output?.slice(0, 500) });
+      // runStep now returns { output, filesUsed }
+      const output = typeof result === 'string' ? result : result?.output;
+      const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+
+      // Return with filesUsed for UI transparency
+      sseSend(res, 'done', {
+        step: params.step,
+        output: output?.slice(0, 500),
+        filesUsed,
+      });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
     }
@@ -1118,7 +1134,7 @@ INSTRUCTIONS:
         const recapInstructions = `Apply the following feedback from conversation:\n\n${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')}`;
 
         // Use runStep with iterateOn to update the document
-        const output = await runStep(params.step, params.slug, {
+        const result = await runStep(params.step, params.slug, {
           description: recapInstructions,
           iterateOn: stepContent,
           verbose: true,
@@ -1127,10 +1143,14 @@ INSTRUCTIONS:
           onData,
         });
 
+        // runStep now returns { output, filesUsed }
+        const output = typeof result === 'string' ? result : result?.output;
+        const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+
         // Clear conversation after recap
         await fs.writeJson(convPath, { messages: [] }, { spaces: 2 });
 
-        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500) });
+        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500), filesUsed });
       }
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
@@ -1241,19 +1261,22 @@ INSTRUCTIONS:
       }
 
       // Build steps with content
+      // V3 workflow steps: init, brainstorming, spec-func, spec-tech, dev-plan, implement, review
       const stepsData = {};
-      const stepNames = ['brief', 'ba-spec', 'questions', 'tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
+      const stepNames = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
       for (const stepName of stepNames) {
         const stepPath = path.join(storyDir, `${stepName}.md`);
         let content = '';
         if (await fs.pathExists(stepPath)) {
           content = await fs.readFile(stepPath, 'utf-8');
         }
+        // Convert kebab-case to camelCase for status lookup (spec-func -> specFunc)
+        const statusKey = stepName.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
         stepsData[stepName] = {
-          status: status.steps?.[stepName] || 'pending',
+          status: status.steps?.[statusKey] || status.steps?.[stepName] || 'pending',
           content,
-          completed: status.steps?.[stepName] === 'done',
-          skipped: status.steps?.[stepName] === 'skipped',
+          completed: (status.steps?.[statusKey] || status.steps?.[stepName]) === 'done',
+          skipped: (status.steps?.[statusKey] || status.steps?.[stepName]) === 'skipped',
         };
       }
 
@@ -1368,10 +1391,11 @@ INSTRUCTIONS:
         }
         status.phase = body.phase;
         // Update current_step based on phase
+        // V3 workflow: init, brainstorming, spec-func, spec-tech, dev-plan, implement, review
         if (body.phase === 'discovery') {
-          status.current_step = 'brief';
+          status.current_step = 'init';
         } else if (body.phase === 'development') {
-          status.current_step = 'tech-spec';
+          status.current_step = 'spec-tech';
         } else if (body.phase === 'qa') {
           status.current_step = 'review';
         }
@@ -1444,7 +1468,7 @@ INSTRUCTIONS:
       const status = await loadStatus(params.slug, root);
 
       // Check if discovery steps are complete
-      const discoverySteps = ['brief', 'ba-spec', 'questions'];
+      const discoverySteps = ['init', 'brainstorming', 'spec-func'];
       const missingSteps = discoverySteps.filter(step =>
         status.steps?.[step] !== 'done' && status.steps?.[step] !== 'skipped'
       );
@@ -1465,7 +1489,7 @@ INSTRUCTIONS:
     try {
       const status = await loadStatus(params.slug, root);
 
-      const discoverySteps = ['brief', 'ba-spec', 'questions'];
+      const discoverySteps = ['init', 'brainstorming', 'spec-func'];
       const allComplete = discoverySteps.every(step =>
         status.steps?.[step] === 'done' || status.steps?.[step] === 'skipped'
       );
@@ -1491,7 +1515,7 @@ INSTRUCTIONS:
       const status = yaml.parse(raw);
 
       status.phase = 'development';
-      status.current_step = 'tech-spec';
+      status.current_step = 'spec-tech'; // V3 workflow
       status.space = 'development';
       status.updatedAt = new Date().toISOString();
 
@@ -1515,7 +1539,7 @@ INSTRUCTIONS:
       const status = yaml.parse(raw);
 
       status.phase = 'development';
-      status.current_step = 'tech-spec';
+      status.current_step = 'spec-tech'; // V3 workflow
       status.space = 'development';
       status.updatedAt = new Date().toISOString();
 
@@ -2087,7 +2111,7 @@ INSTRUCTIONS:
 
   /**
    * POST /api/stories/:slug/generate-qa - Generate QA plan for a story
-   * Reads ba-spec.md and tech-spec.md from the story directory and generates a qa.md file
+   * Reads spec-func.md and spec-tech.md from the story directory and generates a qa.md file
    * @param {string} [body.profile] - QA profile: 'product', 'api', 'security', 'full'
    * @param {string[]} [body.categories] - Custom categories (overrides profile)
    */
@@ -2096,24 +2120,24 @@ INSTRUCTIONS:
       const body = await parseBody();
       const storyDir = await getStoryDirPath(params.slug, root);
 
-      // Read ba-spec.md (specs) and tech-spec.md (tech) files
-      const baSpecPath = path.join(storyDir, 'ba-spec.md');
-      const techSpecPath = path.join(storyDir, 'tech-spec.md');
+      // Read spec-func.md (specs) and spec-tech.md (tech) files (V3 workflow)
+      const specFuncPath = path.join(storyDir, 'spec-func.md');
+      const specTechPath = path.join(storyDir, 'spec-tech.md');
 
       let specsContent = '';
       let techContent = '';
 
-      if (await fs.pathExists(baSpecPath)) {
-        specsContent = await fs.readFile(baSpecPath, 'utf-8');
+      if (await fs.pathExists(specFuncPath)) {
+        specsContent = await fs.readFile(specFuncPath, 'utf-8');
       }
 
-      if (await fs.pathExists(techSpecPath)) {
-        techContent = await fs.readFile(techSpecPath, 'utf-8');
+      if (await fs.pathExists(specTechPath)) {
+        techContent = await fs.readFile(specTechPath, 'utf-8');
       }
 
       // Check if we have at least one source file
       if (!specsContent.trim() && !techContent.trim()) {
-        return error(res, 'No source content found. Please generate ba-spec.md or tech-spec.md first.', 400);
+        return error(res, 'No source content found. Please generate spec-func.md or spec-tech.md first.', 400);
       }
 
       // Load story status for feature name

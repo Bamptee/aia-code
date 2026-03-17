@@ -6,7 +6,8 @@ import { EpicSelector } from '/components/epic-selector.js';
 
 // V3: 7 steps with Product/Dev phases
 const ALL_STEPS = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', 'review'];
-const PRODUCT_STEPS = ['init', 'brainstorming', 'specFunc'];
+// Product steps: init has dedicated InitPanel, so only show brainstorming and specFunc as steps
+const PRODUCT_STEPS = ['brainstorming', 'specFunc'];
 const DEV_STEPS = ['specTech', 'devPlan', 'implement', 'review'];
 
 // Steps that can be skipped (all except init)
@@ -211,6 +212,82 @@ function SkipWarning({ skippedSteps, warning }) {
       ),
       skippedSteps?.length > 0 && React.createElement('p', { className: 'text-slate-500 text-xs mt-1' },
         `Steps ignores: ${skippedSteps.join(', ')}`
+      )
+    )
+  );
+}
+
+function FilesUsedPanel({ filesUsed, expanded = false }) {
+  const [isExpanded, setIsExpanded] = React.useState(expanded);
+
+  if (!filesUsed) return null;
+
+  const hasContent = filesUsed.promptTemplate ||
+    filesUsed.priorSteps?.length > 0 ||
+    filesUsed.contextFiles?.length > 0 ||
+    filesUsed.knowledgeCategories?.length > 0;
+
+  if (!hasContent) return null;
+
+  return React.createElement('div', {
+    className: 'bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden text-xs',
+  },
+    React.createElement('button', {
+      onClick: () => setIsExpanded(!isExpanded),
+      className: 'w-full flex items-center justify-between px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors',
+    },
+      React.createElement('div', { className: 'flex items-center gap-2' },
+        React.createElement('span', null, '📂'),
+        React.createElement('span', null, 'Context Used'),
+        React.createElement('span', { className: 'text-slate-600' },
+          `(${(filesUsed.priorSteps?.length || 0) + (filesUsed.contextFiles?.length || 0)} files)`
+        )
+      ),
+      React.createElement('span', { className: `transition-transform ${isExpanded ? 'rotate-180' : ''}` }, '▼')
+    ),
+    isExpanded && React.createElement('div', { className: 'px-3 pb-3 space-y-2 border-t border-slate-700 pt-2' },
+      // Prompt template
+      filesUsed.promptTemplate && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Prompt: '),
+        React.createElement('span', { className: 'text-violet-400' }, filesUsed.promptTemplate),
+        filesUsed.promptPhase && React.createElement('span', { className: 'text-slate-600 ml-2' },
+          `(${filesUsed.promptPhase}/${filesUsed.promptType})`
+        )
+      ),
+      // Prior steps
+      filesUsed.priorSteps?.length > 0 && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Prior steps: '),
+        React.createElement('span', { className: 'text-emerald-400' },
+          filesUsed.priorSteps.map(f => f.file || f).join(', ')
+        )
+      ),
+      // Context files
+      filesUsed.contextFiles?.length > 0 && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Context: '),
+        React.createElement('span', { className: 'text-blue-400' },
+          filesUsed.contextFiles.join(', ')
+        )
+      ),
+      // Knowledge
+      filesUsed.knowledgeCategories?.length > 0 && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Knowledge: '),
+        React.createElement('span', { className: 'text-amber-400' },
+          filesUsed.knowledgeCategories.join(', ')
+        )
+      ),
+      // Init file
+      filesUsed.initFile && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Init: '),
+        React.createElement('span', { className: 'text-cyan-400' }, filesUsed.initFile)
+      ),
+      // Codebase files
+      filesUsed.codebaseFiles?.length > 0 && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Codebase: '),
+        React.createElement('span', { className: 'text-pink-400' },
+          filesUsed.codebaseFiles.length > 5
+            ? `${filesUsed.codebaseFiles.slice(0, 5).join(', ')} +${filesUsed.codebaseFiles.length - 5} more`
+            : filesUsed.codebaseFiles.join(', ')
+        )
       )
     )
   );
@@ -528,7 +605,7 @@ function StreamingPanel({ output }) {
 
 // ============== Conversation Panel ==============
 
-function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
+function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'iterate', onContentUpdated }) {
   const [messages, setMessages] = React.useState([]);
   const [input, setInput] = React.useState('');
   const [loading, setLoading] = React.useState(true);
@@ -540,27 +617,40 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
   // Convert stepName to API format (kebab-case)
   const apiStepName = stepName.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
 
-  // Check if this is a code step
-  const isCodeStep = ['implement', 'review'].includes(apiStepName);
+  // Check special step types
+  const isCodeStep = CODE_STEPS.includes(stepName) || ['implement', 'review'].includes(apiStepName);
+  const isBrainstorming = stepName === 'brainstorming' || apiStepName === 'brainstorming';
+
+  // Mode-specific config
+  const isReviewMode = mode === 'review';
+  const modeConfig = isReviewMode
+    ? { icon: '🔍', title: 'Adversarial Review', color: 'amber', placeholder: 'Challenge this content, ask critical questions...' }
+    : isBrainstorming
+      ? { icon: '💭', title: 'Brainstorming', color: 'cyan', placeholder: 'Share your ideas, ask questions, explore possibilities...' }
+      : { icon: '💬', title: 'Iterate with AI', color: 'violet', placeholder: 'Ask a question or request changes...' };
+
+  // API key suffix for separate conversations
+  const conversationKey = isReviewMode ? `${apiStepName}-review` : apiStepName;
 
   const loadConversation = async () => {
     try {
-      const data = await api.get(`/stories/${slug}/steps/${apiStepName}/conversation`);
+      const data = await api.get(`/stories/${slug}/steps/${conversationKey}/conversation`);
       setMessages(data.messages || []);
     } catch {}
     setLoading(false);
   };
 
-  React.useEffect(() => { loadConversation(); }, [slug, stepName]);
+  React.useEffect(() => { loadConversation(); }, [slug, stepName, mode]);
   React.useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const handleSend = async () => {
     if (!input.trim() || sending) return;
     setSending(true);
     try {
-      const result = await api.post(`/stories/${slug}/steps/${apiStepName}/chat`, {
+      const result = await api.post(`/stories/${slug}/steps/${conversationKey}/chat`, {
         message: input.trim(),
         model: model || undefined,
+        reviewMode: isReviewMode, // Tell backend this is review mode
       });
       setMessages(prev => [...prev,
         { role: 'user', content: input.trim(), createdAt: new Date().toISOString() },
@@ -576,7 +666,9 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
     setRecapping(true);
     setRecapOutput('');
     try {
-      const result = await streamPost(`/stories/${slug}/steps/${apiStepName}/recap`, {}, {
+      const result = await streamPost(`/stories/${slug}/steps/${conversationKey}/recap`, {
+        reviewMode: isReviewMode,
+      }, {
         onLog: (text) => {
           setRecapOutput(prev => (prev + text).slice(-10000));
         },
@@ -584,7 +676,7 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
       });
       if (result.ok) {
         setRecapOutput('');
-        // Reload conversation to get the summary message (for implement/review)
+        // Reload conversation to get the summary message
         await loadConversation();
         if (onContentUpdated) onContentUpdated();
       } else if (result.error) {
@@ -600,22 +692,37 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
 
   if (loading) return React.createElement('div', { className: 'p-4 text-center text-slate-500 text-sm' }, 'Loading conversation...');
 
-  return React.createElement('div', { className: 'bg-slate-800/50 rounded-lg border border-slate-700 overflow-hidden' },
-    React.createElement('div', { className: 'flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700' },
+  // Color classes based on mode
+  const borderColor = isReviewMode ? 'border-amber-500/30' : isBrainstorming ? 'border-cyan-500/30' : 'border-slate-700';
+  const headerBg = isReviewMode ? 'bg-amber-500/10' : isBrainstorming ? 'bg-cyan-500/10' : 'bg-slate-800';
+  const titleColor = isReviewMode ? 'text-amber-300' : isBrainstorming ? 'text-cyan-300' : 'text-slate-200';
+
+  return React.createElement('div', { className: `bg-slate-800/50 rounded-lg border ${borderColor} overflow-hidden` },
+    React.createElement('div', { className: `flex items-center justify-between px-4 py-3 ${headerBg} border-b ${borderColor}` },
       React.createElement('div', { className: 'flex items-center gap-2' },
-        React.createElement('span', { className: 'text-sm font-medium text-slate-200' }, '💬 Iterate with AI'),
+        React.createElement('span', { className: `text-sm font-medium ${titleColor}` }, `${modeConfig.icon} ${modeConfig.title}`),
         messages.length > 0 && React.createElement('span', { className: 'text-xs text-slate-500 bg-slate-700 px-2 py-0.5 rounded-full' }, `${messages.length}`),
-        isCodeStep && React.createElement('span', { className: 'text-xs text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full' }, '🚀 Code mode')
+        isCodeStep && React.createElement('span', { className: 'text-xs text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full' }, '🚀 Code mode'),
+        isReviewMode && React.createElement('span', { className: 'text-xs text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full' }, '⚡ Critical'),
+        isBrainstorming && React.createElement('span', { className: 'text-xs text-cyan-400 bg-cyan-500/20 px-2 py-0.5 rounded-full' }, '💭 Ideation')
       ),
-      messages.length > 0 && !messages[messages.length - 1]?.isRecapSummary && React.createElement('button', {
+      React.createElement('div', { className: 'flex items-center gap-2' },
+        // Model selector in conversation header
+        onModelChange && React.createElement(ModelSelect, { model, onChange: onModelChange, disabled: sending || recapping }),
+        messages.length > 0 && !messages[messages.length - 1]?.isRecapSummary && React.createElement('button', {
         onClick: handleRecap,
         disabled: recapping,
         className: `flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 ${
-          isCodeStep
-            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
-            : 'bg-violet-500/20 text-violet-400 border border-violet-500/30 hover:bg-violet-500/30'
+          isReviewMode
+            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'
+            : isBrainstorming
+              ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30'
+              : isCodeStep
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+                : 'bg-violet-500/20 text-violet-400 border border-violet-500/30 hover:bg-violet-500/30'
         }`,
-      }, recapping ? '⏳ Applying...' : (isCodeStep ? '🚀 Apply to code' : '✨ Apply feedback'))
+      }, recapping ? '⏳ Generating...' : (isReviewMode ? '✓ Apply fixes' : isBrainstorming ? '📝 Save Summary' : isCodeStep ? '🚀 Apply to code' : '✨ Apply feedback'))
+      )
     ),
     // Show streaming output when recapping
     recapping && React.createElement('div', { className: 'p-4 bg-slate-900/50 border-b border-slate-700' },
@@ -629,7 +736,9 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
     ),
     !recapping && React.createElement('div', { className: 'max-h-64 overflow-y-auto p-4 space-y-3' },
       messages.length === 0 && React.createElement('p', { className: 'text-center text-slate-500 text-sm py-4' },
-        'Ask questions or request changes. Click "Apply feedback" to update the content.'
+        isBrainstorming
+          ? 'Start brainstorming! Explore ideas, ask questions, challenge assumptions. Click "Save Summary" when done.'
+          : 'Ask questions or request changes. Click "Apply feedback" to update the content.'
       ),
       ...messages.map((msg, i) => React.createElement('div', {
         key: i,
@@ -654,20 +763,28 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
       )),
       React.createElement('div', { ref: messagesEndRef })
     ),
-    React.createElement('div', { className: 'flex items-center gap-2 p-3 bg-slate-800 border-t border-slate-700' },
+    React.createElement('div', { className: `flex items-center gap-2 p-3 ${headerBg} border-t ${borderColor}` },
       React.createElement('input', {
         type: 'text',
         value: input,
         onChange: (e) => setInput(e.target.value),
         onKeyDown: (e) => e.key === 'Enter' && !e.shiftKey && handleSend(),
-        placeholder: 'Ask a question or request changes...',
-        className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-500 focus:outline-none',
+        placeholder: modeConfig.placeholder,
+        className: `flex-1 bg-slate-900 border rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none ${
+          isReviewMode ? 'border-amber-500/30 focus:border-amber-500'
+            : isBrainstorming ? 'border-cyan-500/30 focus:border-cyan-500'
+            : 'border-slate-700 focus:border-violet-500'
+        }`,
         disabled: sending,
       }),
       React.createElement('button', {
         onClick: handleSend,
         disabled: sending || !input.trim(),
-        className: 'px-4 py-2 bg-violet-500 text-white rounded-lg text-sm font-medium hover:bg-violet-600 disabled:opacity-50 transition-colors',
+        className: `px-4 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors ${
+          isReviewMode ? 'bg-amber-500 hover:bg-amber-600'
+            : isBrainstorming ? 'bg-cyan-500 hover:bg-cyan-600'
+            : 'bg-violet-500 hover:bg-violet-600'
+        }`,
       }, sending ? '⏳' : '➤')
     )
   );
@@ -981,14 +1098,23 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
 
 // ============== Step Section ==============
 
-function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLinks, onStoryUpdate, readonly = false }) {
+function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, figmaLinks, onStoryUpdate, readonly = false }) {
   const config = STEP_CONFIG[stepKey];
-  const [expanded, setExpanded] = React.useState(!step.completed && !step.skipped && !readonly);
+
+  // Brainstorming is a special "chat-first" step - no Generate, direct conversation
+  const isBrainstorming = stepKey === 'brainstorming';
+  const hasContent = step.content && step.content.trim().length > 0;
+
+  // Only expand the current step (or first incomplete step if currentStep not in visible steps)
+  const isCurrentStep = stepKey === currentStep;
+  const [expanded, setExpanded] = React.useState(isCurrentStep && !readonly);
   const [description, setDescription] = React.useState('');
   const [model, setModel] = React.useState('');
   const [generating, setGenerating] = React.useState(false);
   const [output, setOutput] = React.useState('');
-  const [showConversation, setShowConversation] = React.useState(false);
+  // For brainstorming without content, show chat by default
+  const [showConversation, setShowConversation] = React.useState(isBrainstorming && !hasContent);
+  const [chatMode, setChatMode] = React.useState('iterate'); // 'iterate' | 'review'
   const [viewMode, setViewMode] = React.useState('preview'); // 'preview' | 'edit' | 'translate'
   const [editContent, setEditContent] = React.useState(step.content || '');
   const [saving, setSaving] = React.useState(false);
@@ -999,6 +1125,9 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
   const [langConfig, setLangConfig] = React.useState(null);
   const [translating, setTranslating] = React.useState(false);
   const [translated, setTranslated] = React.useState(null);
+
+  // Files used tracking (populated after generation)
+  const [filesUsed, setFilesUsed] = React.useState(null);
 
   // Convert stepKey to API format (kebab-case)
   const apiStepKey = stepKey.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
@@ -1063,7 +1192,6 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
     setSkipping(false);
   };
 
-  const hasContent = step.content && step.content.trim().length > 0;
   const isCompleted = step.completed;
 
   const handleSaveManual = async () => {
@@ -1084,6 +1212,7 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
   const handleGenerate = async () => {
     setGenerating(true);
     setOutput('');
+    setFilesUsed(null); // Reset filesUsed
 
     const result = await streamPost(`/stories/${slug}/steps/${apiStepKey}/generate`, {
       instructions: description.trim() || null,
@@ -1095,6 +1224,12 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
 
     setOutput('');
     setGenerating(false);
+
+    // Store filesUsed from result if available
+    if (result.filesUsed) {
+      setFilesUsed(result.filesUsed);
+    }
+
     if (result.ok || result.story) {
       setDescription('');
       onStoryUpdate(result.story || await api.get(`/stories/${slug}`));
@@ -1103,6 +1238,25 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
 
   const handleConversationUpdate = async () => {
     onStoryUpdate(await api.get(`/stories/${slug}`));
+  };
+
+  // Start brainstorming with AI-initiated conversation
+  const [startingBrainstorm, setStartingBrainstorm] = React.useState(false);
+  const handleStartBrainstorming = async () => {
+    setStartingBrainstorm(true);
+    try {
+      // Send initial prompt to get AI to start the conversation
+      await api.post(`/stories/${slug}/steps/brainstorming/chat`, {
+        message: 'Démarre le brainstorming pour cette feature. Propose-moi des idées et des questions à explorer basées sur le contexte de la story.',
+        model: model || undefined,
+      });
+      // Open the conversation panel - it will reload and show the messages
+      setShowConversation(true);
+    } catch (err) {
+      console.error('Failed to start brainstorming:', err);
+      alert('Erreur lors du démarrage du brainstorming');
+    }
+    setStartingBrainstorm(false);
   };
 
   const colorClasses = {
@@ -1160,10 +1314,38 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
           ),
           React.createElement('div', { className: 'flex items-center gap-2' },
             dirty && React.createElement('span', { className: 'text-xs text-amber-400' }, '● unsaved'),
+            // Iterate button (violet)
             !readonly && React.createElement('button', {
-              onClick: () => setShowConversation(!showConversation),
-              className: `text-xs px-2 py-1 rounded ${showConversation ? 'bg-violet-500/20 text-violet-400' : 'text-slate-400 hover:text-slate-200'}`,
-            }, showConversation ? '✕ Close chat' : '💬 Iterate')
+              onClick: () => {
+                if (showConversation && chatMode === 'iterate') {
+                  setShowConversation(false);
+                } else {
+                  setChatMode('iterate');
+                  setShowConversation(true);
+                }
+              },
+              className: `text-xs px-2 py-1 rounded transition-colors ${
+                showConversation && chatMode === 'iterate'
+                  ? 'bg-violet-500/30 text-violet-300 border border-violet-500/50'
+                  : 'bg-violet-500/10 text-violet-400 border border-violet-500/30 hover:bg-violet-500/20'
+              }`,
+            }, showConversation && chatMode === 'iterate' ? '✕ Close' : '💬 Iterate'),
+            // Review button (amber) - always visible on steps with content
+            !readonly && React.createElement('button', {
+              onClick: () => {
+                if (showConversation && chatMode === 'review') {
+                  setShowConversation(false);
+                } else {
+                  setChatMode('review');
+                  setShowConversation(true);
+                }
+              },
+              className: `text-xs px-2 py-1 rounded transition-colors ${
+                showConversation && chatMode === 'review'
+                  ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50'
+                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
+              }`,
+            }, showConversation && chatMode === 'review' ? '✕ Close' : '🔍 Review')
           )
         ),
         // Preview mode
@@ -1228,14 +1410,42 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
         )
       ),
 
-      showConversation && hasContent && !readonly && React.createElement(ConversationPanel, {
+      // Show ConversationPanel: for brainstorming always (chat-first), for others only with content
+      showConversation && (hasContent || isBrainstorming) && !readonly && React.createElement(ConversationPanel, {
         slug,
         stepName: stepKey,
         model,
+        onModelChange: setModel,
+        mode: chatMode, // 'iterate' or 'review'
         onContentUpdated: handleConversationUpdate,
       }),
 
-      !readonly && React.createElement('div', { className: 'space-y-4 bg-slate-800/50 rounded-lg p-4 border border-slate-700' },
+      // Brainstorming: chat-first mode - show invite to chat, no Generate button
+      !readonly && isBrainstorming && !hasContent && React.createElement('div', {
+        className: 'bg-gradient-to-r from-cyan-500/10 to-violet-500/10 rounded-lg p-6 border border-cyan-500/30',
+      },
+        React.createElement('div', { className: 'text-center' },
+          React.createElement('div', { className: 'text-3xl mb-3' }, '💭'),
+          React.createElement('h3', { className: 'text-lg font-semibold text-slate-200 mb-2' }, 'Brainstorming Mode'),
+          React.createElement('p', { className: 'text-sm text-slate-400 mb-4' },
+            'Start a conversation to explore ideas. The AI will help you brainstorm, ask questions, and identify edge cases.'
+          )
+        ),
+        React.createElement('div', { className: 'flex items-center justify-center gap-4 mb-4' },
+          React.createElement(ModelSelect, { model, onChange: setModel, disabled: startingBrainstorm }),
+          !showConversation && React.createElement('button', {
+            onClick: handleStartBrainstorming,
+            disabled: startingBrainstorm,
+            className: 'px-6 py-3 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded-lg text-sm font-medium hover:bg-cyan-500/30 transition-colors disabled:opacity-50',
+          }, startingBrainstorm ? '⏳ Démarrage...' : '💬 Start Brainstorming')
+        ),
+        React.createElement('p', { className: 'text-xs text-slate-500 text-center' },
+          'When done, click "Save Summary" to generate the brainstorming.md summary.'
+        )
+      ),
+
+      // Regular steps: Generate section (not for brainstorming)
+      !readonly && !isBrainstorming && React.createElement('div', { className: 'space-y-4 bg-slate-800/50 rounded-lg p-4 border border-slate-700' },
         !hasContent && React.createElement(React.Fragment, null,
           React.createElement('div', { className: 'flex items-center gap-2 text-sm text-slate-400 mb-2' },
             React.createElement('span', null, '✨ Generate'),
@@ -1289,6 +1499,9 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
               className: 'flex items-center gap-2 px-4 py-2 bg-slate-700/50 text-slate-400 border border-slate-600 rounded-lg text-sm hover:bg-slate-700 hover:text-slate-200 disabled:opacity-50 transition-colors',
             }, skipping ? '⏳ Skipping...' : '⏭️ Skip this step')
       ),
+
+      // Files used panel (shows context loaded during generation)
+      filesUsed && React.createElement(FilesUsedPanel, { filesUsed, expanded: false }),
 
       generating && React.createElement(StreamingPanel, { output })
     )
@@ -2628,11 +2841,17 @@ export function StoryView({ slug, context = 'product' }) {
           history: [],
           currentVersion: 0,
         };
+        // Normalize currentStep from status.yaml (may use legacy names like 'brief')
+        const STEP_NAME_MAP = { brief: 'init', 'ba-spec': 'specFunc', 'tech-spec': 'specTech' };
+        const rawCurrentStep = story.currentStep || story.current_step || 'init';
+        const currentStep = STEP_NAME_MAP[rawCurrentStep] || rawCurrentStep;
+
         return React.createElement(StepSection, {
           key: stepKey,
           stepKey,
           step,
           slug,
+          currentStep,
           storyContext: story.init?.enriched || story.description || '',
           attachments: story.init?.attachments,
           figmaLinks: story.init?.figmaLinks,

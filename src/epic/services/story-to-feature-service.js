@@ -136,7 +136,7 @@ export class StoryToFeatureService {
     }
 
     // Determine current step (first pending step after product steps)
-    let currentStep = 'tech-spec';
+    let currentStep = 'spec-tech';
     for (const step of FEATURE_STEPS) {
       if (steps[step] === 'pending') {
         currentStep = step;

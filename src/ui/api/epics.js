@@ -22,9 +22,10 @@ import { FigmaDiscoveryService } from '../../epic/services/figma-discovery-servi
 import { FigmaProvider } from '../../epic/providers/figma-provider.js';
 import { AIProvider } from '../../epic/providers/ai-provider.js';
 import { isValidFigmaUrl, STORY_STEPS, normalizeStepName } from '../../epic/models/validators.js';
-import { CODE_STEPS } from '../../constants.js';
+import { CODE_STEPS, STEP_ORDER } from '../../constants.js';
 import { loadConfig } from '../../models.js';
 import { callModel } from '../../services/model-call.js';
+import { buildPrompt } from '../../prompt-builder.js';
 
 /**
  * Lazily initialize services with caching
@@ -289,20 +290,134 @@ export function registerEpicRoutes(router) {
 
   /**
    * GET /api/stories/:id - Get single Story by ID
+   * Always loads step content from .md files (source of truth)
    */
   router.get('/api/stories/:id', async (req, res, { params, root }) => {
+    console.log(`[GET /api/stories/${params.id}] Starting, root=${root}`);
     try {
+      // Always try to load from CLI format first (status.yaml + .md files)
+      const storyDir = path.join(root, '.aia', 'stories', params.id);
+      const statusFile = path.join(storyDir, 'status.yaml');
+      console.log(`[GET /api/stories/${params.id}] Checking ${statusFile}`);
+
+      const statusExists = await fs.pathExists(statusFile);
+      console.log(`[GET /api/stories/${params.id}] statusFile exists: ${statusExists}`);
+
+      if (statusExists) {
+        const yaml = await import('yaml');
+        const statusContent = await fs.readFile(statusFile, 'utf-8');
+        const status = yaml.default.parse(statusContent);
+        console.log(`[GET /api/stories/${params.id}] Loaded status, steps:`, Object.keys(status.steps || {}));
+
+        // Build story object from CLI format
+        const cliStory = {
+          id: params.id,
+          slug: status.slug || params.id,
+          title: status.name || params.id,
+          name: status.name || params.id,
+          description: '',
+          type: status.type || 'feature',
+          phase: status.phase || 'development',
+          space: 'development',
+          steps: {},
+          init: {},
+          createdAt: status.createdAt || new Date().toISOString(),
+          updatedAt: status.updatedAt || new Date().toISOString(),
+          skippedSteps: status.skippedSteps || [],
+          knowledge: status.knowledge || [],
+        };
+
+        // Helper to detect default template (not real content)
+        const isDefaultTemplate = (content) => {
+          if (!content) return true;
+          return content.includes('<!-- Describe your story here') ||
+                 content.includes('<!-- Add epic description here') ||
+                 content.includes('<!-- Add any initial specs');
+        };
+
+        // Load init.md if exists
+        const initFile = path.join(storyDir, 'init.md');
+        if (await fs.pathExists(initFile)) {
+          const initContent = await fs.readFile(initFile, 'utf-8');
+          // Only set as enriched if it's not the default template
+          if (initContent && initContent.trim() && !isDefaultTemplate(initContent)) {
+            cliStory.init.enriched = initContent;
+            cliStory.init.input = initContent;
+          }
+        }
+
+        // V3 step files (kebab-case) - these are the canonical names
+        const v3StepFiles = [
+          { file: 'init.md', key: 'init', kebab: 'init' },
+          { file: 'brainstorming.md', key: 'brainstorming', kebab: 'brainstorming' },
+          { file: 'spec-func.md', key: 'specFunc', kebab: 'spec-func' },
+          { file: 'spec-tech.md', key: 'specTech', kebab: 'spec-tech' },
+          { file: 'dev-plan.md', key: 'devPlan', kebab: 'dev-plan' },
+          { file: 'implement.md', key: 'implement', kebab: 'implement' },
+          { file: 'review.md', key: 'review', kebab: 'review' },
+        ];
+
+        // Load V3 step content
+        for (const { file, key, kebab } of v3StepFiles) {
+          const filePath = path.join(storyDir, file);
+          const fileExists = await fs.pathExists(filePath);
+          if (fileExists) {
+            const rawContent = await fs.readFile(filePath, 'utf-8');
+            const stepStatus = status.steps?.[kebab] || status.steps?.[key] || 'pending';
+
+            // For init step, ignore default template content
+            const isTemplate = key === 'init' && isDefaultTemplate(rawContent);
+            const content = isTemplate ? '' : rawContent;
+            const hasContent = content && content.trim().length > 0;
+
+            console.log(`[GET /api/stories/${params.id}] ${file}: exists=${fileExists}, length=${rawContent?.length || 0}, isTemplate=${isTemplate}, hasContent=${hasContent}`);
+
+            cliStory.steps[key] = {
+              content: content || '',
+              completed: stepStatus === 'done' || hasContent,
+              skipped: stepStatus === 'skipped' || (status.skippedSteps || []).includes(key),
+              currentVersion: hasContent ? 1 : 0,
+              history: hasContent ? [{
+                version: 1,
+                content,
+                generatedAt: cliStory.updatedAt,
+              }] : [],
+            };
+          } else {
+            // Step file doesn't exist yet
+            const stepStatus = status.steps?.[kebab] || status.steps?.[key] || 'pending';
+            cliStory.steps[key] = {
+              content: '',
+              completed: false,
+              skipped: stepStatus === 'skipped' || (status.skippedSteps || []).includes(key),
+              currentVersion: 0,
+              history: [],
+            };
+          }
+        }
+
+        return json(res, {
+          ...cliStory,
+          epicId: status.epic || 'general',
+          epicName: status.epic || 'General',
+        });
+      }
+
+      // Fallback: try JSON-based story (epic system)
       const { storyService } = await getServices(root);
       const { epic, story } = await storyService.findStoryWithEpic(params.id);
-      if (!story) {
-        return error(res, `Story ${params.id} not found`, 404);
+
+      if (story) {
+        return json(res, {
+          ...story,
+          epicId: epic?.id || null,
+          epicName: epic?.name || null,
+        });
       }
-      json(res, {
-        ...story,
-        epicId: epic?.id || null,
-        epicName: epic?.name || null,
-      });
+
+      return error(res, `Story ${params.id} not found`, 404);
     } catch (err) {
+      console.error(`[GET /api/stories/${params.id}] Error:`, err.message);
       error(res, err.message, 500);
     }
   });
@@ -920,10 +1035,27 @@ IMPORTANT:
   });
 
   /**
-   * POST /api/stories/:id/steps/:stepName/generate - Generate step content with AI (with history)
-   * Updated to save versions in history
+   * POST /api/stories/:id/steps/:stepName/generate - Generate step content with AI (SSE)
+   * Uses buildPrompt for V3 steps and returns filesUsed metadata
    */
   router.post('/api/stories/:id/steps/:stepName/generate', async (req, res, { params, root, parseBody }) => {
+    // SSE helper functions
+    const sseHeaders = () => {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'X-Accel-Buffering': 'no',
+      });
+      res.flushHeaders();
+    };
+
+    const sseSend = (event, data) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (res.flush) res.flush();
+    };
+
     try {
       const body = await parseBody();
       const { storyService, aiProvider } = await getServices(root);
@@ -943,72 +1075,215 @@ IMPORTANT:
         return error(res, `Story ${params.id} not found`, 404);
       }
 
-      // Build context from story init
-      let context = '';
-      if (story.init?.enriched) {
-        context += `Story Context:\n${story.init.enriched}`;
-      } else if (story.init?.input) {
-        context += `Story Context:\n${story.init.input}`;
-      }
+      // Start SSE
+      sseHeaders();
+      sseSend('status', { status: 'preparing', message: 'Building prompt context...' });
 
-      // Build input based on step type
-      let input = `Story: ${story.title}\n`;
-      if (story.description) {
-        input += `Description: ${story.description}\n`;
-      }
-      if (body.context) {
-        input += `Additional context: ${body.context}\n`;
-      }
+      // Normalize step name for buildPrompt (kebab-case)
+      const normalizedStep = normalizeStepName(params.stepName);
+      const apiStepName = params.stepName.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
 
-      // Generate based on step type
+      // Check if this is a V3 step that can use buildPrompt
+      const v3Steps = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
+      const isV3Step = v3Steps.includes(apiStepName);
+
       let generatedContent;
-      switch (params.stepName) {
-        case 'brief':
-          generatedContent = await aiProvider.generateBrief(input, context);
-          break;
-        case 'baSpec':
-          if (story.steps?.brief?.content) {
-            input = `${input}\nExisting Brief:\n${story.steps.brief.content}`;
+      let filesUsed = null;
+      let selectedModel = aiProvider.getModel();
+
+      if (isV3Step && story.slug) {
+        // Use buildPrompt for V3 steps
+        sseSend('status', { status: 'loading', message: 'Loading context files...' });
+
+        try {
+          const promptResult = await buildPrompt(story.slug, apiStepName, {
+            description: body.context || '',
+            instructions: body.instructions || '',
+            root,
+          });
+
+          filesUsed = promptResult.filesUsed;
+          const prompt = promptResult.prompt;
+
+          sseSend('status', { status: 'generating', message: 'AI is generating content...' });
+
+          // Stream log output to client
+          const onData = ({ type, text }) => {
+            try {
+              sseSend('log', { type, text });
+            } catch {
+              // Ignore write errors during streaming
+            }
+          };
+
+          // Load model from config
+          try {
+            const config = await loadConfig(root);
+            selectedModel = body.model || config.models?.[apiStepName]?.[0]?.model || aiProvider.getModel();
+          } catch {
+            // Use default model
           }
-          generatedContent = await aiProvider.generateBASpec(input, context);
-          break;
-        case 'questions':
-          if (story.steps?.brief?.content) {
-            input = `${input}\nBrief:\n${story.steps.brief.content}`;
-          }
-          if (story.steps?.baSpec?.content) {
-            input = `${input}\nBA Specification:\n${story.steps.baSpec.content}`;
-          }
-          generatedContent = await aiProvider.generateQuestions(input, context);
-          break;
+
+          generatedContent = await callModel(selectedModel, prompt, {
+            verbose: false,
+            apply: false,
+            onData,
+            cwd: root,
+          });
+        } catch (err) {
+          // Fallback to legacy method if buildPrompt fails
+          console.log(`[Generate] buildPrompt failed for ${apiStepName}: ${err.message}, falling back to legacy`);
+          sseSend('log', { type: 'warn', text: `Using legacy generation (buildPrompt failed: ${err.message})` });
+          generatedContent = await generateLegacy(story, params.stepName, body, aiProvider);
+        }
+      } else {
+        // Use legacy method for old steps
+        sseSend('status', { status: 'generating', message: 'AI is generating content...' });
+        generatedContent = await generateLegacy(story, params.stepName, body, aiProvider);
       }
 
-      // Save to history
-      const updatedStory = await storyService.addStepVersion(
-        params.id,
-        params.stepName,
-        generatedContent,
-        body.instructions || 'Initial generation',
-        aiProvider.getModel()
-      );
+      // Save to history (normalizeStepName ensures camelCase storage)
+      console.log(`[Generate] Saving content (${generatedContent?.length || 0} chars) for step ${params.stepName}`);
 
-      json(res, {
+      let updatedStory;
+      const stepKey = normalizeStepName(params.stepName);
+
+      try {
+        updatedStory = await storyService.addStepVersion(
+          params.id,
+          params.stepName,
+          generatedContent,
+          body.instructions || 'Initial generation',
+          selectedModel
+        );
+        console.log(`[Generate] Story saved successfully. Steps keys: ${Object.keys(updatedStory?.steps || {}).join(', ')}`);
+      } catch (saveErr) {
+        console.error(`[Generate] Failed to save to story service: ${saveErr.message}`);
+
+        // Fallback: try to write directly to .md file for CLI-format stories
+        if (story.slug) {
+          try {
+            const storyDir = path.join(root, '.aia', 'stories', story.slug);
+            const stepFile = path.join(storyDir, `${apiStepName}.md`);
+
+            if (await fs.pathExists(storyDir)) {
+              await fs.writeFile(stepFile, generatedContent, 'utf-8');
+              console.log(`[Generate] Fallback: Saved to ${stepFile}`);
+              sseSend('log', { type: 'info', text: `Saved to ${apiStepName}.md` });
+
+              // Create a mock story response for the UI
+              updatedStory = {
+                ...story,
+                steps: {
+                  ...story.steps,
+                  [stepKey]: {
+                    content: generatedContent,
+                    completed: true,
+                    currentVersion: 1,
+                    history: [{
+                      version: 1,
+                      content: generatedContent,
+                      generatedAt: new Date().toISOString(),
+                    }],
+                  },
+                },
+              };
+            } else {
+              throw new Error(`Story directory not found: ${storyDir}`);
+            }
+          } catch (fallbackErr) {
+            console.error(`[Generate] Fallback also failed: ${fallbackErr.message}`);
+            sseSend('log', { type: 'error', text: `Save failed: ${fallbackErr.message}` });
+            sseSend('done', {
+              ok: false,
+              error: saveErr.message,
+              content: generatedContent,
+              filesUsed,
+            });
+            res.end();
+            return;
+          }
+        } else {
+          sseSend('log', { type: 'error', text: `Save failed: ${saveErr.message}` });
+          sseSend('done', {
+            ok: false,
+            error: saveErr.message,
+            content: generatedContent,
+            filesUsed,
+          });
+          res.end();
+          return;
+        }
+      }
+
+      console.log(`[Generate] Normalized step key: ${stepKey}, has content: ${!!updatedStory?.steps?.[stepKey]?.content}`);
+
+      // Send completion event with filesUsed
+      sseSend('done', {
+        ok: true,
+        story: updatedStory,
         content: generatedContent,
-        version: updatedStory.steps[params.stepName].currentVersion,
-        model: aiProvider.getModel(),
+        version: updatedStory.steps[stepKey]?.currentVersion,
+        model: selectedModel,
         provider: aiProvider.getProvider(),
-        history: updatedStory.steps[params.stepName].history,
+        filesUsed,
+        history: updatedStory.steps[stepKey]?.history,
       });
     } catch (err) {
-      if (err.code === 'NOT_FOUND') {
-        error(res, err.message, 404);
-      } else if (err.code === 'AI_RESPONSE_ERROR' || err.code === 'AI_UNAVAILABLE') {
-        error(res, err.message, 502);
-      } else {
-        error(res, err.message, 500);
+      try {
+        sseSend('error', { message: err.message });
+      } catch {
+        // If SSE not started yet, use regular error response
+        if (err.code === 'NOT_FOUND') {
+          error(res, err.message, 404);
+        } else if (err.code === 'AI_RESPONSE_ERROR' || err.code === 'AI_UNAVAILABLE') {
+          error(res, err.message, 502);
+        } else {
+          error(res, err.message, 500);
+        }
+        return;
       }
     }
+    res.end();
   });
+
+  // Helper function for legacy generation
+  async function generateLegacy(story, stepName, body, aiProvider) {
+    let context = '';
+    if (story.init?.enriched) {
+      context += `Story Context:\n${story.init.enriched}`;
+    } else if (story.init?.input) {
+      context += `Story Context:\n${story.init.input}`;
+    }
+
+    let input = `Story: ${story.title}\n`;
+    if (story.description) {
+      input += `Description: ${story.description}\n`;
+    }
+    if (body.context) {
+      input += `Additional context: ${body.context}\n`;
+    }
+
+    switch (stepName) {
+      case 'brief':
+        return aiProvider.generateBrief(input, context);
+      case 'baSpec':
+        if (story.steps?.brief?.content) {
+          input = `${input}\nExisting Brief:\n${story.steps.brief.content}`;
+        }
+        return aiProvider.generateBASpec(input, context);
+      case 'questions':
+        if (story.steps?.brief?.content) {
+          input = `${input}\nBrief:\n${story.steps.brief.content}`;
+        }
+        if (story.steps?.baSpec?.content) {
+          input = `${input}\nBA Specification:\n${story.steps.baSpec.content}`;
+        }
+        return aiProvider.generateQuestions(input, context);
+      default:
+        throw new Error(`No legacy generator for step: ${stepName}`);
+    }
+  }
 
   // ============== STORY CONVERSATION ENDPOINTS ==============
 
@@ -1033,7 +1308,8 @@ IMPORTANT:
 
   /**
    * POST /api/stories/:id/steps/:stepName/chat - Send a message in step conversation
-   * Body: { message: string }
+   * Body: { message: string, reviewMode?: boolean }
+   * stepName can end with '-review' for separate review conversations
    * Returns AI response in configured communication_language
    */
   router.post('/api/stories/:id/steps/:stepName/chat', async (req, res, { params, root, parseBody }) => {
@@ -1049,14 +1325,53 @@ IMPORTANT:
         return error(res, 'message is required and must be a string', 400);
       }
 
+      // Detect review mode from stepName suffix or body flag
+      const isReviewMode = params.stepName.endsWith('-review') || body.reviewMode === true;
+      const actualStepName = params.stepName.replace(/-review$/, '');
+      const conversationKey = params.stepName; // Keep full name for conversation storage
+
+      // Normalize step name from kebab-case to camelCase for story.steps access
+      const normalizedStep = normalizeStepName(actualStepName);
+
+      console.log(`[Chat] Mode: ${isReviewMode ? 'REVIEW' : 'ITERATE'}`);
+      console.log(`[Chat] Step: ${actualStepName} -> normalized: ${normalizedStep}`);
+      console.log(`[Chat] Conversation key: ${conversationKey}`);
+
       // Get the story
       const { story } = await storyService.findStoryWithEpic(params.id);
       if (!story) {
         return error(res, `Story ${params.id} not found`, 404);
       }
 
-      // Get step content for context
-      const stepContent = story.steps[params.stepName]?.content || '';
+      // Get step content for context - try both kebab and camelCase
+      let stepContent = story.steps?.[normalizedStep]?.content || story.steps?.[actualStepName]?.content || '';
+
+      // Log available steps for debugging
+      const availableSteps = Object.keys(story.steps || {});
+      console.log(`[Chat] Available steps in story: ${availableSteps.join(', ')}`);
+      console.log(`[Chat] Step content loaded: ${stepContent ? `${stepContent.length} chars` : 'EMPTY'}`);
+
+      // If no content in story.steps, try to load from .md file
+      if (!stepContent) {
+        try {
+          const fs = await import('fs-extra');
+          const path = await import('path');
+          const { AIA_DIR } = await import('../../constants.js');
+
+          // Try story directory first
+          const storyDir = path.default.join(root, AIA_DIR, 'stories', story.slug || params.id);
+          const stepFile = path.default.join(storyDir, `${actualStepName}.md`);
+
+          if (await fs.default.pathExists(stepFile)) {
+            stepContent = await fs.default.readFile(stepFile, 'utf8');
+            console.log(`[Chat] Loaded from file: ${stepFile} (${stepContent.length} chars)`);
+          } else {
+            console.log(`[Chat] File not found: ${stepFile}`);
+          }
+        } catch (err) {
+          console.log(`[Chat] Error loading step file: ${err.message}`);
+        }
+      }
 
       // Load config for communication_language
       let communicationLanguage = 'English';
@@ -1067,11 +1382,11 @@ IMPORTANT:
         // Use default
       }
 
-      // Add user message to conversation
-      await storyService.addConversationMessage(params.id, params.stepName, 'user', body.message);
+      // Add user message to conversation (use full key including -review if present)
+      await storyService.addConversationMessage(params.id, conversationKey, 'user', body.message);
 
       // Build context from story and previous conversation
-      const conversation = await storyService.getConversation(params.id, params.stepName);
+      const conversation = await storyService.getConversation(params.id, conversationKey);
       let conversationContext = '';
       if (conversation.messages.length > 1) {
         conversationContext = '\n\nPrevious conversation:\n' +
@@ -1080,12 +1395,111 @@ IMPORTANT:
           ).join('\n');
       }
 
-      // Build prompt for AI
-      const prompt = `You are a helpful assistant reviewing and iterating on a product/feature specification.
+      // Also load story init context if available
+      let initContext = '';
+      if (story.init?.enriched) {
+        initContext = `\n\nSTORY CONTEXT (from init):\n${story.init.enriched}`;
+      } else {
+        // Try to load init.md directly for CLI-format stories
+        try {
+          const fs = await import('fs-extra');
+          const path = await import('path');
+          const { AIA_DIR } = await import('../../constants.js');
 
-CURRENT STEP: ${params.stepName}
+          const storyDir = path.default.join(root, AIA_DIR, 'stories', story.slug || params.id);
+          const initFile = path.default.join(storyDir, 'init.md');
+
+          if (await fs.default.pathExists(initFile)) {
+            const initContent = await fs.default.readFile(initFile, 'utf8');
+            // Only use if it's not just the default template
+            if (initContent && !initContent.includes('<!-- Describe your story here')) {
+              initContext = `\n\nSTORY CONTEXT (from init.md):\n${initContent}`;
+            }
+          }
+        } catch (err) {
+          console.log(`[Chat] Error loading init.md: ${err.message}`);
+        }
+      }
+
+      // Always include story title for context
+      const storyTitle = story.title || story.name || params.id;
+      const storyDescription = story.description || '';
+
+      console.log(`[Chat] Building prompt with ${stepContent.length} chars of step content, init: ${initContext.length} chars`);
+
+      // Check if this is brainstorming step (chat-first mode)
+      const isBrainstorming = actualStepName === 'brainstorming';
+
+      // Build prompt for AI - different modes
+      let prompt;
+      if (isReviewMode) {
+        prompt = `You are a CRITICAL REVIEWER performing an adversarial review. Your job is to find problems, weaknesses, and gaps.
+
+STEP BEING REVIEWED: ${actualStepName}
+${initContext}
+
+CONTENT TO REVIEW:
+---
+${stepContent || '(No content generated for this step yet)'}
+---
+${conversationContext}
+
+USER MESSAGE: ${body.message}
+
+RESPONSE LANGUAGE: ${communicationLanguage}
+
+YOUR ROLE: Be a tough, skeptical reviewer. You should:
+- Challenge assumptions and decisions
+- Identify missing edge cases
+- Point out ambiguities and inconsistencies
+- Question technical choices
+- Find potential bugs or issues
+- Suggest concrete improvements
+
+Be direct and specific. Don't be nice for the sake of being nice - your job is to make this content better by finding its weaknesses.
+
+Format issues as:
+**[SEVERITY: high/medium/low]** Issue description
+- Impact: What could go wrong
+- Suggestion: How to fix it
+
+IMPORTANT: Respond in ${communicationLanguage}.`;
+      } else if (isBrainstorming) {
+        // Brainstorming: conversational, exploratory mode
+        prompt = `You are a product discovery assistant helping to brainstorm and explore a feature idea.
+
+STORY TITLE: ${storyTitle}
+${storyDescription ? `STORY DESCRIPTION: ${storyDescription}` : ''}
+${initContext}
+${conversationContext}
+
+USER MESSAGE: ${body.message}
+
+RESPONSE LANGUAGE: ${communicationLanguage}
+
+IMPORTANT: You already know the story is about "${storyTitle}". Use this context to provide relevant suggestions.
+
+YOUR ROLE: Help the user explore and refine this feature:
+- If the user asks open questions like "what do you suggest?", propose concrete ideas based on the story title
+- Ask clarifying questions to understand their needs (one or two at a time)
+- Suggest alternative approaches or improvements
+- Identify potential challenges and edge cases early
+- Help prioritize requirements
+- Build on previous answers in the conversation
+
+Be proactive and creative. Start by acknowledging what the feature is about and then guide the discussion.
+
+IMPORTANT: Respond in ${communicationLanguage}.`;
+      } else {
+        prompt = `You are a helpful assistant iterating on a product/feature specification.
+
+CURRENT STEP: ${actualStepName}
+${initContext}
+
 CURRENT CONTENT:
-${stepContent || '(No content yet)'}
+---
+${stepContent || '(No content generated for this step yet)'}
+---
 ${conversationContext}
 
 USER MESSAGE: ${body.message}
@@ -1101,6 +1515,11 @@ TASK: Respond helpfully to the user's message. You can:
 Keep your response concise and actionable. If the user wants changes, describe what should change but don't rewrite the whole document.
 
 IMPORTANT: Respond in ${communicationLanguage}.`;
+      }
+
+      // Log the prompt header for debugging
+      console.log(`[Chat] Prompt starts with: "${prompt.substring(0, 100)}..."`);
+      console.log(`[Chat] Total prompt length: ${prompt.length} chars`);
 
       const response = await callModel(aiProvider.getModel(), prompt, { verbose: false, apply: false });
 
@@ -1152,14 +1571,21 @@ IMPORTANT: Respond in ${communicationLanguage}.`;
   /**
    * POST /api/stories/:id/steps/:stepName/recap - Recap conversation and regenerate step content
    * Combines all feedback from conversation into an updated version
+   * stepName can end with '-review' for review conversations
    */
-  router.post('/api/stories/:id/steps/:stepName/recap', async (req, res, { params, root }) => {
+  router.post('/api/stories/:id/steps/:stepName/recap', async (req, res, { params, root, parseBody }) => {
     try {
+      const body = await parseBody().catch(() => ({}));
       const { storyService, aiProvider } = await getServices(root);
 
       if (!aiProvider.isConfigured()) {
         return error(res, 'AI provider not configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.', 400);
       }
+
+      // Detect review mode from stepName suffix or body flag
+      const isReviewMode = params.stepName.endsWith('-review') || body.reviewMode === true;
+      const actualStepName = params.stepName.replace(/-review$/, '');
+      const conversationKey = params.stepName;
 
       // Get the story
       const { story } = await storyService.findStoryWithEpic(params.id);
@@ -1167,58 +1593,121 @@ IMPORTANT: Respond in ${communicationLanguage}.`;
         return error(res, `Story ${params.id} not found`, 404);
       }
 
-      // Get current step content
-      const stepContent = story.steps[params.stepName]?.content;
-      if (!stepContent) {
-        return error(res, `Step ${params.stepName} has no content to update`, 400);
+      // Get current step content (use actual step name)
+      const normalizedStep = normalizeStepName(actualStepName);
+      const stepContent = story.steps[actualStepName]?.content || story.steps[normalizedStep]?.content;
+
+      // Check if this is brainstorming (chat-first mode - no initial content required)
+      const isBrainstorming = actualStepName === 'brainstorming';
+
+      // For non-brainstorming steps, content is required
+      if (!stepContent && !isBrainstorming) {
+        return error(res, `Step ${actualStepName} has no content to update`, 400);
       }
 
-      // Get conversation history
-      const conversation = await storyService.getConversation(params.id, params.stepName);
+      // Get conversation history (use full key including -review)
+      const conversation = await storyService.getConversation(params.id, conversationKey);
       if (!conversation.messages || conversation.messages.length === 0) {
         return error(res, 'No conversation to recap', 400);
       }
 
       // Build conversation summary
       const conversationText = conversation.messages
-        .map(m => `${m.role === 'user' ? 'USER FEEDBACK' : 'ASSISTANT RESPONSE'}: ${m.content}`)
+        .map(m => `${m.role === 'user' ? 'USER' : 'AI'}: ${m.content}`)
         .join('\n\n');
 
-      // Build prompt for regeneration
-      const prompt = `You are updating a document based on user feedback collected during a conversation.
+      // Build prompt for regeneration - different modes
+      let prompt;
+      if (isBrainstorming) {
+        // Brainstorming: generate summary from chat-first conversation
+        prompt = `You are creating a structured summary of a brainstorming session.
 
-ORIGINAL DOCUMENT (${params.stepName}):
+STORY CONTEXT:
+Title: ${story.title || story.name}
+Description: ${story.description || 'No description'}
+
+BRAINSTORMING CONVERSATION:
+${conversationText}
+
+TASK:
+Create a structured markdown summary of this brainstorming session. Include:
+
+## Key Ideas
+- List the main ideas discussed
+
+## Explored Options
+- Different approaches considered
+- Pros and cons mentioned
+
+## Questions & Concerns
+- Open questions raised
+- Edge cases identified
+- Potential challenges
+
+## Decisions & Next Steps
+- Any decisions made
+- Recommended next steps
+
+## Raw Notes
+- Any other important points from the conversation
+
+Output ONLY the markdown summary, no explanations or preamble.`;
+      } else if (isReviewMode) {
+        prompt = `You are applying fixes identified during an adversarial review session.
+
+ORIGINAL DOCUMENT (${actualStepName}):
+${stepContent}
+
+REVIEW SESSION:
+${conversationText}
+
+TASK:
+Apply the fixes and improvements discussed during the review:
+- Fix all issues marked as high or medium severity
+- Address the specific problems pointed out
+- Keep changes focused on the identified issues
+- Maintain the same format and structure
+- Output ONLY the fixed document, no explanations
+
+Be thorough but conservative - only change what was identified as problematic.`;
+      } else {
+        prompt = `You are updating a document based on user feedback collected during a conversation.
+
+ORIGINAL DOCUMENT (${actualStepName}):
 ${stepContent}
 
 CONVERSATION WITH FEEDBACK:
 ${conversationText}
 
 TASK:
-Regenerate the ${params.stepName} document incorporating all the user's feedback and suggestions from the conversation.
+Regenerate the ${actualStepName} document incorporating all the user's feedback and suggestions from the conversation.
 - Keep the same format and structure as the original
 - Apply all requested changes
 - Maintain professional tone
 - Output ONLY the updated document, no explanations`;
+      }
 
       const newContent = await callModel(aiProvider.getModel(), prompt, { verbose: false, apply: false });
 
-      // Save new version
+      // Save new version to the actual step (not the -review key)
+      const targetStep = normalizedStep || actualStepName;
       const updatedStory = await storyService.addStepVersion(
         params.id,
-        params.stepName,
+        targetStep,
         newContent.trim(),
-        'Recap from conversation feedback',
+        isReviewMode ? 'Fixes from adversarial review' : 'Recap from conversation feedback',
         aiProvider.getModel()
       );
 
       // Clear conversation after recap
-      await storyService.clearConversation(params.id, params.stepName);
+      await storyService.clearConversation(params.id, conversationKey);
 
       json(res, {
         content: newContent.trim(),
-        version: updatedStory.steps[params.stepName].currentVersion,
+        version: updatedStory.steps[targetStep]?.currentVersion,
         model: aiProvider.getModel(),
         conversationCleared: true,
+        reviewMode: isReviewMode,
       });
     } catch (err) {
       if (err.code === 'NOT_FOUND') {

@@ -152,7 +152,7 @@ async function migrateStoryToYaml(story, epicSlug, root) {
     phase,
     type: story.type || 'feature',
     flow: phase === 'discovery' ? 'full' : 'full',
-    current_step: phase === 'discovery' ? 'brief' : 'tech-spec',
+    current_step: phase === 'discovery' ? 'init' : 'spec-tech',
     createdAt: story.createdAt || new Date().toISOString(),
     updatedAt: story.updatedAt || new Date().toISOString(),
     steps: {

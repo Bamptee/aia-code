@@ -171,7 +171,18 @@ export async function runStep(step, feature, { description, instructions, histor
 
   try {
     const model = modelOverride || await resolveModel(step, root);
-    const prompt = await buildPrompt(feature, step, { description, instructions, history, attachments, phase: phaseData, root });
+    const { prompt, filesUsed } = await buildPrompt(feature, step, { description, instructions, history, attachments, phase: phaseData, root });
+
+    // Log files used for transparency
+    if (filesUsed) {
+      console.log(chalk.dim(`[Context] Prompt: ${filesUsed.promptTemplate} (${filesUsed.promptPhase}/${filesUsed.promptType})`));
+      if (filesUsed.priorSteps?.length > 0) {
+        console.log(chalk.dim(`[Context] Prior steps: ${filesUsed.priorSteps.map(f => f.file).join(', ')}`));
+      }
+      if (filesUsed.contextFiles?.length > 0) {
+        console.log(chalk.dim(`[Context] Context files: ${filesUsed.contextFiles.join(', ')}`));
+      }
+    }
 
     const start = performance.now();
     const output = await callModel(model, prompt, { verbose, apply: shouldApply, onData: wrappedOnData, cwd });
@@ -194,7 +205,8 @@ export async function runStep(step, feature, { description, instructions, histor
 
     await logExecution({ feature, step, model, duration, phase: phaseData?.number }, root);
 
-    return output;
+    // Return output and filesUsed for UI transparency
+    return { output, filesUsed };
   } catch (err) {
     await updateStepStatus(feature, step, STEP_STATUS.ERROR, root);
     if (phaseData) {

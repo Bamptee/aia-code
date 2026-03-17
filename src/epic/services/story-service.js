@@ -639,6 +639,9 @@ export class StoryService {
       throw new ValidationError(`Invalid step name: ${stepName}. Must be one of: ${STORY_STEPS.join(', ')}`);
     }
 
+    // Normalize step name to camelCase for consistent storage
+    const normalizedStep = normalizeStepName(stepName);
+
     const { epic, story } = await this.findStoryWithEpic(storyId);
 
     if (!story) {
@@ -646,8 +649,8 @@ export class StoryService {
     }
 
     // Ensure step exists (backwards compatibility for stories created before 8 steps)
-    if (!story.steps[stepName]) {
-      story.steps[stepName] = {
+    if (!story.steps[normalizedStep]) {
+      story.steps[normalizedStep] = {
         completed: false,
         skipped: false,
         content: null,
@@ -656,7 +659,7 @@ export class StoryService {
       };
     }
 
-    const step = story.steps[stepName];
+    const step = story.steps[normalizedStep];
 
     // Ensure history array exists (for backwards compatibility)
     if (!step.history) {

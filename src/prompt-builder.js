@@ -91,16 +91,20 @@ async function loadFeatureFiles(feature, step, root, options = {}) {
 
   const priorSteps = stepOrder.slice(0, stepIndex);
   const sections = [];
+  const loadedFiles = [];
 
   for (const s of priorSteps) {
     const fileName = STEP_FILE_MAP[s] || s;
-    const content = await readIfExists(path.join(featureDir, `${fileName}.md`));
+    const filePath = path.join(featureDir, `${fileName}.md`);
+    const content = await readIfExists(filePath);
     if (content) {
       sections.push(content);
+      loadedFiles.push({ step: s, file: `${fileName}.md`, chars: content.length });
+      console.log(`[PromptBuilder]   - Loaded prior step: ${fileName}.md (${content.length} chars)`);
     }
   }
 
-  return { content: sections.join('\n\n'), priorSteps };
+  return { content: sections.join('\n\n'), priorSteps, loadedFiles };
 }
 
 /**
@@ -468,10 +472,20 @@ async function loadPromptTemplate(step, root) {
 }
 
 export async function buildPrompt(feature, step, { description, instructions, history, attachments, root = process.cwd() } = {}) {
+  console.log(`\n[PromptBuilder] ========== Building prompt for step: ${step} ==========`);
+  console.log(`[PromptBuilder] Feature/Story: ${feature}`);
+  console.log(`[PromptBuilder] Root: ${root}`);
+
   const config = await loadConfig(root);
+  console.log(`[PromptBuilder] Config loaded - doc_lang: ${config.document_output_language}, comm_lang: ${config.communication_language}`);
 
   // Check if spec-tech was skipped (for implement step auto-analysis)
   const specTechSkipped = (step === 'implement') ? await isSpecTechSkipped(feature, root) : false;
+  if (specTechSkipped) {
+    console.log(`[PromptBuilder] ⚠️ spec-tech was SKIPPED - will use auto-analysis`);
+  }
+
+  console.log(`[PromptBuilder] Loading files...`);
 
   const [context, knowledgeCategories, initSpecs, featureResult, previousOutput, taskResult] = await Promise.all([
     loadContextFiles(config, root),
@@ -482,20 +496,50 @@ export async function buildPrompt(feature, step, { description, instructions, hi
     loadPromptTemplate(step, root),
   ]);
 
+  // Log what was loaded
+  console.log(`[PromptBuilder] ✓ Context files: ${context ? `${context.length} chars` : 'none'}`);
+  console.log(`[PromptBuilder] ✓ Knowledge categories: ${knowledgeCategories?.join(', ') || 'none'}`);
+  console.log(`[PromptBuilder] ✓ Init specs: ${initSpecs ? `${initSpecs.length} chars` : 'none'}`);
+  console.log(`[PromptBuilder] ✓ Previous output: ${previousOutput ? `${previousOutput.length} chars` : 'none'}`);
+
   // Handle both old string return and new object return from loadFeatureFiles
   const featureContent = typeof featureResult === 'string' ? featureResult : featureResult?.content;
+  const loadedPriorSteps = featureResult?.loadedFiles || [];
+  console.log(`[PromptBuilder] ✓ Feature content (prior steps): ${featureContent ? `${featureContent.length} chars` : 'none'}`);
+  if (loadedPriorSteps.length > 0) {
+    console.log(`[PromptBuilder]   Prior steps loaded: ${loadedPriorSteps.map(f => f.file).join(', ')}`);
+  }
 
   // Extract task content and metadata from parsed prompt template
   const task = taskResult.content;
   const taskMetadata = taskResult.metadata;
+  console.log(`[PromptBuilder] ✓ Prompt template loaded: ${taskMetadata?.name || step}.md`);
+  console.log(`[PromptBuilder]   - Phase: ${taskMetadata?.phase || 'unknown'}`);
+  console.log(`[PromptBuilder]   - Type: ${taskMetadata?.type || 'generate'}`);
+  console.log(`[PromptBuilder]   - Scan required: ${taskMetadata?.scan_required || false}`);
+  console.log(`[PromptBuilder]   - First 100 chars: "${task?.substring(0, 100)}..."`);
 
   // Load auto-analysis context if spec-tech was skipped
   let autoAnalysisContext = null;
   if (specTechSkipped && step === 'implement') {
     autoAnalysisContext = await loadAutoAnalysisContext(root);
+    console.log(`[PromptBuilder] ✓ Auto-analysis context loaded`);
   }
 
   const knowledge = await loadKnowledge(knowledgeCategories, root);
+  console.log(`[PromptBuilder] ✓ Knowledge: ${knowledge ? `${knowledge.length} chars` : 'none'}`);
+
+  // Track files used for transparency
+  const filesUsed = {
+    promptTemplate: `${taskMetadata?.name || step}.md`,
+    promptPhase: taskMetadata?.phase || 'unknown',
+    promptType: taskMetadata?.type || 'generate',
+    contextFiles: config.context_files || [],
+    knowledgeCategories: knowledgeCategories || [],
+    priorSteps: loadedPriorSteps,
+    codebaseFiles: [],
+    initFile: initSpecs ? 'init.md' : null,
+  };
 
   const parts = [];
 
@@ -628,7 +672,15 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   // Add language reminder at the end (always, to reinforce)
   parts.push(`\n\n---\nREMINDER: Your entire output MUST be written in ${docLang}.`);
 
-  return parts.join('\n');
+  const prompt = parts.join('\n');
+
+  console.log(`[PromptBuilder] ========== Prompt built: ${prompt.length} chars ==========\n`);
+
+  // Return both prompt and metadata about files used
+  return {
+    prompt,
+    filesUsed,
+  };
 }
 
 /**

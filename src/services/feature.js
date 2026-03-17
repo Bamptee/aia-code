@@ -75,8 +75,8 @@ function buildStatusYaml(slug, { name, type = DEFAULT_FEATURE_TYPE, apps = [], e
     steps[step] = 'pending';
   }
 
-  // Determine first step based on phase
-  const currentStep = phase === STORY_PHASES.DEVELOPMENT ? 'tech-spec' : 'brief';
+  // Determine first step based on phase (V3 step names)
+  const currentStep = phase === STORY_PHASES.DEVELOPMENT ? 'spec-tech' : 'init';
 
   // Keep flow for backwards compatibility (deprecated but still used in some places)
   const flow = 'full';

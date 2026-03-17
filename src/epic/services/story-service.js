@@ -1398,4 +1398,98 @@ export class StoryService {
     await this.storage.writeEpic(epic);
     return story;
   }
+
+  // ============== Worktrunk Methods ==============
+
+  /**
+   * Enables worktrunk for a story
+   * @param {string} storyId - Story ID
+   * @param {string} branch - Worktree branch name
+   * @param {string} path - Absolute path to the worktree
+   * @param {Array<{app: string, branch: string}>} [submoduleBranches] - Submodule branches
+   * @returns {Promise<import('../models/story.js').Story>} Updated story
+   * @throws {NotFoundError} If Story not found
+   */
+  async enableWorktrunk(storyId, branch, path, submoduleBranches = []) {
+    const { epic, story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    // Find the story in the epic and update it
+    const storyIndex = epic.stories.findIndex((s) => s.id === storyId);
+    if (storyIndex === -1) {
+      throw new NotFoundError(`Story ${storyId} not found in epic`);
+    }
+
+    story.worktrunk = {
+      enabled: true,
+      branch,
+      path,
+      createdAt: new Date().toISOString(),
+      submoduleBranches,
+    };
+    story.updatedAt = new Date().toISOString();
+    epic.stories[storyIndex] = story;
+    epic.updatedAt = new Date().toISOString();
+
+    await this.storage.writeEpic(epic);
+    return story;
+  }
+
+  /**
+   * Disables worktrunk for a story
+   * @param {string} storyId - Story ID
+   * @returns {Promise<import('../models/story.js').Story>} Updated story
+   * @throws {NotFoundError} If Story not found
+   */
+  async disableWorktrunk(storyId) {
+    const { epic, story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    // Find the story in the epic and update it
+    const storyIndex = epic.stories.findIndex((s) => s.id === storyId);
+    if (storyIndex === -1) {
+      throw new NotFoundError(`Story ${storyId} not found in epic`);
+    }
+
+    story.worktrunk = null;
+    story.updatedAt = new Date().toISOString();
+    epic.stories[storyIndex] = story;
+    epic.updatedAt = new Date().toISOString();
+
+    await this.storage.writeEpic(epic);
+    return story;
+  }
+
+  /**
+   * Gets worktrunk status for a story
+   * @param {string} storyId - Story ID
+   * @returns {Promise<import('../models/story.js').StoryWorktrunk|null>} Worktrunk config or null
+   * @throws {NotFoundError} If Story not found
+   */
+  async getWorktrunkStatus(storyId) {
+    const { story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    return story.worktrunk || null;
+  }
+
+  /**
+   * Checks if worktrunk is enabled for a story
+   * @param {string} storyId - Story ID
+   * @returns {Promise<boolean>} True if worktrunk is enabled
+   * @throws {NotFoundError} If Story not found
+   */
+  async isWorktrunkEnabled(storyId) {
+    const worktrunk = await this.getWorktrunkStatus(storyId);
+    return worktrunk?.enabled === true;
+  }
 }

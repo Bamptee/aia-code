@@ -458,7 +458,7 @@ async function loadPromptTemplate(step, root) {
   return { content: body, metadata: frontMatter };
 }
 
-export async function buildPrompt(feature, step, { description, instructions, history, attachments, root = process.cwd() } = {}) {
+export async function buildPrompt(feature, step, { description, instructions, history, attachments, root = process.cwd(), wtPath = null } = {}) {
   console.log(`\n[PromptBuilder] ========== Building prompt for step: ${step} ==========`);
   console.log(`[PromptBuilder] Feature/Story: ${feature}`);
   console.log(`[PromptBuilder] Root: ${root}`);
@@ -531,6 +531,16 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   const parts = [];
 
   parts.push('IMPORTANT: You are working on a feature development pipeline. Everything you need is provided below in this prompt. Do NOT attempt to read, search for, or reference any external files. Do NOT say files are missing. Work exclusively with the content given below.\n');
+
+  // Worktree workspace isolation - if wtPath is provided, all file operations must use it
+  if (wtPath) {
+    parts.push('=== WORKSPACE ISOLATION ===\n');
+    parts.push(`This story uses an isolated git worktree for development.`);
+    parts.push(`WORKTREE PATH: ${wtPath}`);
+    parts.push(`ALL file edits and creations MUST be within this worktree path.`);
+    parts.push(`Use absolute paths starting with: ${wtPath}/`);
+    parts.push(`Do NOT modify files in the main repository.\n`);
+  }
 
   // Inject user preferences - document language is the ONLY thing that matters for output
   const docLang = config.document_output_language || 'English';

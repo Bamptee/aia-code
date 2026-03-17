@@ -189,13 +189,12 @@ export async function runStep(step, feature, { description, instructions, histor
   // Start agent session for tracking (pass attempt and root for retries)
   startSession(feature, step, { attempt, root });
 
-  // Note: Claude CLI has a bug where it hangs in git worktrees
-  // So we always use the main repo root as CWD for now
-  // TODO: Re-enable worktree CWD when Claude CLI fixes this
-  // const branch = getFeatureBranch(feature);
-  // const wtPath = hasWorktree(branch, root) ? getWorktreePath(branch, root) : null;
-  // const cwd = wtPath || root;
-  const cwd = root;
+  // Workaround for Claude CLI bug in git worktrees:
+  // Instead of running in worktree (which hangs), we stay in main repo
+  // but pass the worktree path to the prompt so files are edited there
+  const branch = getFeatureBranch(feature);
+  const wtPath = hasWorktree(branch, root) ? getWorktreePath(branch, root) : null;
+  const cwd = root; // Keep CWD as main repo for stability
 
   // Wrapper onData to buffer logs in session
   const wrappedOnData = (data) => {
@@ -207,7 +206,7 @@ export async function runStep(step, feature, { description, instructions, histor
   let model;
   try {
     model = modelOverride || await resolveModel(step, root);
-    const { prompt, filesUsed } = await buildPrompt(feature, step, { description, instructions, history, attachments, phase: phaseData, root });
+    const { prompt, filesUsed } = await buildPrompt(feature, step, { description, instructions, history, attachments, phase: phaseData, root, wtPath });
 
     // Log files used for transparency
     if (filesUsed) {

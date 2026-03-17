@@ -81,6 +81,15 @@ import { STORY_STATUS, STORY_SPACE, STORY_TYPE } from './validators.js';
  */
 
 /**
+ * @typedef {Object} StoryWorktrunk
+ * @property {boolean} enabled - Whether worktrunk is enabled
+ * @property {string|null} branch - Worktree branch name (e.g., 'story/{storyId}')
+ * @property {string|null} path - Absolute path to the worktree
+ * @property {string|null} createdAt - ISO 8601 timestamp when worktree was created
+ * @property {Array<{app: string, branch: string}>} submoduleBranches - Branches created in submodules
+ */
+
+/**
  * @typedef {Object} Story
  * @property {string} id - UUID v4
  * @property {'feature'|'bug'} type - Story type
@@ -97,6 +106,7 @@ import { STORY_STATUS, STORY_SPACE, STORY_TYPE } from './validators.js';
  * @property {Array<string>} attachments - Array of attachment filenames
  * @property {boolean} taskMode - Whether story uses task-based workflow
  * @property {TaskSummary|null} taskSummary - Summary of task counts
+ * @property {StoryWorktrunk|null} worktrunk - Worktrunk configuration for isolated development
  * @property {string} createdAt - ISO 8601 timestamp
  * @property {string} updatedAt - ISO 8601 timestamp
  */
@@ -159,6 +169,7 @@ export function createStory(data) {
     attachments: [],
     taskMode: false,
     taskSummary: null,
+    worktrunk: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -246,6 +257,7 @@ export function createBugFromRejection(feature, reason) {
     attachments: [],
     taskMode: false,
     taskSummary: null,
+    worktrunk: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -366,5 +378,51 @@ export function createQAAction(action, reason = null, createdBugId = null) {
     reason,
     createdBugId,
     performedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Creates a worktrunk configuration for a story
+ * @param {string} branch - Worktree branch name
+ * @param {string} path - Absolute path to the worktree
+ * @param {Array<{app: string, branch: string}>} [submoduleBranches] - Submodule branches created
+ * @returns {StoryWorktrunk} Worktrunk configuration
+ */
+export function createWorktrunk(branch, path, submoduleBranches = []) {
+  return {
+    enabled: true,
+    branch,
+    path,
+    createdAt: new Date().toISOString(),
+    submoduleBranches,
+  };
+}
+
+/**
+ * Enables worktrunk for a story
+ * @param {Story} story - Story to enable worktrunk for
+ * @param {string} branch - Worktree branch name
+ * @param {string} path - Absolute path to the worktree
+ * @param {Array<{app: string, branch: string}>} [submoduleBranches] - Submodule branches
+ * @returns {Story} Updated story
+ */
+export function enableWorktrunk(story, branch, path, submoduleBranches = []) {
+  return {
+    ...story,
+    worktrunk: createWorktrunk(branch, path, submoduleBranches),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Disables worktrunk for a story
+ * @param {Story} story - Story to disable worktrunk for
+ * @returns {Story} Updated story
+ */
+export function disableWorktrunk(story) {
+  return {
+    ...story,
+    worktrunk: null,
+    updatedAt: new Date().toISOString(),
   };
 }

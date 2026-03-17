@@ -20,23 +20,26 @@ function findWtBinary() {
 
   const home = os.homedir();
   const candidates = [
+    path.join(home, '.cargo', 'bin', 'wt'), // Check cargo first (most common)
     'wt', // in PATH
-    path.join(home, '.cargo', 'bin', 'wt'),
     '/usr/local/bin/wt',
     '/opt/homebrew/bin/wt',
   ];
 
+  console.log('[Worktrunk] Searching for wt binary...');
   for (const candidate of candidates) {
     try {
-      execSync(`${candidate} --version`, { stdio: 'ignore' });
+      execSync(`"${candidate}" --version`, { stdio: 'ignore' });
       wtBinary = candidate;
+      console.log('[Worktrunk] Found wt at:', candidate);
       return wtBinary;
-    } catch {
-      // Try next
+    } catch (e) {
+      console.log('[Worktrunk] Not found at:', candidate, e.message);
     }
   }
 
   wtBinary = false;
+  console.log('[Worktrunk] wt binary not found');
   return wtBinary;
 }
 
@@ -51,6 +54,13 @@ function getWtCommand() {
  */
 export function isWtInstalled() {
   return findWtBinary() !== false;
+}
+
+/**
+ * Reset the wt binary cache (useful after installing wt)
+ */
+export function resetWtCache() {
+  wtBinary = null;
 }
 
 /**
@@ -307,5 +317,86 @@ export function stopAllComposeServices(wtPath) {
     cwd: wtPath,
     stdio: 'inherit',
   });
+}
+
+/**
+ * Check if a directory is a git submodule
+ * @param {string} dirPath - Directory path to check
+ * @returns {boolean}
+ */
+function isGitSubmodule(dirPath) {
+  // F7 fix: wrap all fs operations in try/catch
+  try {
+    // A submodule has a .git file (not directory) pointing to the parent's .git/modules
+    const gitPath = path.join(dirPath, '.git');
+    // Use try/catch for existsSync as it can throw on permission errors
+    let exists = false;
+    try {
+      exists = fs.existsSync(gitPath);
+    } catch {
+      return false;
+    }
+    if (!exists) return false;
+    const stat = fs.statSync(gitPath);
+    return stat.isFile(); // Submodules have .git as a file, not directory
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Create branches in submodules for a story
+ * @param {string} wtPath - Worktree directory path
+ * @param {Array<{name: string, path: string}>} apps - Apps/submodules to create branches in
+ * @param {string} branchName - Branch name to create
+ * @returns {Array<{app: string, branch: string}>} Created branches
+ */
+export function createSubmoduleBranches(wtPath, apps, branchName) {
+  validateBranchName(branchName);
+  const results = [];
+
+  for (const app of apps) {
+    const appPath = path.join(wtPath, app.path);
+
+    // Check if path exists and is a submodule
+    if (!fs.existsSync(appPath)) {
+      // F6 fix: use debug-level logging only in development
+      if (process.env.DEBUG) console.log(`[Worktrunk] Skipping ${app.name}: path does not exist`);
+      continue;
+    }
+
+    if (!isGitSubmodule(appPath)) {
+      if (process.env.DEBUG) console.log(`[Worktrunk] Skipping ${app.name}: not a git submodule`);
+      continue;
+    }
+
+    try {
+      // Check if branch already exists in submodule
+      try {
+        execSync(`git show-ref --verify --quiet refs/heads/${branchName}`, { cwd: appPath, stdio: 'ignore' });
+        // Branch exists, just checkout
+        execSync(`git checkout ${branchName}`, { cwd: appPath, stdio: 'pipe' });
+      } catch {
+        // Branch doesn't exist, create it
+        execSync(`git checkout -b ${branchName}`, { cwd: appPath, stdio: 'pipe' });
+      }
+
+      results.push({ app: app.name, branch: branchName });
+    } catch (err) {
+      // F6 fix: keep error logging but make it conditional
+      if (process.env.DEBUG) console.error(`[Worktrunk] Failed to create branch in ${app.name}: ${err.message}`);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Get story branch name from story ID
+ * @param {string} storyId - Story UUID
+ * @returns {string} Branch name (e.g., 'story/abc12345')
+ */
+export function getStoryBranch(storyId) {
+  return `story/${storyId.slice(0, 8)}`;
 }
 

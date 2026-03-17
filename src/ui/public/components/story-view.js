@@ -1,6 +1,7 @@
 import React from 'react';
 import { api, streamPost } from '/main.js';
 import { EpicSelector } from '/components/epic-selector.js';
+import { StoryWorktrunkPanel } from '/components/worktrunk-panel.js';
 
 // ============== Constants v3 ==============
 
@@ -2939,6 +2940,14 @@ export function StoryView({ slug, context = 'product' }) {
     context === 'dev' && story.qaStatus === 'rejected' && React.createElement(QARejectionAlert, {
       story,
       onStoryUpdate: setStory,
+    }),
+
+    // Worktrunk Panel (only in dev context with edit access)
+    context === 'dev' && accessLevel === 'edit' && React.createElement(StoryWorktrunkPanel, {
+      storyId: story.id,
+      onWorktrunkChange: (enabled) => {
+        loadData(); // Reload story data when worktrunk status changes
+      },
     }),
 
     // Product Actions (only in product context with edit access, discovery phase)

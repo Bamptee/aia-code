@@ -474,11 +474,12 @@ IMPORTANT:
 
       sseSend('status', { status: 'generating', message: 'AI is structuring the story...' });
 
-      const enrichedContent = await callModel(model, enrichPrompt, {
+      const callResult = await callModel(model, enrichPrompt, {
         verbose: false,
         apply: false,
         onData
       });
+      const enrichedContent = callResult.output;
 
       // Save enriched content to init.md
       await fs.writeFile(initPath, enrichedContent.trim(), 'utf-8');
@@ -562,7 +563,8 @@ IMPORTANT:
 - Output ONLY the markdown document, no explanations
 - Write in ${config.document_output_language || 'English'}`;
 
-        const enrichedContent = await callModel(model, enrichPrompt, { verbose: false, apply: false });
+        const callResult = await callModel(model, enrichPrompt, { verbose: false, apply: false });
+        const enrichedContent = callResult.output;
         await fs.writeFile(initPath, enrichedContent.trim(), 'utf-8');
 
         // Mark as enriched in status.yaml and step as done
@@ -692,7 +694,8 @@ DOCUMENT TO TRANSLATE:
 ${content}`;
 
       const model = config.models?.init?.[0]?.model || 'claude-default';
-      const translated = await callModel(model, translatePrompt, { verbose: false, apply: false });
+      const callResult = await callModel(model, translatePrompt, { verbose: false, apply: false });
+      const translated = callResult.output;
 
       json(res, {
         needed: true,
@@ -724,6 +727,45 @@ ${content}`;
         communication_language: 'English',
         needsTranslation: false
       });
+    }
+  });
+
+  /**
+   * GET /api/stories/:slug/tokens - Get token usage for a story
+   */
+  router.get('/api/stories/:slug/tokens', async (req, res, { params, root }) => {
+    try {
+      const status = await loadStatus(params.slug, root);
+      if (!status) {
+        return error(res, 'Story not found', 404);
+      }
+
+      // Get tokenUsage from status.yaml
+      const tokenUsage = status.tokenUsage || {};
+
+      // Calculate totals
+      let totalInput = 0;
+      let totalOutput = 0;
+      let totalTokens = 0;
+
+      for (const stepData of Object.values(tokenUsage)) {
+        if (stepData && typeof stepData === 'object') {
+          totalInput += stepData.input || 0;
+          totalOutput += stepData.output || 0;
+          totalTokens += stepData.total || 0;
+        }
+      }
+
+      json(res, {
+        steps: tokenUsage,
+        total: {
+          input: totalInput,
+          output: totalOutput,
+          total: totalTokens,
+        },
+      });
+    } catch (err) {
+      error(res, err.message, 500);
     }
   });
 
@@ -759,6 +801,18 @@ ${content}`;
     };
 
     try {
+      // Reset step if already done (allows regeneration from UI)
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const statusPath = path.join(storyDir, 'status.yaml');
+      const rawStatus = await fs.readFile(statusPath, 'utf-8');
+      const status = yaml.parse(rawStatus);
+      if (status.steps?.[params.step] === 'done') {
+        status.steps[params.step] = 'pending';
+        status.updatedAt = new Date().toISOString();
+        await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+        sseSend(res, 'log', { type: 'info', text: `Reset step ${params.step} for regeneration` });
+      }
+
       const result = await runStep(params.step, params.slug, {
         description: body.instructions || body.description || '',
         model: body.model || undefined,
@@ -768,15 +822,34 @@ ${content}`;
         onData,
       });
 
-      // runStep now returns { output, filesUsed }
+      // runStep now returns { output, filesUsed, tokenUsage }
       const output = typeof result === 'string' ? result : result?.output;
       const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+      const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
+
+      // Save token usage to status.yaml
+      if (tokenUsage) {
+        try {
+          const storyDir = await getStoryDirPath(params.slug, root);
+          const statusPath = path.join(storyDir, 'status.yaml');
+          const rawStatus = await fs.readFile(statusPath, 'utf-8');
+          const status = yaml.parse(rawStatus);
+          status.tokenUsage = status.tokenUsage || {};
+          status.tokenUsage[params.step] = tokenUsage;
+          status.updatedAt = new Date().toISOString();
+          await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+          sseSend(res, 'log', { type: 'info', text: `Tokens: ${tokenUsage.total} (in: ${tokenUsage.input}, out: ${tokenUsage.output})` });
+        } catch (tokenErr) {
+          console.error(`[Generate] Failed to save token usage: ${tokenErr.message}`);
+        }
+      }
 
       // Return with filesUsed for UI transparency
       sseSend(res, 'done', {
         step: params.step,
         output: output?.slice(0, 500),
         filesUsed,
+        tokenUsage,
       });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
@@ -817,9 +890,31 @@ ${content}`;
         onData,
       });
 
-      // runStep now returns { output, filesUsed }
+      // runStep now returns { output, filesUsed, tokenUsage }
       const output = typeof result === 'string' ? result : result?.output;
       const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+      const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
+
+      // Accumulate token usage in status.yaml
+      if (tokenUsage) {
+        try {
+          const statusPath = path.join(storyDir, 'status.yaml');
+          const rawStatus = await fs.readFile(statusPath, 'utf-8');
+          const status = yaml.parse(rawStatus);
+          status.tokenUsage = status.tokenUsage || {};
+          const existing = status.tokenUsage[params.step] || { input: 0, output: 0, total: 0 };
+          status.tokenUsage[params.step] = {
+            input: existing.input + (tokenUsage.input || 0),
+            output: existing.output + (tokenUsage.output || 0),
+            total: existing.total + (tokenUsage.total || 0),
+          };
+          status.updatedAt = new Date().toISOString();
+          await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+          sseSend(res, 'log', { type: 'info', text: `Tokens: +${tokenUsage.total} (total: ${status.tokenUsage[params.step].total})` });
+        } catch (tokenErr) {
+          console.error(`[Iterate] Failed to save token usage: ${tokenErr.message}`);
+        }
+      }
 
       // Return with filesUsed for UI transparency
       sseSend(res, 'done', {
@@ -960,7 +1055,8 @@ INSTRUCTIONS:
 
       // Use model from request body, or fall back to config
       const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
-      const aiResponse = await callModel(model, chatPrompt, { verbose: false, apply: false });
+      const callResult = await callModel(model, chatPrompt, { verbose: false, apply: false });
+      const aiResponse = callResult.output;
 
       // Save messages
       const userMsg = { role: 'user', content: body.message, createdAt: new Date().toISOString() };
@@ -1019,7 +1115,8 @@ DOCUMENT TO TRANSLATE:
 ${content}`;
 
       const model = config.models?.init?.[0]?.model || 'claude-default';
-      const translated = await callModel(model, translatePrompt, { verbose: false, apply: false });
+      const callResult = await callModel(model, translatePrompt, { verbose: false, apply: false });
+      const translated = callResult.output;
 
       json(res, {
         needed: true,
@@ -1109,12 +1206,13 @@ INSTRUCTIONS:
         console.log('[Recap] Calling model in agent mode:', model);
 
         // Call model directly in agent mode (bypasses runStep's "already done" check)
-        const output = await callModel(model, codeInstructions, {
+        const callResult = await callModel(model, codeInstructions, {
           verbose: true,
           apply: true,
           onData,
           cwd: root,
         });
+        const output = callResult.output;
 
         // Add summary message to conversation before clearing
         const summaryMsg = {

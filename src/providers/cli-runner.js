@@ -94,7 +94,24 @@ function parseStreamJsonEvent(line, onData, state = {}) {
 
     // Final result
     if (event.type === 'result') {
+      // Capture token usage from result event
+      if (event.usage) {
+        state.tokenUsage = {
+          input: event.usage.input_tokens || 0,
+          output: event.usage.output_tokens || 0,
+          total: (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0),
+        };
+      }
       return { result: event.result || '', state };
+    }
+
+    // Capture token usage from message_delta events (cumulative)
+    if (event.type === 'stream_event' && event.event?.type === 'message_delta' && event.event?.usage) {
+      state.tokenUsage = {
+        input: event.event.usage.input_tokens ?? state.tokenUsage?.input ?? 0,
+        output: event.event.usage.output_tokens ?? 0,
+        total: (event.event.usage.input_tokens ?? state.tokenUsage?.input ?? 0) + (event.event.usage.output_tokens ?? 0),
+      };
     }
 
     return { result: null, state };
@@ -219,8 +236,15 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
       if (code !== 0) {
         finish(new Error(`${command} exited with code ${code}:\n${stderr.trim()}`));
       } else {
-        // For stream-json, return the extracted result; otherwise return chunks
-        finish(null, streamJson ? finalResult : chunks.join(''));
+        // For stream-json, return the extracted result with token usage; otherwise return chunks
+        if (streamJson) {
+          finish(null, {
+            output: finalResult,
+            tokenUsage: parserState.tokenUsage || null,
+          });
+        } else {
+          finish(null, chunks.join(''));
+        }
       }
     });
 

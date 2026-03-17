@@ -690,6 +690,107 @@ export class StoryService {
   }
 
   /**
+   * Updates token usage for a step
+   * @param {string} storyId - Story ID
+   * @param {string} stepName - Step name
+   * @param {Object} tokenUsage - Token usage data
+   * @param {number} tokenUsage.input - Input tokens
+   * @param {number} tokenUsage.output - Output tokens
+   * @param {number} [tokenUsage.total] - Total tokens (calculated if not provided)
+   * @param {boolean} [accumulate=false] - If true, add to existing usage instead of replacing
+   * @returns {Promise<import('../models/story.js').Story>} Updated story
+   * @throws {NotFoundError} If Story not found
+   * @throws {ValidationError} If step name is invalid
+   */
+  async updateStepTokenUsage(storyId, stepName, tokenUsage, accumulate = false) {
+    if (!isValidStepName(stepName)) {
+      throw new ValidationError(`Invalid step name: ${stepName}. Must be one of: ${STORY_STEPS.join(', ')}`);
+    }
+
+    const normalizedStep = normalizeStepName(stepName);
+    const { epic, story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    // Ensure step exists
+    if (!story.steps[normalizedStep]) {
+      story.steps[normalizedStep] = {
+        completed: false,
+        skipped: false,
+        content: null,
+        history: [],
+        currentVersion: 0,
+      };
+    }
+
+    const step = story.steps[normalizedStep];
+
+    // Calculate total if not provided
+    const total = tokenUsage.total ?? (tokenUsage.input + tokenUsage.output);
+
+    if (accumulate && step.tokenUsage) {
+      // Add to existing usage
+      step.tokenUsage = {
+        input: (step.tokenUsage.input || 0) + (tokenUsage.input || 0),
+        output: (step.tokenUsage.output || 0) + (tokenUsage.output || 0),
+        total: (step.tokenUsage.total || 0) + total,
+      };
+    } else {
+      // Replace usage
+      step.tokenUsage = {
+        input: tokenUsage.input || 0,
+        output: tokenUsage.output || 0,
+        total,
+      };
+    }
+
+    story.updatedAt = new Date().toISOString();
+    epic.updatedAt = new Date().toISOString();
+
+    await this.storage.writeEpic(epic);
+    return story;
+  }
+
+  /**
+   * Gets token usage for all steps of a story
+   * @param {string} storyId - Story ID
+   * @returns {Promise<{steps: Object, total: Object}>} Token usage by step and total
+   * @throws {NotFoundError} If Story not found
+   */
+  async getTokenUsage(storyId) {
+    const { story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    const steps = {};
+    let totalInput = 0;
+    let totalOutput = 0;
+    let totalTokens = 0;
+
+    for (const [stepName, stepData] of Object.entries(story.steps || {})) {
+      if (stepData.tokenUsage) {
+        steps[stepName] = stepData.tokenUsage;
+        totalInput += stepData.tokenUsage.input || 0;
+        totalOutput += stepData.tokenUsage.output || 0;
+        totalTokens += stepData.tokenUsage.total || 0;
+      }
+    }
+
+    return {
+      steps,
+      total: {
+        input: totalInput,
+        output: totalOutput,
+        total: totalTokens,
+      },
+    };
+  }
+
+  /**
    * Reverts step to a previous version
    * @param {string} storyId - Story ID
    * @param {string} stepName - Step name

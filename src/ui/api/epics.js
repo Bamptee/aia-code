@@ -743,7 +743,8 @@ IMPORTANT:
 - If the input is vague, make reasonable assumptions and note them
 - Output ONLY the markdown document, no explanations`;
 
-        const enriched = await callModel(selectedModel, enrichPrompt, { verbose: false, apply: false });
+        const enrichResult = await callModel(selectedModel, enrichPrompt, { verbose: false, apply: false });
+        const enriched = enrichResult.output;
         story = await storyService.setInitEnriched(params.id, enriched.trim(), selectedModel);
       }
 
@@ -883,7 +884,8 @@ IMPORTANT:
         }
       };
 
-      const enriched = await callModel(selectedModel, enrichPrompt, { verbose: false, apply: false, onData });
+      const enrichResult = await callModel(selectedModel, enrichPrompt, { verbose: false, apply: false, onData });
+      const enriched = enrichResult.output;
       const updatedStory = await storyService.setInitEnriched(params.id, enriched.trim(), selectedModel);
 
       // Send completion event with the updated story data
@@ -1124,12 +1126,23 @@ IMPORTANT:
             // Use default model
           }
 
-          generatedContent = await callModel(selectedModel, prompt, {
+          const callResult = await callModel(selectedModel, prompt, {
             verbose: false,
             apply: false,
             onData,
             cwd: root,
           });
+          generatedContent = callResult.output;
+
+          // Save token usage if available
+          if (callResult.tokenUsage) {
+            try {
+              await storyService.updateStepTokenUsage(params.id, params.stepName, callResult.tokenUsage);
+              sseSend('log', { type: 'info', text: `Tokens: ${callResult.tokenUsage.total} (in: ${callResult.tokenUsage.input}, out: ${callResult.tokenUsage.output})` });
+            } catch (tokenErr) {
+              console.error(`[Generate] Failed to save token usage: ${tokenErr.message}`);
+            }
+          }
         } catch (err) {
           // Fallback to legacy method if buildPrompt fails
           console.log(`[Generate] buildPrompt failed for ${apiStepName}: ${err.message}, falling back to legacy`);
@@ -1521,7 +1534,17 @@ IMPORTANT: Respond in ${communicationLanguage}.`;
       console.log(`[Chat] Prompt starts with: "${prompt.substring(0, 100)}..."`);
       console.log(`[Chat] Total prompt length: ${prompt.length} chars`);
 
-      const response = await callModel(aiProvider.getModel(), prompt, { verbose: false, apply: false });
+      const chatResult = await callModel(aiProvider.getModel(), prompt, { verbose: false, apply: false });
+      const response = chatResult.output;
+
+      // Accumulate token usage for this step (chat messages add to existing)
+      if (chatResult.tokenUsage) {
+        try {
+          await storyService.updateStepTokenUsage(params.id, params.stepName, chatResult.tokenUsage, true);
+        } catch (tokenErr) {
+          console.error(`[Chat] Failed to save token usage: ${tokenErr.message}`);
+        }
+      }
 
       // Add assistant response to conversation
       const assistantMessage = await storyService.addConversationMessage(
@@ -1537,6 +1560,7 @@ IMPORTANT: Respond in ${communicationLanguage}.`;
         message: assistantMessage,
         language: communicationLanguage,
         model: aiProvider.getModel(),
+        tokenUsage: chatResult.tokenUsage || null,
       });
     } catch (err) {
       if (err.code === 'NOT_FOUND') {
@@ -1687,7 +1711,18 @@ Regenerate the ${actualStepName} document incorporating all the user's feedback 
 - Output ONLY the updated document, no explanations`;
       }
 
-      const newContent = await callModel(aiProvider.getModel(), prompt, { verbose: false, apply: false });
+      const recapResult = await callModel(aiProvider.getModel(), prompt, { verbose: false, apply: false });
+      const newContent = recapResult.output;
+
+      // Save token usage (accumulate since this is part of a conversation)
+      if (recapResult.tokenUsage) {
+        try {
+          const targetStep = normalizedStep || actualStepName;
+          await storyService.updateStepTokenUsage(params.id, targetStep, recapResult.tokenUsage, true);
+        } catch (tokenErr) {
+          console.error(`[Recap] Failed to save token usage: ${tokenErr.message}`);
+        }
+      }
 
       // Save new version to the actual step (not the -review key)
       const targetStep = normalizedStep || actualStepName;
@@ -1995,6 +2030,24 @@ Regenerate the ${actualStepName} document incorporating all the user's feedback 
     try {
       const { storyService } = await getServices(root);
       const result = await storyService.canPromote(params.id);
+      json(res, result);
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') {
+        error(res, err.message, 404);
+      } else {
+        error(res, err.message, 500);
+      }
+    }
+  });
+
+  /**
+   * GET /api/stories/:id/tokens - Get token usage for a story
+   * Response: { steps: { init: { input, output, total }, ... }, total: { input, output, total } }
+   */
+  router.get('/api/stories/:id/tokens', async (req, res, { params, root }) => {
+    try {
+      const { storyService } = await getServices(root);
+      const result = await storyService.getTokenUsage(params.id);
       json(res, result);
     } catch (err) {
       if (err.code === 'NOT_FOUND') {

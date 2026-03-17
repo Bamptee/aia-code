@@ -41,8 +41,12 @@ export async function runWithTaskContext(task, story, options = {}) {
     const prompt = await buildTaskPrompt(task, story, { root });
 
     const start = performance.now();
-    const output = await callModel(model, prompt, { verbose, apply, onData: wrappedOnData, cwd });
+    const result = await callModel(model, prompt, { verbose, apply, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
+
+    // Extract output and tokenUsage from result
+    const output = result.output;
+    const tokenUsage = result.tokenUsage;
 
     await logExecution({
       feature: `task-${task.id.slice(0, 8)}`,
@@ -51,6 +55,7 @@ export async function runWithTaskContext(task, story, options = {}) {
       duration,
       taskId: task.id,
       taskTitle: task.title,
+      tokenUsage,
     }, root);
 
     // Parse output for modified files if possible
@@ -59,6 +64,7 @@ export async function runWithTaskContext(task, story, options = {}) {
     return {
       output,
       filesModified,
+      tokenUsage,
       success: true,
       error: null,
       completedAt: new Date().toISOString(),
@@ -67,6 +73,7 @@ export async function runWithTaskContext(task, story, options = {}) {
     return {
       output: '',
       filesModified: [],
+      tokenUsage: null,
       success: false,
       error: err.message,
       completedAt: new Date().toISOString(),
@@ -185,8 +192,12 @@ export async function runStep(step, feature, { description, instructions, histor
     }
 
     const start = performance.now();
-    const output = await callModel(model, prompt, { verbose, apply: shouldApply, onData: wrappedOnData, cwd });
+    const result = await callModel(model, prompt, { verbose, apply: shouldApply, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
+
+    // Extract output and tokenUsage from result
+    const output = result.output;
+    const tokenUsage = result.tokenUsage;
 
     // In phase mode, append to implement.md instead of overwriting
     const storyDir = await getStoryDirPath(feature, root);
@@ -203,10 +214,10 @@ export async function runStep(step, feature, { description, instructions, histor
       console.log(chalk.green(`Step "${step}" completed for feature "${feature}".`));
     }
 
-    await logExecution({ feature, step, model, duration, phase: phaseData?.number }, root);
+    await logExecution({ feature, step, model, duration, phase: phaseData?.number, tokenUsage }, root);
 
-    // Return output and filesUsed for UI transparency
-    return { output, filesUsed };
+    // Return output, filesUsed and tokenUsage for UI transparency
+    return { output, filesUsed, tokenUsage };
   } catch (err) {
     await updateStepStatus(feature, step, STEP_STATUS.ERROR, root);
     if (phaseData) {

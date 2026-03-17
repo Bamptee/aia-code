@@ -441,11 +441,12 @@ IMPORTANT:
 
       sseSend(res, 'status', { status: 'generating', message: 'AI is structuring the feature...' });
 
-      const enrichedContent = await callModel(model, enrichPrompt, {
+      const callResult = await callModel(model, enrichPrompt, {
         verbose: false,
         apply: false,
         onData
       });
+      const enrichedContent = callResult.output;
 
       // Save enriched content to init.md
       const storyDir = await getStoryDirPath(params.name, root);

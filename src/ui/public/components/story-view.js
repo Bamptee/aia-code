@@ -79,6 +79,14 @@ const PHASE_FILTERS = {
   'dev': (step) => STEP_CONFIG[step]?.phase === 'dev',
 };
 
+// Format token count for display (1234 → "1.2k", 12345 → "12.3k")
+function formatTokenCount(count) {
+  if (!count || count === 0) return null;
+  if (count < 1000) return count.toString();
+  if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
+  return `${Math.round(count / 1000)}k`;
+}
+
 // Get skip warning based on skipped steps
 function getSkipWarning(fromStep, toStep) {
   const fromIndex = ALL_STEPS.indexOf(fromStep);
@@ -344,7 +352,7 @@ function ActionBar({ step, stepKey, onGenerate, onChat, onReview, generating, re
   );
 }
 
-function StepPills({ steps, storySteps, currentStep, onStepClick }) {
+function StepPills({ steps, storySteps, currentStep, onStepClick, tokenUsage }) {
   // Group steps by phase for visual separation
   const productSteps = steps.filter(s => STEP_CONFIG[s]?.phase === 'product');
   const devSteps = steps.filter(s => STEP_CONFIG[s]?.phase === 'dev');
@@ -355,6 +363,10 @@ function StepPills({ steps, storySteps, currentStep, onStepClick }) {
     const isCompleted = stepData?.completed;
     const isSkipped = stepData?.skipped;
     const isCurrent = currentStep === stepKey;
+
+    // Get token usage for this step
+    const stepTokens = tokenUsage?.steps?.[stepKey];
+    const formattedTokens = formatTokenCount(stepTokens?.total);
 
     return React.createElement('button', {
       key: stepKey,
@@ -368,9 +380,14 @@ function StepPills({ steps, storySteps, currentStep, onStepClick }) {
               ? 'bg-emerald-500/20 text-emerald-400'
               : 'bg-slate-800 text-slate-400 hover:text-slate-200'
       }`,
+      title: stepTokens ? `Input: ${stepTokens.input}, Output: ${stepTokens.output}` : undefined,
     },
       React.createElement('span', null, isSkipped ? '⏭️' : config?.icon || '📄'),
-      React.createElement('span', null, config?.name || stepKey)
+      React.createElement('span', null, config?.name || stepKey),
+      // Token badge
+      formattedTokens && React.createElement('span', {
+        className: 'ml-1 px-1.5 py-0.5 text-[10px] rounded bg-slate-700/50 text-slate-400',
+      }, formattedTokens)
     );
   };
 
@@ -1098,8 +1115,9 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
 
 // ============== Step Section ==============
 
-function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, figmaLinks, onStoryUpdate, readonly = false }) {
+function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, figmaLinks, onStoryUpdate, readonly = false, tokenUsage = null }) {
   const config = STEP_CONFIG[stepKey];
+  const formattedTokens = formatTokenCount(tokenUsage?.total);
 
   // Brainstorming is a special "chat-first" step - no Generate, direct conversation
   const isBrainstorming = stepKey === 'brainstorming';
@@ -1290,6 +1308,11 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
         isSkipped && React.createElement('span', { className: 'px-2 py-1 text-xs rounded-full bg-slate-600/50 text-slate-400 border border-slate-500/30' }, '⏭️ Skipped'),
         !isSkipped && isCompleted && React.createElement('span', { className: 'px-2 py-1 text-xs rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' }, '✓ Done'),
         step.currentVersion > 0 && React.createElement('span', { className: 'text-xs text-slate-500' }, `v${step.currentVersion}`),
+        // Token usage badge
+        formattedTokens && React.createElement('span', {
+          className: 'px-2 py-1 text-xs rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/30',
+          title: tokenUsage ? `Input: ${tokenUsage.input}, Output: ${tokenUsage.output}` : '',
+        }, `🎯 ${formattedTokens}`),
         React.createElement('span', { className: `transition-transform ${expanded ? 'rotate-180' : ''}` }, '▼')
       )
     ),
@@ -2669,14 +2692,19 @@ export function StoryView({ slug, context = 'product' }) {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const [initExpanded, setInitExpanded] = React.useState(false);
+  const [tokenUsage, setTokenUsage] = React.useState(null);
 
   const contextConfig = CONTEXT_CONFIG[context];
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const storyData = await api.get(`/stories/${slug}`);
+      const [storyData, tokensData] = await Promise.all([
+        api.get(`/stories/${slug}`),
+        api.get(`/stories/${slug}/tokens`).catch(() => null),
+      ]);
       setStory(storyData);
+      setTokenUsage(tokensData);
 
       // Auto-expand init panel if no enriched context yet
       const hasEnriched = storyData?.init?.enriched && storyData.init.enriched.trim().length > 0;
@@ -2769,7 +2797,12 @@ export function StoryView({ slug, context = 'product' }) {
             // QA Rejected badge - show when story was rejected from QA
             story.qaStatus === 'rejected' && React.createElement('span', {
               className: 'px-3 py-1 text-xs rounded-full bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse',
-            }, '🔴 QA Rejected')
+            }, '🔴 QA Rejected'),
+            // Total token usage badge
+            tokenUsage?.total?.total > 0 && React.createElement('span', {
+              className: 'px-3 py-1 text-xs rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/30',
+              title: `Total: ${tokenUsage.total.total} (Input: ${tokenUsage.total.input}, Output: ${tokenUsage.total.output})`,
+            }, `🎯 ${formatTokenCount(tokenUsage.total.total)} tokens`)
           ),
           React.createElement('h1', { className: 'text-2xl font-bold text-white mb-1' }, story.title || story.name || slug),
           story.description && React.createElement('p', { className: 'text-slate-400' }, story.description)
@@ -2846,6 +2879,9 @@ export function StoryView({ slug, context = 'product' }) {
         const rawCurrentStep = story.currentStep || story.current_step || 'init';
         const currentStep = STEP_NAME_MAP[rawCurrentStep] || rawCurrentStep;
 
+        // Convert stepKey to kebab-case for token lookup (status.yaml uses kebab-case)
+        const apiStepKey = stepKey.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
+
         return React.createElement(StepSection, {
           key: stepKey,
           stepKey,
@@ -2857,6 +2893,7 @@ export function StoryView({ slug, context = 'product' }) {
           figmaLinks: story.init?.figmaLinks,
           onStoryUpdate: setStory,
           readonly,
+          tokenUsage: tokenUsage?.steps?.[apiStepKey] || tokenUsage?.steps?.[stepKey],
         });
       })
     )

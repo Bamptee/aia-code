@@ -28,6 +28,7 @@ import { createStory, getStoriesDir } from '../../services/feature.js';
 import { QABoosterService } from '../../epic/services/qa-booster-service.js';
 import { loadStatus, getStoryDirPath, updateStepStatus } from '../../services/status.js';
 import { loadConfig } from '../../models.js';
+import { getApps } from '../../services/apps.js';
 import { callModel } from '../../services/model-call.js';
 import { runStep } from '../../services/runner.js';
 
@@ -1511,6 +1512,53 @@ INSTRUCTIONS:
       await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
       json(res, { id: params.slug, ...status });
+    } catch (err) {
+      error(res, err.message, 500);
+    }
+  });
+
+  /**
+   * PATCH /api/stories/:slug/apps - Update story apps scope
+   */
+  router.patch('/api/stories/:slug/apps', async (req, res, { params, root, parseBody }) => {
+    try {
+      const body = await parseBody();
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const statusPath = path.join(storyDir, 'status.yaml');
+
+      const raw = await fs.readFile(statusPath, 'utf-8');
+      const status = yaml.parse(raw);
+
+      // Validate apps - must be an array of strings
+      if (!Array.isArray(body.apps)) {
+        return error(res, 'apps must be an array', 400);
+      }
+
+      // F11: Limit array size to prevent abuse
+      const MAX_APPS = 50;
+      if (body.apps.length > MAX_APPS) {
+        return error(res, `apps array exceeds maximum size (${MAX_APPS})`, 400);
+      }
+
+      // Filter to valid strings
+      const requestedApps = body.apps.filter(a => typeof a === 'string' && a.trim()).map(a => a.trim());
+
+      // F9: Validate that app names exist in config
+      const configuredApps = await getApps(root);
+      const validAppNames = new Set(configuredApps.map(a => a.name));
+      const validatedApps = requestedApps.filter(name => validAppNames.has(name));
+
+      // Warn if some apps were invalid (but still proceed)
+      const invalidApps = requestedApps.filter(name => !validAppNames.has(name));
+      if (invalidApps.length > 0) {
+        console.warn(`[API] Invalid app names ignored: ${invalidApps.join(', ')}`);
+      }
+
+      status.apps = validatedApps;
+      status.updatedAt = new Date().toISOString();
+      await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+
+      json(res, { id: params.slug, apps: status.apps });
     } catch (err) {
       error(res, err.message, 500);
     }

@@ -12,6 +12,7 @@ import {
 import { loadConfig } from './models.js';
 import { loadKnowledge } from './knowledge-loader.js';
 import { readIfExists } from './utils.js';
+import { getAppPaths, getKnowledgeForApps } from './services/apps.js';
 
 // V3 step file name mapping (kebab-case)
 const STEP_FILE_MAP = {
@@ -277,18 +278,28 @@ async function loadPreviousOutput(feature, step, root) {
   return readIfExists(filePath);
 }
 
-async function resolveKnowledgeCategories(feature, config, root) {
-  const storyDir = await getStoryDir(feature, root);
-  const statusFile = path.join(storyDir, 'status.yaml');
-  const raw = await readIfExists(statusFile);
+async function resolveKnowledgeCategories(feature, config, root, status = null) {
+  // F6: Accept pre-loaded status to avoid double parsing
+  if (!status) {
+    const storyDir = await getStoryDir(feature, root);
+    const statusFile = path.join(storyDir, 'status.yaml');
+    const raw = await readIfExists(statusFile);
+    status = raw ? yaml.parse(raw) : null;
+  }
 
-  if (raw) {
-    const status = yaml.parse(raw);
+  if (status) {
+    // 1. If explicit knowledge in status.yaml, use it
     if (status?.knowledge?.length) {
       return status.knowledge;
     }
+
+    // 2. If apps are selected, use their knowledge categories
+    if (status?.apps?.length) {
+      return getKnowledgeForApps(status.apps, root);
+    }
   }
 
+  // 3. Fallback to default
   return config.knowledge_default ?? [];
 }
 
@@ -474,9 +485,15 @@ export async function buildPrompt(feature, step, { description, instructions, hi
 
   console.log(`[PromptBuilder] Loading files...`);
 
+  // F6: Load status once and reuse for knowledge and scope
+  const storyDir = await getStoryDir(feature, root);
+  const statusFile = path.join(storyDir, 'status.yaml');
+  const statusRaw = await readIfExists(statusFile);
+  const storyStatus = statusRaw ? yaml.parse(statusRaw) : null;
+
   const [context, knowledgeCategories, initSpecs, featureResult, previousOutput, taskResult] = await Promise.all([
     loadContextFiles(config, root),
-    resolveKnowledgeCategories(feature, config, root),
+    resolveKnowledgeCategories(feature, config, root, storyStatus),
     loadInitSpecs(feature, root),
     loadFeatureFiles(feature, step, root),
     loadPreviousOutput(feature, step, root),
@@ -548,6 +565,22 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   parts.push('=== OUTPUT LANGUAGE ===\n');
   parts.push(`Write ALL your output in ${docLang}. This is mandatory and non-negotiable.`);
   parts.push(`Do NOT use any other language for the document content.\n`);
+
+  // F6: Use pre-loaded storyStatus for SCOPE section (avoid double parsing)
+  if (storyStatus?.apps?.length > 0) {
+    const appPaths = await getAppPaths(storyStatus.apps, root);
+
+    if (appPaths.length > 0) {
+      parts.push('=== SCOPE ===\n');
+      parts.push('IMPORTANT: This story only concerns the following directories:');
+      for (const p of appPaths) {
+        parts.push(`- ${path.relative(root, p)}`);
+      }
+      parts.push('\nFocus your analysis and changes on these directories only.');
+      parts.push('Do NOT scan or modify files outside of these directories unless absolutely necessary.\n');
+      console.log(`[PromptBuilder] ✓ App scope: ${storyStatus.apps.join(', ')} → ${appPaths.length} paths`);
+    }
+  }
 
   // Add conversation history if present (for multi-turn)
   if (history && history.length > 0) {

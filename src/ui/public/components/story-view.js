@@ -1722,6 +1722,162 @@ function PhaseSelector({ story, onStoryUpdate }) {
   );
 }
 
+// ============== Apps Scope Selector ==============
+
+function AppsScopeSelector({ story, onStoryUpdate, readonly = false }) {
+  const [open, setOpen] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [availableApps, setAvailableApps] = React.useState([]);
+  const [selectedApps, setSelectedApps] = React.useState(story.apps || []);
+  // F8: Track pending request to prevent race conditions
+  const pendingRef = React.useRef(null);
+
+  // F12: Load available apps with cleanup to prevent memory leak
+  React.useEffect(() => {
+    let cancelled = false;
+    api.get('/apps')
+      .then(apps => {
+        if (!cancelled) {
+          setAvailableApps(apps.filter(a => a.enabled !== false));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAvailableApps([]);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Sync with story when it updates
+  React.useEffect(() => {
+    setSelectedApps(story.apps || []);
+  }, [story.apps]);
+
+  // F13: Get valid story identifier
+  const getStoryId = () => {
+    const id = story.slug || story.id;
+    if (!id || typeof id !== 'string') {
+      console.error('Invalid story identifier');
+      return null;
+    }
+    return id;
+  };
+
+  const updateApps = async (newApps) => {
+    const storyId = getStoryId();
+    if (!storyId) return;
+
+    // F8: Cancel previous pending request logic
+    const requestId = Date.now();
+    pendingRef.current = requestId;
+
+    setLoading(true);
+    setError(null);
+    try {
+      await api.patch(`/stories/${storyId}/apps`, { apps: newApps });
+      // F8: Only update state if this is still the latest request
+      if (pendingRef.current === requestId) {
+        setSelectedApps(newApps);
+        if (onStoryUpdate) {
+          onStoryUpdate({ ...story, apps: newApps });
+        }
+      }
+    } catch (e) {
+      // F7: Show user feedback on error
+      if (pendingRef.current === requestId) {
+        setError('Failed to update apps');
+        console.error('Failed to update apps:', e);
+        // Revert to server state
+        setSelectedApps(story.apps || []);
+      }
+    }
+    if (pendingRef.current === requestId) {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleApp = (appName) => {
+    const newApps = selectedApps.includes(appName)
+      ? selectedApps.filter(a => a !== appName)
+      : [...selectedApps, appName];
+    updateApps(newApps);
+  };
+
+  const handleRemoveApp = (appName) => {
+    const newApps = selectedApps.filter(a => a !== appName);
+    updateApps(newApps);
+  };
+
+  // Find app info (for icon)
+  const getAppInfo = (appName) => availableApps.find(a => a.name === appName);
+
+  // Apps not yet selected
+  const unselectedApps = availableApps.filter(a => !selectedApps.includes(a.name));
+
+  if (readonly && selectedApps.length === 0) return null;
+
+  return React.createElement('div', { className: 'flex items-center gap-1.5 flex-wrap' },
+    // F7: Show error message if any
+    error && React.createElement('span', {
+      className: 'text-xs text-red-400 px-2 py-0.5 bg-red-500/10 rounded',
+      onClick: () => setError(null),
+      title: 'Click to dismiss',
+    }, error),
+    // Selected apps as chips
+    ...selectedApps.map(appName => {
+      const appInfo = getAppInfo(appName);
+      return React.createElement('span', {
+        key: appName,
+        className: 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30',
+      },
+        appInfo?.icon || '📦',
+        appName,
+        !readonly && React.createElement('button', {
+          onClick: () => handleRemoveApp(appName),
+          disabled: loading,
+          className: 'ml-0.5 hover:text-red-400 transition-colors disabled:opacity-50',
+          title: `Remove ${appName}`,
+        }, '×')
+      );
+    }),
+    // Add button (dropdown)
+    !readonly && unselectedApps.length > 0 && React.createElement('div', { className: 'relative' },
+      React.createElement('button', {
+        onClick: () => setOpen(!open),
+        disabled: loading,
+        className: 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700 hover:text-slate-300 transition-colors disabled:opacity-50',
+        title: 'Add app to scope',
+      }, '+', 'App'),
+      open && React.createElement(React.Fragment, null,
+        React.createElement('div', {
+          className: 'fixed inset-0 z-40',
+          onClick: () => setOpen(false),
+        }),
+        React.createElement('div', {
+          className: 'absolute top-full left-0 mt-1 py-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl min-w-[140px] z-50',
+        },
+          ...unselectedApps.map(app =>
+            React.createElement('button', {
+              key: app.name,
+              onClick: () => { handleToggleApp(app.name); setOpen(false); },
+              className: 'w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 text-slate-300 hover:bg-slate-700/50 transition-colors',
+            },
+              React.createElement('span', null, app.icon || '📦'),
+              app.name
+            )
+          )
+        )
+      )
+    ),
+    // Show placeholder if no apps and not readonly
+    !readonly && selectedApps.length === 0 && unselectedApps.length === 0 && React.createElement('span', {
+      className: 'text-xs text-slate-500 italic',
+    }, 'No apps configured')
+  );
+}
+
 // ============== QA Rejection Alert (Dev view) ==============
 
 function QARejectionAlert({ story, onStoryUpdate }) {
@@ -2879,6 +3035,12 @@ export function StoryView({ slug, context = 'product' }) {
               },
               disabled: false,
               showCount: false,
+            }),
+            // Apps Scope Selector - filters context for prompts
+            React.createElement(AppsScopeSelector, {
+              story,
+              onStoryUpdate: setStory,
+              readonly,
             }),
             React.createElement('span', { className: `px-3 py-1 text-xs rounded-full ${contextConfig.gradient} ${contextConfig.text} ${contextConfig.border} border` },
               `${contextConfig.icon} ${contextConfig.label} View`

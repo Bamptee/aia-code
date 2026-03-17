@@ -337,8 +337,8 @@ export async function calculateEpicProgress(slug, root = process.cwd()) {
     return { total: 0, completed: 0, percentage: 0 };
   }
 
-  // A story is "completed" when its implement step is done
-  const completed = stories.filter(s => s.steps?.implement === 'done').length;
+  // A story is "completed" when its status is 'done'
+  const completed = stories.filter(s => s.status === 'done').length;
   const percentage = Math.round((completed / stories.length) * 100);
 
   return { total: stories.length, completed, percentage };

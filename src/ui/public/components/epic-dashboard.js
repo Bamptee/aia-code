@@ -109,9 +109,9 @@ function LoadingSpinner({ text = 'Loading...' }) {
 
 function EpicCard({ epic, onClick, onStatusChange }) {
   const statusConfig = EPIC_STATUS[epic.status] || EPIC_STATUS.discovery;
-  const storyCount = epic.stories?.length || 0;
-  const doneCount = (epic.stories || []).filter(s => s.status === 'done').length;
-  const progress = storyCount > 0 ? Math.round((doneCount / storyCount) * 100) : 0;
+  const storyCount = epic.progress?.total || 0;
+  const doneCount = epic.progress?.completed || 0;
+  const progress = epic.progress?.percentage || 0;
 
   return React.createElement('div', {
     className: `bg-aia-card border border-aia-border rounded-lg p-4 hover:border-aia-accent/50 transition-all cursor-pointer ${epic.isArchived ? 'opacity-60' : ''}`,

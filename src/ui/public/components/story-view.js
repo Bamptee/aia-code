@@ -580,9 +580,19 @@ function FigmaLinksZone({ slug, links = [], onUpdate, readonly = false }) {
 
 // ============== Streaming Output Panel ==============
 
-function StreamingPanel({ output }) {
+/**
+ * StreamingPanel - Shows agent output with status indicators
+ * @param {Object} props
+ * @param {string} props.output - Current output text
+ * @param {Object} [props.sessionStatus] - Session status from agent-status API
+ * @param {string} [props.sessionStatus.status] - 'running' | 'stalled' | 'retrying' | 'idle'
+ * @param {number} [props.sessionStatus.attempt] - Current attempt number
+ * @param {Object} [props.sessionStatus.retry] - Retry info if scheduled
+ */
+function StreamingPanel({ output, sessionStatus }) {
   const ref = React.useRef(null);
   const [elapsed, setElapsed] = React.useState(0);
+  const [retryCountdown, setRetryCountdown] = React.useState(null);
 
   React.useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
@@ -594,16 +604,95 @@ function StreamingPanel({ output }) {
     return () => clearInterval(interval);
   }, []);
 
+  // Update retry countdown
+  React.useEffect(() => {
+    if (sessionStatus?.retry?.dueAt) {
+      const updateCountdown = () => {
+        const remaining = Math.max(0, Math.round((sessionStatus.retry.dueAt - Date.now()) / 1000));
+        setRetryCountdown(remaining);
+      };
+      updateCountdown();
+      const interval = setInterval(updateCountdown, 1000);
+      return () => clearInterval(interval);
+    }
+    setRetryCountdown(null);
+  }, [sessionStatus?.retry?.dueAt]);
+
   const formatTime = (s) => s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`;
 
-  return React.createElement('div', { className: 'bg-slate-900 border border-blue-500/30 rounded-lg overflow-hidden' },
-    React.createElement('div', { className: 'flex items-center justify-between px-4 py-2 bg-blue-500/10 border-b border-blue-500/30' },
+  // Determine status styling
+  const status = sessionStatus?.status || 'running';
+  const attempt = sessionStatus?.attempt || 1;
+  const maxRetries = 3; // Match agent-sessions.js MAX_RETRIES
+
+  const statusConfig = {
+    running: {
+      border: 'border-blue-500/30',
+      bg: 'bg-blue-500/10',
+      spinnerColor: 'border-blue-400',
+      textColor: 'text-blue-400',
+      label: attempt > 1 ? `Retry #${attempt}/${maxRetries}` : 'Generating...',
+      icon: null, // uses spinner
+    },
+    stalled: {
+      border: 'border-orange-500/30',
+      bg: 'bg-orange-500/10',
+      spinnerColor: 'border-orange-400',
+      textColor: 'text-orange-400',
+      label: 'Stalled - Agent not responding',
+      icon: '⚠️',
+    },
+    retrying: {
+      border: 'border-amber-500/30',
+      bg: 'bg-amber-500/10',
+      spinnerColor: 'border-amber-400',
+      textColor: 'text-amber-400',
+      label: retryCountdown !== null
+        ? `Retry #${sessionStatus?.retry?.attempt || 1}/${maxRetries} in ${formatTime(retryCountdown)}`
+        : 'Scheduling retry...',
+      icon: '🔄',
+    },
+    maxRetries: {
+      border: 'border-red-500/30',
+      bg: 'bg-red-500/10',
+      spinnerColor: 'border-red-400',
+      textColor: 'text-red-400',
+      label: 'Max retries reached - Manual intervention required',
+      icon: '❌',
+    },
+  };
+
+  const config = statusConfig[status] || statusConfig.running;
+
+  return React.createElement('div', { className: `bg-slate-900 border ${config.border} rounded-lg overflow-hidden` },
+    React.createElement('div', { className: `flex items-center justify-between px-4 py-2 ${config.bg} border-b ${config.border}` },
       React.createElement('div', { className: 'flex items-center gap-2' },
-        React.createElement('div', { className: 'w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin' }),
-        React.createElement('span', { className: 'text-sm text-blue-400 font-medium' }, 'Generating...')
+        config.icon
+          ? React.createElement('span', { className: 'text-sm' }, config.icon)
+          : React.createElement('div', { className: `w-3 h-3 border-2 ${config.spinnerColor} border-t-transparent rounded-full animate-spin` }),
+        React.createElement('span', { className: `text-sm ${config.textColor} font-medium` }, config.label)
       ),
-      React.createElement('span', { className: 'text-xs text-slate-500 font-mono' }, formatTime(elapsed))
+      React.createElement('div', { className: 'flex items-center gap-3' },
+        // Show attempt badge if retry
+        attempt > 1 && status === 'running' && React.createElement('span', {
+          className: 'px-2 py-0.5 text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full',
+        }, `Attempt ${attempt}/${maxRetries}`),
+        // Show tokens if available
+        sessionStatus?.tokens?.total > 0 && React.createElement('span', {
+          className: 'text-xs text-slate-500',
+        }, `${sessionStatus.tokens.total} tokens`),
+        React.createElement('span', { className: 'text-xs text-slate-500 font-mono' }, formatTime(elapsed))
+      )
     ),
+    // Show retry error message if retrying
+    status === 'retrying' && sessionStatus?.retry?.error && React.createElement('div', {
+      className: 'px-4 py-2 bg-amber-500/5 border-b border-amber-500/20 text-xs text-amber-300',
+    }, `Previous error: ${sessionStatus.retry.error}`),
+    // Show stall warning
+    status === 'stalled' && React.createElement('div', {
+      className: 'px-4 py-2 bg-orange-500/5 border-b border-orange-500/20 text-xs text-orange-300',
+    }, 'No output received for 5 minutes. A retry will be scheduled automatically.'),
+    // Output content
     output
       ? React.createElement('pre', {
           ref,
@@ -611,9 +700,9 @@ function StreamingPanel({ output }) {
         }, output.slice(-5000))
       : React.createElement('div', { className: 'flex flex-col items-center gap-3 py-8' },
           React.createElement('div', { className: 'flex gap-1' },
-            React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full animate-bounce', style: { animationDelay: '0ms' } }),
-            React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full animate-bounce', style: { animationDelay: '150ms' } }),
-            React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full animate-bounce', style: { animationDelay: '300ms' } })
+            React.createElement('span', { className: `w-2 h-2 ${config.spinnerColor.replace('border-', 'bg-')} rounded-full animate-bounce`, style: { animationDelay: '0ms' } }),
+            React.createElement('span', { className: `w-2 h-2 ${config.spinnerColor.replace('border-', 'bg-')} rounded-full animate-bounce`, style: { animationDelay: '150ms' } }),
+            React.createElement('span', { className: `w-2 h-2 ${config.spinnerColor.replace('border-', 'bg-')} rounded-full animate-bounce`, style: { animationDelay: '300ms' } })
           ),
           React.createElement('span', { className: 'text-sm text-slate-500' }, 'AI is working...')
         )

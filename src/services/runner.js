@@ -7,7 +7,7 @@ import { buildPrompt, buildTaskPrompt } from '../prompt-builder.js';
 import { callModel } from './model-call.js';
 import { loadStatus, updateStepStatus, updatePhaseStatus, getPhaseByNumber, initializePhasesFromDevPlan, getStoryDirPath } from './status.js';
 import { logExecution } from '../logger.js';
-import { startSession, endSession, appendLog } from './agent-sessions.js';
+import { startSession, endSession, appendLog, claim, isClaimed, updateTokens, scheduleRetry } from './agent-sessions.js';
 import { hasWorktree, getWorktreePath, getFeatureBranch } from './worktrunk.js';
 
 /**
@@ -27,7 +27,14 @@ export async function runWithTaskContext(task, story, options = {}) {
   } = options;
 
   const sessionId = `task-${task.id.slice(0, 8)}`;
-  startSession(sessionId, 'task-implement');
+
+  // Check if task is already claimed (prevent double-dispatch)
+  if (isClaimed(sessionId)) {
+    throw new Error(`Task "${sessionId}" already has an active session.`);
+  }
+  claim(sessionId);
+
+  startSession(sessionId, 'task-implement', { root });
 
   const wrappedOnData = (data) => {
     appendLog(sessionId, data.text, data.type);
@@ -61,6 +68,14 @@ export async function runWithTaskContext(task, story, options = {}) {
     // Parse output for modified files if possible
     const filesModified = extractModifiedFiles(output, task.files);
 
+    // Update session with token usage
+    if (tokenUsage) {
+      updateTokens(sessionId, tokenUsage);
+    }
+
+    // End session successfully
+    endSession(sessionId, { success: true });
+
     return {
       output,
       filesModified,
@@ -70,6 +85,9 @@ export async function runWithTaskContext(task, story, options = {}) {
       completedAt: new Date().toISOString(),
     };
   } catch (err) {
+    // End session without releasing claim for potential retry
+    endSession(sessionId, { success: false });
+
     return {
       output: '',
       filesModified: [],
@@ -78,8 +96,6 @@ export async function runWithTaskContext(task, story, options = {}) {
       error: err.message,
       completedAt: new Date().toISOString(),
     };
-  } finally {
-    endSession(sessionId);
   }
 }
 
@@ -113,9 +129,20 @@ function extractModifiedFiles(output, taskFiles) {
   return Array.from(foundFiles);
 }
 
-export async function runStep(step, feature, { description, instructions, history, attachments, model: modelOverride, verbose = false, apply = false, phase = null, task = null, root = process.cwd(), onData } = {}) {
+export async function runStep(step, feature, { description, instructions, history, attachments, model: modelOverride, verbose = false, apply = false, phase = null, task = null, root = process.cwd(), onData, attempt = 1, isRetry = false } = {}) {
   if (!FEATURE_STEPS.includes(step)) {
     throw new Error(`Unknown step "${step}". Valid steps: ${FEATURE_STEPS.join(', ')}`);
+  }
+
+  // Check if story is already claimed (prevent double-dispatch)
+  // Skip this check for retries as they reuse the existing claim
+  if (isClaimed(feature) && !isRetry) {
+    throw new Error(`Story "${feature}" already has an active session. Wait for it to complete or cancel it.`);
+  }
+
+  // Claim the story for this execution (only on first attempt, not retries)
+  if (!isRetry) {
+    claim(feature);
   }
 
   const status = await loadStatus(feature, root);
@@ -159,8 +186,8 @@ export async function runStep(step, feature, { description, instructions, histor
 
   const shouldApply = apply || APPLY_STEPS.has(step);
 
-  // Start agent session for tracking
-  startSession(feature, step);
+  // Start agent session for tracking (pass attempt and root for retries)
+  startSession(feature, step, { attempt, root });
 
   // Note: Claude CLI has a bug where it hangs in git worktrees
   // So we always use the main repo root as CWD for now
@@ -176,8 +203,10 @@ export async function runStep(step, feature, { description, instructions, histor
     if (onData) onData(data);
   };
 
+  // Resolve model outside try block so we can pass it to scheduleRetry on failure
+  let model;
   try {
-    const model = modelOverride || await resolveModel(step, root);
+    model = modelOverride || await resolveModel(step, root);
     const { prompt, filesUsed } = await buildPrompt(feature, step, { description, instructions, history, attachments, phase: phaseData, root });
 
     // Log files used for transparency
@@ -199,6 +228,11 @@ export async function runStep(step, feature, { description, instructions, histor
     const output = result.output;
     const tokenUsage = result.tokenUsage;
 
+    // Update session with token usage
+    if (tokenUsage) {
+      updateTokens(feature, tokenUsage);
+    }
+
     // In phase mode, append to implement.md instead of overwriting
     const storyDir = await getStoryDirPath(feature, root);
     const outputPath = path.join(storyDir, `${step}.md`);
@@ -216,6 +250,9 @@ export async function runStep(step, feature, { description, instructions, histor
 
     await logExecution({ feature, step, model, duration, phase: phaseData?.number, tokenUsage }, root);
 
+    // End session successfully - this releases the claim
+    endSession(feature, { success: true });
+
     // Return output, filesUsed and tokenUsage for UI transparency
     return { output, filesUsed, tokenUsage };
   } catch (err) {
@@ -223,9 +260,14 @@ export async function runStep(step, feature, { description, instructions, histor
     if (phaseData) {
       await updatePhaseStatus(feature, phaseData.id, 'pending', root);
     }
+
+    // Schedule retry BEFORE ending session so broadcast works
+    // Pass the failed model so retry can use a fallback
+    scheduleRetry(feature, step, err.message, root, model);
+
+    // End session without releasing claim (retry will reuse it)
+    endSession(feature, { success: false });
+
     throw err;
-  } finally {
-    // End session regardless of success or failure
-    endSession(feature);
   }
 }

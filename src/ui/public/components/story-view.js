@@ -717,6 +717,7 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
   const [input, setInput] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [sending, setSending] = React.useState(false);
+  const [starting, setStarting] = React.useState(false);
   const [recapping, setRecapping] = React.useState(false);
   const [recapOutput, setRecapOutput] = React.useState('');
   const messagesEndRef = React.useRef(null);
@@ -749,6 +750,21 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
 
   React.useEffect(() => { loadConversation(); }, [slug, stepName, mode]);
   React.useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  // Handle AI-initiated brainstorming
+  const handleStartChat = async () => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      const result = await api.post(`/stories/${slug}/steps/${conversationKey}/start-chat`, {
+        model: model || undefined,
+      });
+      setMessages([result.message]);
+    } catch (err) {
+      alert('Erreur: ' + (err.message || 'Impossible de démarrer'));
+    }
+    setStarting(false);
+  };
 
   const handleSend = async () => {
     if (!input.trim() || sending) return;
@@ -804,6 +820,9 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
   const headerBg = isReviewMode ? 'bg-amber-500/10' : isBrainstorming ? 'bg-cyan-500/10' : 'bg-slate-800';
   const titleColor = isReviewMode ? 'text-amber-300' : isBrainstorming ? 'text-cyan-300' : 'text-slate-200';
 
+  // Get last assistant message with filesUsed for context display
+  const lastAssistantMsgWithFiles = [...messages].reverse().find(m => m.role === 'assistant' && m.filesUsed);
+
   return React.createElement('div', { className: `bg-slate-800/50 rounded-lg border ${borderColor} overflow-hidden` },
     React.createElement('div', { className: `flex items-center justify-between px-4 py-3 ${headerBg} border-b ${borderColor}` },
       React.createElement('div', { className: 'flex items-center gap-2' },
@@ -842,10 +861,15 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
       }, recapOutput.slice(-2000))
     ),
     !recapping && React.createElement('div', { className: 'max-h-64 overflow-y-auto p-4 space-y-3' },
-      messages.length === 0 && React.createElement('p', { className: 'text-center text-slate-500 text-sm py-4' },
-        isBrainstorming
-          ? 'Start brainstorming! Explore ideas, ask questions, challenge assumptions. Click "Save Summary" when done.'
-          : 'Ask questions or request changes. Click "Apply feedback" to update the content.'
+      messages.length === 0 && isBrainstorming && React.createElement('div', { className: 'flex flex-col items-center gap-3 py-4' },
+        React.createElement('button', {
+          onClick: handleStartChat,
+          disabled: starting,
+          className: 'px-4 py-2 bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center gap-2',
+        }, starting ? '⏳ Chargement...' : '🚀 Démarrer le brainstorming')
+      ),
+      messages.length === 0 && !isBrainstorming && React.createElement('p', { className: 'text-center text-slate-500 text-sm py-4' },
+        'Ask questions or request changes. Click "Apply feedback" to update the content.'
       ),
       ...messages.map((msg, i) => React.createElement('div', {
         key: i,
@@ -865,9 +889,20 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
             React.createElement('span', null, 'Actions Applied')
           ),
           React.createElement('p', { className: 'text-sm whitespace-pre-wrap' }, msg.translatedContent || msg.content),
-          React.createElement('p', { className: 'text-xs text-slate-500 mt-1' }, new Date(msg.createdAt).toLocaleTimeString())
+          React.createElement('div', { className: 'flex items-center gap-2 mt-1' },
+            React.createElement('span', { className: 'text-xs text-slate-500' }, new Date(msg.createdAt).toLocaleTimeString()),
+            msg.role === 'assistant' && msg.tokenUsage && React.createElement('span', {
+              className: 'text-xs text-slate-500',
+              title: `Input: ${msg.tokenUsage.input || 0}, Output: ${msg.tokenUsage.output || 0}`,
+            }, `🎯 ${formatTokenCount(msg.tokenUsage.total)}`)
+          )
         )
       )),
+      // Show context files from last assistant message
+      lastAssistantMsgWithFiles?.filesUsed && React.createElement(FilesUsedPanel, {
+        filesUsed: lastAssistantMsgWithFiles.filesUsed,
+        expanded: false,
+      }),
       React.createElement('div', { ref: messagesEndRef })
     ),
     React.createElement('div', { className: `flex items-center gap-2 p-3 ${headerBg} border-t ${borderColor}` },

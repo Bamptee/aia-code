@@ -311,7 +311,7 @@ function extractTaskList(devPlan) {
   return taskLines.join('\n');
 }
 
-async function loadInitSpecs(feature, root) {
+export async function loadInitSpecs(feature, root) {
   const storyDir = await getStoryDir(feature, root);
   const filePath = path.join(storyDir, 'init.md');
   return readIfExists(filePath);
@@ -502,7 +502,7 @@ function parseFrontMatter(content) {
   return { frontMatter: null, body: content };
 }
 
-async function loadPromptTemplate(step, root) {
+export async function loadPromptTemplate(step, root) {
   const templatePath = path.join(root, AIA_DIR, 'prompts', `${step}.md`);
   const content = await readIfExists(templatePath);
   if (!content) {

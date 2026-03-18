@@ -31,6 +31,7 @@ import { loadConfig } from '../../models.js';
 import { getApps } from '../../services/apps.js';
 import { callModel } from '../../services/model-call.js';
 import { runStep } from '../../services/runner.js';
+import { loadPromptTemplate, loadInitSpecs } from '../../prompt-builder.js';
 
 /**
  * Register all Epic-related API routes (simplified YAML system)
@@ -1162,10 +1163,111 @@ INSTRUCTIONS:
       const callResult = await callModel(model, chatPrompt, { verbose: false, apply: false });
       const aiResponse = callResult.output;
 
-      // Save messages
+      // Build filesUsed for transparency
+      const filesUsed = {
+        promptTemplate: null,
+        initFile: null,
+        stepContent: stepContent ? `${actualStep}.md` : null,
+        contextFiles: [],
+      };
+
+      // Save messages with tokenUsage and filesUsed
       const userMsg = { role: 'user', content: body.message, createdAt: new Date().toISOString() };
-      const aiMsg = { role: 'assistant', content: aiResponse.trim(), createdAt: new Date().toISOString() };
+      const aiMsg = {
+        role: 'assistant',
+        content: aiResponse.trim(),
+        createdAt: new Date().toISOString(),
+        tokenUsage: callResult.tokenUsage,
+        filesUsed,
+      };
       conversation.messages.push(userMsg, aiMsg);
+      await fs.writeJson(convPath, conversation, { spaces: 2 });
+
+      json(res, { message: aiMsg });
+    } catch (err) {
+      error(res, err.message, 500);
+    }
+  });
+
+  /**
+   * POST /api/stories/:slug/steps/:step/start-chat - AI initiates brainstorming conversation
+   */
+  router.post('/api/stories/:slug/steps/:step/start-chat', async (req, res, { params, root, parseBody }) => {
+    try {
+      const body = await parseBody();
+
+      // Validate: only available for brainstorming step
+      if (params.step !== 'brainstorming') {
+        return error(res, 'start-chat only available for brainstorming', 400);
+      }
+
+      // Validate model if provided
+      if (body.model && typeof body.model !== 'string') {
+        return error(res, 'model must be a string', 400);
+      }
+
+      let promptTemplate;
+      try {
+        const result = await loadPromptTemplate(params.step, root);
+        promptTemplate = result.content;
+      } catch (err) {
+        return error(res, `Failed to load brainstorming prompt: ${err.message}`, 500);
+      }
+
+      // Load init.md (non-blocking if not found)
+      const initContent = await loadInitSpecs(params.slug, root);
+
+      // Load config for language
+      const config = await loadConfig(root);
+      const commLang = config.communication_language || 'English';
+
+      // Build contextual prompt
+      let chatPrompt = `${promptTemplate}\n\n`;
+
+      if (initContent) {
+        chatPrompt += `INIT DOCUMENT (story context):\n---\n${initContent}\n---\n\n`;
+      }
+
+      chatPrompt += `INSTRUCTIONS:
+- You are initiating a brainstorming session for this feature
+- Analyze the init document and identify key areas that need clarification
+- Ask 3-5 focused questions to guide the discussion
+- Be specific and actionable
+- Respond in ${commLang}`;
+
+      // Use model from request body, or fall back to config
+      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
+
+      let callResult;
+      try {
+        callResult = await callModel(model, chatPrompt, { verbose: false, apply: false });
+      } catch (err) {
+        return error(res, `Model call failed: ${err.message}`, 500);
+      }
+
+      const aiResponse = callResult.output;
+
+      // Build filesUsed for transparency
+      const filesUsed = {
+        promptTemplate: 'brainstorming.md',
+        initFile: initContent ? 'init.md' : null,
+        stepContent: null,
+        contextFiles: [],
+      };
+
+      // Create message with tokenUsage and filesUsed
+      const aiMsg = {
+        role: 'assistant',
+        content: aiResponse.trim(),
+        createdAt: new Date().toISOString(),
+        tokenUsage: callResult.tokenUsage,
+        filesUsed,
+      };
+
+      // Save conversation
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const convPath = path.join(storyDir, `${params.step}-conversation.json`);
+      const conversation = { messages: [aiMsg] };
       await fs.writeJson(convPath, conversation, { spaces: 2 });
 
       json(res, { message: aiMsg });

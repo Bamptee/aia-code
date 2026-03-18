@@ -908,6 +908,9 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
   const [saving, setSaving] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
 
+  // Model selection state
+  const [model, setModel] = React.useState('');
+
   // Translation state
   const [langConfig, setLangConfig] = React.useState(null);
   const [translating, setTranslating] = React.useState(false);
@@ -923,6 +926,7 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
     setEditContent(story?.init?.enriched || '');
     setDirty(false);
     setTranslated(null); // Reset translation when content changes
+    setModel(''); // Reset model selection when story changes
   }, [story?.init?.enriched]);
 
   const needsTranslation = langConfig?.needsTranslation && story?.init?.enriched;
@@ -934,6 +938,7 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
     try {
       const result = await streamPost(`/stories/${slug}/init/enrich`, {
         description,
+        model: model || undefined,
       }, {
         onLog: (text) => setOutput(prev => (prev + text).slice(-10000)),
         onStatus: () => {},
@@ -1074,7 +1079,10 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
         )
       ),
       React.createElement('div', { className: 'flex items-center justify-between' },
-        React.createElement('span', { className: 'text-xs text-slate-500' }, `${description.length} characters`),
+        React.createElement('div', { className: 'flex items-center gap-3' },
+          React.createElement('span', { className: 'text-xs text-slate-500' }, `${description.length} characters`),
+          React.createElement(ModelSelect, { model, onChange: setModel, disabled: loading || saving || translating })
+        ),
         React.createElement('div', { className: 'flex items-center gap-3' },
           hasEnrichedContext && React.createElement('button', {
             onClick: onComplete,

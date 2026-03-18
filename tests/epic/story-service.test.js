@@ -211,9 +211,9 @@ describe('StoryService - Basic Operations', () => {
       await storyService.create(epic.id, { title: 'Story 2', type: 'feature' });
 
       // Promote one to development
-      await storyService.updateStep(story1.id, 'brief', { skipped: true });
-      await storyService.updateStep(story1.id, 'baSpec', { skipped: true });
-      await storyService.updateStep(story1.id, 'questions', { skipped: true });
+      await storyService.updateStep(story1.id, 'init', { skipped: true });
+      await storyService.updateStep(story1.id, 'specFunc', { skipped: true });
+      await storyService.updateStep(story1.id, 'brainstorming', { skipped: true });
       await storyService.promote(story1.id);
 
       const devStories = await storyService.list({ space: 'development' });
@@ -394,14 +394,14 @@ describe('StoryService - Steps and Promotion', () => {
         type: 'feature',
       });
 
-      const updated = await storyService.updateStep(story.id, 'brief', {
+      const updated = await storyService.updateStep(story.id, 'init', {
         completed: true,
-        content: 'This is the brief content',
+        content: 'This is the init content',
       });
 
-      assert.strictEqual(updated.steps.brief.completed, true);
-      assert.strictEqual(updated.steps.brief.skipped, false);
-      assert.strictEqual(updated.steps.brief.content, 'This is the brief content');
+      assert.strictEqual(updated.steps.init.completed, true);
+      assert.strictEqual(updated.steps.init.skipped, false);
+      assert.strictEqual(updated.steps.init.content, 'This is the init content');
     });
 
     test('skips step', async () => {
@@ -411,13 +411,13 @@ describe('StoryService - Steps and Promotion', () => {
         type: 'feature',
       });
 
-      const updated = await storyService.updateStep(story.id, 'baSpec', {
+      const updated = await storyService.updateStep(story.id, 'specFunc', {
         skipped: true,
       });
 
-      assert.strictEqual(updated.steps.baSpec.skipped, true);
-      assert.strictEqual(updated.steps.baSpec.completed, false);
-      assert.strictEqual(updated.steps.baSpec.content, null);
+      assert.strictEqual(updated.steps.specFunc.skipped, true);
+      assert.strictEqual(updated.steps.specFunc.completed, false);
+      assert.strictEqual(updated.steps.specFunc.content, null);
     });
 
     test('skipping clears completed', async () => {
@@ -428,18 +428,18 @@ describe('StoryService - Steps and Promotion', () => {
       });
 
       // Complete first
-      await storyService.updateStep(story.id, 'brief', {
+      await storyService.updateStep(story.id, 'init', {
         completed: true,
         content: 'Content',
       });
 
       // Then skip
-      const updated = await storyService.updateStep(story.id, 'brief', {
+      const updated = await storyService.updateStep(story.id, 'init', {
         skipped: true,
       });
 
-      assert.strictEqual(updated.steps.brief.completed, false);
-      assert.strictEqual(updated.steps.brief.content, null);
+      assert.strictEqual(updated.steps.init.completed, false);
+      assert.strictEqual(updated.steps.init.content, null);
     });
 
     test('completing clears skipped', async () => {
@@ -450,16 +450,16 @@ describe('StoryService - Steps and Promotion', () => {
       });
 
       // Skip first
-      await storyService.updateStep(story.id, 'brief', { skipped: true });
+      await storyService.updateStep(story.id, 'init', { skipped: true });
 
       // Then complete
-      const updated = await storyService.updateStep(story.id, 'brief', {
+      const updated = await storyService.updateStep(story.id, 'init', {
         completed: true,
         content: 'New content',
       });
 
-      assert.strictEqual(updated.steps.brief.skipped, false);
-      assert.strictEqual(updated.steps.brief.completed, true);
+      assert.strictEqual(updated.steps.init.skipped, false);
+      assert.strictEqual(updated.steps.init.completed, true);
     });
 
     test('throws ValidationError for invalid step name', async () => {
@@ -488,7 +488,7 @@ describe('StoryService - Steps and Promotion', () => {
 
       const result = await storyService.canPromote(story.id);
       assert.strictEqual(result.canPromote, false);
-      assert.deepStrictEqual(result.missingSteps.sort(), ['baSpec', 'brief', 'questions']);
+      assert.deepStrictEqual(result.missingSteps.sort(), ['brainstorming', 'init', 'specFunc']);
     });
 
     test('returns true with all steps completed', async () => {
@@ -498,9 +498,9 @@ describe('StoryService - Steps and Promotion', () => {
         type: 'feature',
       });
 
-      await storyService.updateStep(story.id, 'brief', { completed: true, content: 'Brief' });
-      await storyService.updateStep(story.id, 'baSpec', { completed: true, content: 'Spec' });
-      await storyService.updateStep(story.id, 'questions', { completed: true, content: 'Q&A' });
+      await storyService.updateStep(story.id, 'init', { completed: true, content: 'Init' });
+      await storyService.updateStep(story.id, 'specFunc', { completed: true, content: 'Spec' });
+      await storyService.updateStep(story.id, 'brainstorming', { completed: true, content: 'Ideas' });
 
       const result = await storyService.canPromote(story.id);
       assert.strictEqual(result.canPromote, true);
@@ -514,9 +514,9 @@ describe('StoryService - Steps and Promotion', () => {
         type: 'feature',
       });
 
-      await storyService.updateStep(story.id, 'brief', { skipped: true });
-      await storyService.updateStep(story.id, 'baSpec', { skipped: true });
-      await storyService.updateStep(story.id, 'questions', { skipped: true });
+      await storyService.updateStep(story.id, 'init', { skipped: true });
+      await storyService.updateStep(story.id, 'specFunc', { skipped: true });
+      await storyService.updateStep(story.id, 'brainstorming', { skipped: true });
 
       const result = await storyService.canPromote(story.id);
       assert.strictEqual(result.canPromote, true);
@@ -529,9 +529,9 @@ describe('StoryService - Steps and Promotion', () => {
         type: 'feature',
       });
 
-      await storyService.updateStep(story.id, 'brief', { completed: true, content: 'Brief' });
-      await storyService.updateStep(story.id, 'baSpec', { skipped: true });
-      await storyService.updateStep(story.id, 'questions', { completed: true, content: 'Q&A' });
+      await storyService.updateStep(story.id, 'init', { completed: true, content: 'Init' });
+      await storyService.updateStep(story.id, 'specFunc', { skipped: true });
+      await storyService.updateStep(story.id, 'brainstorming', { completed: true, content: 'Ideas' });
 
       const result = await storyService.canPromote(story.id);
       assert.strictEqual(result.canPromote, true);
@@ -547,9 +547,9 @@ describe('StoryService - Steps and Promotion', () => {
       });
 
       // Complete all steps
-      await storyService.updateStep(story.id, 'brief', { skipped: true });
-      await storyService.updateStep(story.id, 'baSpec', { skipped: true });
-      await storyService.updateStep(story.id, 'questions', { skipped: true });
+      await storyService.updateStep(story.id, 'init', { skipped: true });
+      await storyService.updateStep(story.id, 'specFunc', { skipped: true });
+      await storyService.updateStep(story.id, 'brainstorming', { skipped: true });
 
       const promoted = await storyService.promote(story.id);
 
@@ -564,15 +564,15 @@ describe('StoryService - Steps and Promotion', () => {
         type: 'feature',
       });
 
-      await storyService.updateStep(story.id, 'brief', { completed: true, content: 'Brief content' });
-      await storyService.updateStep(story.id, 'baSpec', { skipped: true });
-      await storyService.updateStep(story.id, 'questions', { completed: true, content: 'Q&A' });
+      await storyService.updateStep(story.id, 'init', { completed: true, content: 'Init content' });
+      await storyService.updateStep(story.id, 'specFunc', { skipped: true });
+      await storyService.updateStep(story.id, 'brainstorming', { completed: true, content: 'Ideas' });
 
       const promoted = await storyService.promote(story.id);
 
-      assert.strictEqual(promoted.steps.brief.content, 'Brief content');
-      assert.strictEqual(promoted.steps.baSpec.skipped, true);
-      assert.strictEqual(promoted.steps.questions.content, 'Q&A');
+      assert.strictEqual(promoted.steps.init.content, 'Init content');
+      assert.strictEqual(promoted.steps.specFunc.skipped, true);
+      assert.strictEqual(promoted.steps.brainstorming.content, 'Ideas');
     });
 
     test('throws BusinessRuleError for incomplete steps', async () => {
@@ -583,7 +583,7 @@ describe('StoryService - Steps and Promotion', () => {
       });
 
       // Only complete one step
-      await storyService.updateStep(story.id, 'brief', { completed: true, content: 'Brief' });
+      await storyService.updateStep(story.id, 'init', { completed: true, content: 'Init' });
 
       await assert.rejects(
         async () => {
@@ -635,7 +635,7 @@ describe('StoryService - Movement Between Epics', () => {
       });
 
       // Modify the story
-      await storyService.updateStep(story.id, 'brief', { completed: true, content: 'Brief' });
+      await storyService.updateStep(story.id, 'init', { completed: true, content: 'Init' });
       await storyService.updateStatus(story.id, 'in_progress');
 
       const moved = await storyService.move(story.id, epic2.id);
@@ -643,7 +643,7 @@ describe('StoryService - Movement Between Epics', () => {
       assert.strictEqual(moved.title, 'Story');
       assert.strictEqual(moved.description, 'Description');
       assert.strictEqual(moved.status, 'in_progress');
-      assert.strictEqual(moved.steps.brief.completed, true);
+      assert.strictEqual(moved.steps.init.completed, true);
     });
 
     test('updates story index', async () => {

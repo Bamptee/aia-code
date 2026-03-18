@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
-import { AIA_DIR, FEATURE_STEPS, DEFAULT_FEATURE_TYPE, FEATURE_TYPES, LEGACY_FEATURES_DIR, STORY_PHASES, SKIPPABLE_STEPS } from '../constants.js';
+import { AIA_DIR, FEATURE_STEPS, DEFAULT_FEATURE_TYPE, FEATURE_TYPES, LEGACY_FEATURES_DIR, STORY_PHASES, SKIPPABLE_STEPS, PRODUCT_STEPS } from '../constants.js';
 import { generateSlug as generateSlugFromService } from '../epic/services/slug-service.js';
 import { getDefaultEpicSlug, getAllStorySlugs } from './epic.js';
 
@@ -75,8 +75,8 @@ function buildStatusYaml(slug, { name, type = DEFAULT_FEATURE_TYPE, apps = [], e
     steps[step] = 'pending';
   }
 
-  // Determine first step based on phase
-  const currentStep = phase === STORY_PHASES.DEVELOPMENT ? 'tech-spec' : 'brief';
+  // Determine first step based on phase (V3 step names)
+  const currentStep = phase === STORY_PHASES.DEVELOPMENT ? 'spec-tech' : 'init';
 
   // Keep flow for backwards compatibility (deprecated but still used in some places)
   const flow = 'full';
@@ -92,7 +92,7 @@ function buildStatusYaml(slug, { name, type = DEFAULT_FEATURE_TYPE, apps = [], e
     createdFrom: validCreatedFrom,
     createdAt: new Date().toISOString(),
     steps,
-    skippedSteps: [], // Steps that are skipped (count as done for progress)
+    skippedSteps: phase === STORY_PHASES.DEVELOPMENT ? PRODUCT_STEPS.filter(s => s !== 'init') : [], // Skip product steps (except init) when starting in development
     knowledge: ['backend'],
   };
 

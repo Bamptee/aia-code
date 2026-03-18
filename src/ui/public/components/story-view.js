@@ -1,53 +1,127 @@
 import React from 'react';
 import { api, streamPost } from '/main.js';
 import { EpicSelector } from '/components/epic-selector.js';
+import { StoryWorktrunkPanel } from '/components/worktrunk-panel.js';
 
-// ============== Constants ==============
+// ============== Constants v3 ==============
 
-const ALL_STEPS = ['brief', 'baSpec', 'questions', 'techSpec', 'challenge', 'devPlan', 'implement', 'review'];
-const PRODUCT_STEPS = ['brief', 'baSpec', 'questions'];
-const DEV_STEPS = ['techSpec', 'challenge', 'devPlan', 'implement', 'review'];
+// V3: 7 steps with Product/Dev phases
+const ALL_STEPS = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', 'review'];
+// Product steps: init has dedicated InitPanel, so only show brainstorming and specFunc as steps
+const PRODUCT_STEPS = ['brainstorming', 'specFunc'];
+const DEV_STEPS = ['specTech', 'devPlan', 'implement', 'review'];
 
-// Steps that can be skipped (not init, dev-plan, implement)
-const SKIPPABLE_STEPS = ['brief', 'baSpec', 'questions', 'techSpec', 'challenge', 'review'];
+// Steps that can be skipped (all except init)
+const SKIPPABLE_STEPS = ['brainstorming', 'specFunc', 'specTech', 'devPlan', 'review'];
+
+// Steps that produce code changes
+const CODE_STEPS = ['implement', 'review'];
 
 // Map kebab-case from API to camelCase
 const STEP_KEY_MAP = {
-  'brief': 'brief',
-  'ba-spec': 'baSpec',
-  'baSpec': 'baSpec',
-  'questions': 'questions',
-  'tech-spec': 'techSpec',
-  'techSpec': 'techSpec',
-  'challenge': 'challenge',
+  'init': 'init',
+  'brainstorming': 'brainstorming',
+  'spec-func': 'specFunc',
+  'specFunc': 'specFunc',
+  'spec-tech': 'specTech',
+  'specTech': 'specTech',
   'dev-plan': 'devPlan',
   'devPlan': 'devPlan',
   'implement': 'implement',
   'review': 'review',
+  // Legacy v1 mappings for backward compatibility
+  'brief': 'init',
+  'ba-spec': 'specFunc',
+  'baSpec': 'specFunc',
+  'questions': 'brainstorming',
+  'tech-spec': 'specTech',
+  'techSpec': 'specTech',
+  'challenge': 'review',
 };
 
 // Map camelCase to kebab-case for API calls
 const STEP_API_MAP = {
-  'brief': 'brief',
-  'baSpec': 'ba-spec',
-  'questions': 'questions',
-  'techSpec': 'tech-spec',
-  'challenge': 'challenge',
+  'init': 'init',
+  'brainstorming': 'brainstorming',
+  'specFunc': 'spec-func',
+  'specTech': 'spec-tech',
   'devPlan': 'dev-plan',
   'implement': 'implement',
   'review': 'review',
 };
 
+// V3 Step configuration with phases
 const STEP_CONFIG = {
-  brief: { name: 'Brief', icon: '📋', color: 'emerald', description: 'High-level summary and requirements' },
-  baSpec: { name: 'BA Spec', icon: '📊', color: 'blue', description: 'Business analysis and specifications' },
-  questions: { name: 'Questions', icon: '❓', color: 'amber', description: 'Open questions and clarifications' },
-  techSpec: { name: 'Tech Spec', icon: '🛠️', color: 'violet', description: 'Technical architecture' },
-  challenge: { name: 'Challenge', icon: '⚠️', color: 'red', description: 'Risks and blockers' },
-  devPlan: { name: 'Dev Plan', icon: '📝', color: 'cyan', description: 'Implementation plan' },
-  implement: { name: 'Implement', icon: '💻', color: 'green', description: 'Implementation notes' },
-  review: { name: 'Review', icon: '✅', color: 'purple', description: 'Code review' },
+  init: { name: 'Init', icon: '📋', color: 'emerald', phase: 'product', description: 'Story context and requirements', type: 'generate' },
+  brainstorming: { name: 'Brainstorming', icon: '💡', color: 'amber', phase: 'product', description: 'Discovery and ideation', type: 'chat-only' },
+  specFunc: { name: 'Spec Func', icon: '📊', color: 'blue', phase: 'product', description: 'Functional specification', type: 'generate' },
+  specTech: { name: 'Spec Tech', icon: '🛠️', color: 'violet', phase: 'dev', description: 'Technical specification', type: 'generate' },
+  devPlan: { name: 'Dev Plan', icon: '📝', color: 'cyan', phase: 'dev', description: 'Implementation tasks', type: 'generate' },
+  implement: { name: 'Implement', icon: '💻', color: 'green', phase: 'dev', description: 'Code implementation', type: 'generate' },
+  review: { name: 'Review', icon: '✅', color: 'purple', phase: 'dev', description: 'Code review', type: 'generate' },
+  // Legacy aliases for backward compatibility
+  brief: { name: 'Brief', icon: '📋', color: 'emerald', phase: 'product', description: 'High-level summary', type: 'generate', legacy: true },
+  baSpec: { name: 'BA Spec', icon: '📊', color: 'blue', phase: 'product', description: 'Business analysis', type: 'generate', legacy: true },
+  questions: { name: 'Questions', icon: '❓', color: 'amber', phase: 'product', description: 'Open questions', type: 'chat-only', legacy: true },
+  techSpec: { name: 'Tech Spec', icon: '🛠️', color: 'violet', phase: 'dev', description: 'Technical architecture', type: 'generate', legacy: true },
+  challenge: { name: 'Challenge', icon: '⚠️', color: 'red', phase: 'dev', description: 'Risks and blockers', type: 'generate', legacy: true },
 };
+
+// Actions per step type
+const STEP_ACTIONS = {
+  'chat-only': ['chat', 'review'],
+  'generate': ['generate', 'chat', 'review'],
+};
+
+// Phase filters for dashboard
+const PHASE_FILTERS = {
+  'all': () => true,
+  'product': (step) => STEP_CONFIG[step]?.phase === 'product',
+  'dev': (step) => STEP_CONFIG[step]?.phase === 'dev',
+};
+
+// Format token count for display (1234 → "1.2k", 12345 → "12.3k")
+function formatTokenCount(count) {
+  if (!count || count === 0) return null;
+  if (count < 1000) return count.toString();
+  if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
+  return `${Math.round(count / 1000)}k`;
+}
+
+// Get skip warning based on skipped steps
+function getSkipWarning(fromStep, toStep) {
+  const fromIndex = ALL_STEPS.indexOf(fromStep);
+  const toIndex = ALL_STEPS.indexOf(toStep);
+
+  if (fromIndex === -1 || toIndex === -1 || toIndex <= fromIndex) {
+    return null;
+  }
+
+  const skipped = ALL_STEPS.slice(fromIndex + 1, toIndex);
+
+  if (skipped.includes('specFunc') && skipped.includes('specTech')) {
+    return {
+      level: 'high',
+      message: 'Contexte tres limite - Pas de spec fonctionnelle ni technique',
+      autoAnalysis: true,
+    };
+  }
+  if (skipped.includes('specTech')) {
+    return {
+      level: 'medium',
+      message: 'Pas de spec technique - Analyse automatique du codebase',
+      autoAnalysis: true,
+    };
+  }
+  if (skipped.includes('specFunc')) {
+    return {
+      level: 'low',
+      message: 'Pas de spec fonctionnelle - Contexte limite',
+      autoAnalysis: false,
+    };
+  }
+  return null;
+}
 
 const CONTEXT_CONFIG = {
   product: { label: 'Product', icon: '🔍', gradient: 'from-purple-500/10 to-fuchsia-500/10', border: 'border-purple-500/30', text: 'text-purple-400' },
@@ -56,10 +130,14 @@ const CONTEXT_CONFIG = {
 };
 
 const PHASE_CONFIG = {
-  discovery: { label: 'Discovery', color: 'purple' },
-  development: { label: 'Development', color: 'violet' },
-  qa: { label: 'QA', color: 'sky' },
-  done: { label: 'Done', color: 'emerald' },
+  // V3 phases
+  product: { label: 'Product', color: 'purple', icon: '🔍' },
+  dev: { label: 'Dev', color: 'violet', icon: '🚀' },
+  // Legacy phases
+  discovery: { label: 'Discovery', color: 'purple', icon: '🔍' },
+  development: { label: 'Development', color: 'violet', icon: '🚀' },
+  qa: { label: 'QA', color: 'sky', icon: '✅' },
+  done: { label: 'Done', color: 'emerald', icon: '✓' },
 };
 
 // ============== Access Control ==============
@@ -119,6 +197,219 @@ function AccessDenied({ phase, context }) {
     )
   );
 }
+
+// ============== V3 UI Components ==============
+
+function SkipWarning({ skippedSteps, warning }) {
+  if (!warning) return null;
+
+  const levelColors = {
+    high: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', icon: '🚨' },
+    medium: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', icon: '⚠️' },
+    low: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', icon: 'ℹ️' },
+  };
+  const colors = levelColors[warning.level] || levelColors.medium;
+
+  return React.createElement('div', {
+    className: `${colors.bg} ${colors.border} border rounded-lg p-3 flex items-start gap-3`,
+  },
+    React.createElement('span', { className: 'text-xl' }, colors.icon),
+    React.createElement('div', { className: 'flex-1' },
+      React.createElement('p', { className: `${colors.text} text-sm font-medium` }, warning.message),
+      warning.autoAnalysis && React.createElement('p', { className: 'text-slate-400 text-xs mt-1' },
+        'L\'agent effectuera une auto-analyse du codebase pour compenser le contexte manquant.'
+      ),
+      skippedSteps?.length > 0 && React.createElement('p', { className: 'text-slate-500 text-xs mt-1' },
+        `Steps ignores: ${skippedSteps.join(', ')}`
+      )
+    )
+  );
+}
+
+function FilesUsedPanel({ filesUsed, expanded = false }) {
+  const [isExpanded, setIsExpanded] = React.useState(expanded);
+
+  if (!filesUsed) return null;
+
+  const hasContent = filesUsed.promptTemplate ||
+    filesUsed.priorSteps?.length > 0 ||
+    filesUsed.contextFiles?.length > 0 ||
+    filesUsed.knowledgeCategories?.length > 0;
+
+  if (!hasContent) return null;
+
+  return React.createElement('div', {
+    className: 'bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden text-xs',
+  },
+    React.createElement('button', {
+      onClick: () => setIsExpanded(!isExpanded),
+      className: 'w-full flex items-center justify-between px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors',
+    },
+      React.createElement('div', { className: 'flex items-center gap-2' },
+        React.createElement('span', null, '📂'),
+        React.createElement('span', null, 'Context Used'),
+        React.createElement('span', { className: 'text-slate-600' },
+          `(${(filesUsed.priorSteps?.length || 0) + (filesUsed.contextFiles?.length || 0)} files)`
+        )
+      ),
+      React.createElement('span', { className: `transition-transform ${isExpanded ? 'rotate-180' : ''}` }, '▼')
+    ),
+    isExpanded && React.createElement('div', { className: 'px-3 pb-3 space-y-2 border-t border-slate-700 pt-2' },
+      // Prompt template
+      filesUsed.promptTemplate && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Prompt: '),
+        React.createElement('span', { className: 'text-violet-400' }, filesUsed.promptTemplate),
+        filesUsed.promptPhase && React.createElement('span', { className: 'text-slate-600 ml-2' },
+          `(${filesUsed.promptPhase}/${filesUsed.promptType})`
+        )
+      ),
+      // Prior steps
+      filesUsed.priorSteps?.length > 0 && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Prior steps: '),
+        React.createElement('span', { className: 'text-emerald-400' },
+          filesUsed.priorSteps.map(f => f.file || f).join(', ')
+        )
+      ),
+      // Context files
+      filesUsed.contextFiles?.length > 0 && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Context: '),
+        React.createElement('span', { className: 'text-blue-400' },
+          filesUsed.contextFiles.join(', ')
+        )
+      ),
+      // Knowledge
+      filesUsed.knowledgeCategories?.length > 0 && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Knowledge: '),
+        React.createElement('span', { className: 'text-amber-400' },
+          filesUsed.knowledgeCategories.join(', ')
+        )
+      ),
+      // Init file
+      filesUsed.initFile && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Init: '),
+        React.createElement('span', { className: 'text-cyan-400' }, filesUsed.initFile)
+      ),
+      // Codebase files
+      filesUsed.codebaseFiles?.length > 0 && React.createElement('div', null,
+        React.createElement('span', { className: 'text-slate-500' }, 'Codebase: '),
+        React.createElement('span', { className: 'text-pink-400' },
+          filesUsed.codebaseFiles.length > 5
+            ? `${filesUsed.codebaseFiles.slice(0, 5).join(', ')} +${filesUsed.codebaseFiles.length - 5} more`
+            : filesUsed.codebaseFiles.join(', ')
+        )
+      )
+    )
+  );
+}
+
+function PhaseFilter({ current, onChange }) {
+  const phases = [
+    { key: 'all', label: 'All', icon: '📋' },
+    { key: 'product', label: 'Product', icon: '🔍' },
+    { key: 'dev', label: 'Dev', icon: '🚀' },
+  ];
+
+  return React.createElement('div', { className: 'flex items-center gap-1 bg-slate-800 rounded-lg p-1' },
+    ...phases.map(phase =>
+      React.createElement('button', {
+        key: phase.key,
+        onClick: () => onChange(phase.key),
+        className: `flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg transition-colors ${
+          current === phase.key
+            ? 'bg-violet-500/30 text-violet-300'
+            : 'text-slate-400 hover:text-slate-200'
+        }`,
+      },
+        React.createElement('span', null, phase.icon),
+        React.createElement('span', null, phase.label)
+      )
+    )
+  );
+}
+
+function ActionBar({ step, stepKey, onGenerate, onChat, onReview, generating, readonly }) {
+  const config = STEP_CONFIG[stepKey];
+  if (!config) return null;
+
+  const stepType = config.type || 'generate';
+  const actions = STEP_ACTIONS[stepType] || STEP_ACTIONS.generate;
+
+  return React.createElement('div', { className: 'flex items-center gap-2' },
+    actions.includes('generate') && React.createElement('button', {
+      onClick: onGenerate,
+      disabled: generating || readonly,
+      className: 'flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-violet-500/20 text-violet-400 border border-violet-500/30 hover:bg-violet-500/30 disabled:opacity-50 transition-colors',
+    }, generating ? '⏳ Generating...' : '✨ Generate'),
+    actions.includes('chat') && React.createElement('button', {
+      onClick: onChat,
+      disabled: generating || readonly,
+      className: 'flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 disabled:opacity-50 transition-colors',
+    }, '💬 Chat'),
+    actions.includes('review') && React.createElement('button', {
+      onClick: onReview,
+      disabled: generating || readonly,
+      className: 'flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 disabled:opacity-50 transition-colors',
+    }, '🔍 Review')
+  );
+}
+
+function StepPills({ steps, storySteps, currentStep, onStepClick, tokenUsage }) {
+  // Group steps by phase for visual separation
+  const productSteps = steps.filter(s => STEP_CONFIG[s]?.phase === 'product');
+  const devSteps = steps.filter(s => STEP_CONFIG[s]?.phase === 'dev');
+
+  const renderStep = (stepKey) => {
+    const config = STEP_CONFIG[stepKey];
+    const stepData = storySteps?.[stepKey];
+    const isCompleted = stepData?.completed;
+    const isSkipped = stepData?.skipped;
+    const isCurrent = currentStep === stepKey;
+
+    // Get token usage for this step
+    const stepTokens = tokenUsage?.steps?.[stepKey];
+    const formattedTokens = formatTokenCount(stepTokens?.total);
+
+    return React.createElement('button', {
+      key: stepKey,
+      onClick: () => onStepClick(stepKey),
+      className: `flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+        isCurrent
+          ? 'bg-violet-500/30 text-violet-300 border border-violet-500/50'
+          : isSkipped
+            ? 'bg-slate-700/50 text-slate-500 line-through'
+            : isCompleted
+              ? 'bg-emerald-500/20 text-emerald-400'
+              : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+      }`,
+      title: stepTokens ? `Input: ${stepTokens.input}, Output: ${stepTokens.output}` : undefined,
+    },
+      React.createElement('span', null, isSkipped ? '⏭️' : config?.icon || '📄'),
+      React.createElement('span', null, config?.name || stepKey),
+      // Token badge
+      formattedTokens && React.createElement('span', {
+        className: 'ml-1 px-1.5 py-0.5 text-[10px] rounded bg-slate-700/50 text-slate-400',
+      }, formattedTokens)
+    );
+  };
+
+  return React.createElement('div', { className: 'flex items-center gap-2 flex-wrap' },
+    // Product phase steps
+    productSteps.length > 0 && React.createElement('div', { className: 'flex items-center gap-1' },
+      React.createElement('span', { className: 'text-xs text-purple-400 mr-1' }, '🔍'),
+      ...productSteps.map(renderStep)
+    ),
+    // Separator
+    productSteps.length > 0 && devSteps.length > 0 &&
+      React.createElement('span', { className: 'text-slate-600 mx-1' }, '|'),
+    // Dev phase steps
+    devSteps.length > 0 && React.createElement('div', { className: 'flex items-center gap-1' },
+      React.createElement('span', { className: 'text-xs text-violet-400 mr-1' }, '🚀'),
+      ...devSteps.map(renderStep)
+    )
+  );
+}
+
+// ============== Original Helper Components ==============
 
 function ModelSelect({ model, onChange, disabled }) {
   const [models, setModels] = React.useState([]);
@@ -219,80 +510,21 @@ function AttachmentZone({ slug, attachments = [], onUpdate, readonly = false }) 
   );
 }
 
-// ============== Figma Links Zone ==============
-
-function FigmaLinksZone({ slug, links = [], onUpdate, readonly = false }) {
-  const [url, setUrl] = React.useState('');
-  const [adding, setAdding] = React.useState(false);
-  const [error, setError] = React.useState(null);
-
-  const handleAdd = async () => {
-    if (!url.trim() || readonly) return;
-    setAdding(true);
-    setError(null);
-    try {
-      const res = await api.post(`/stories/${slug}/init/figma`, { url: url.trim() });
-      if (res.story) onUpdate(res.story);
-      setUrl('');
-    } catch (e) {
-      setError(e.message);
-    }
-    setAdding(false);
-  };
-
-  const handleRemove = async (linkUrl) => {
-    if (readonly) return;
-    try {
-      const res = await api.delete(`/stories/${slug}/init/figma`, { url: linkUrl });
-      if (res.story) onUpdate(res.story);
-    } catch (e) {
-      setError(e.message);
-    }
-  };
-
-  return React.createElement('div', { className: 'space-y-2' },
-    !readonly && React.createElement('div', { className: 'flex items-center gap-2' },
-      React.createElement('input', {
-        type: 'text',
-        value: url,
-        onChange: e => setUrl(e.target.value),
-        onKeyDown: e => e.key === 'Enter' && handleAdd(),
-        placeholder: 'Paste Figma link...',
-        className: 'flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-500 focus:outline-none',
-      }),
-      React.createElement('button', {
-        onClick: handleAdd,
-        disabled: adding || !url.trim(),
-        className: 'px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors text-sm disabled:opacity-50',
-      }, adding ? '...' : '🎨 Add')
-    ),
-
-    error && React.createElement('p', { className: 'text-red-400 text-xs' }, error),
-
-    links.length > 0 && React.createElement('div', { className: 'flex flex-wrap gap-2' },
-      ...links.map(l => React.createElement('a', {
-        key: l.url,
-        href: l.url,
-        target: '_blank',
-        rel: 'noopener',
-        className: 'flex items-center gap-2 px-2 py-1 bg-purple-500/10 border border-purple-500/30 rounded-lg text-xs text-purple-400 hover:bg-purple-500/20',
-      },
-        '🎨',
-        l.label || 'Figma',
-        !readonly && React.createElement('button', {
-          onClick: (e) => { e.preventDefault(); handleRemove(l.url); },
-          className: 'text-red-400 hover:text-red-300 ml-1',
-        }, '×')
-      ))
-    )
-  );
-}
-
 // ============== Streaming Output Panel ==============
 
-function StreamingPanel({ output }) {
+/**
+ * StreamingPanel - Shows agent output with status indicators
+ * @param {Object} props
+ * @param {string} props.output - Current output text
+ * @param {Object} [props.sessionStatus] - Session status from agent-status API
+ * @param {string} [props.sessionStatus.status] - 'running' | 'stalled' | 'retrying' | 'idle'
+ * @param {number} [props.sessionStatus.attempt] - Current attempt number
+ * @param {Object} [props.sessionStatus.retry] - Retry info if scheduled
+ */
+function StreamingPanel({ output, sessionStatus }) {
   const ref = React.useRef(null);
   const [elapsed, setElapsed] = React.useState(0);
+  const [retryCountdown, setRetryCountdown] = React.useState(null);
 
   React.useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
@@ -304,16 +536,95 @@ function StreamingPanel({ output }) {
     return () => clearInterval(interval);
   }, []);
 
+  // Update retry countdown
+  React.useEffect(() => {
+    if (sessionStatus?.retry?.dueAt) {
+      const updateCountdown = () => {
+        const remaining = Math.max(0, Math.round((sessionStatus.retry.dueAt - Date.now()) / 1000));
+        setRetryCountdown(remaining);
+      };
+      updateCountdown();
+      const interval = setInterval(updateCountdown, 1000);
+      return () => clearInterval(interval);
+    }
+    setRetryCountdown(null);
+  }, [sessionStatus?.retry?.dueAt]);
+
   const formatTime = (s) => s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`;
 
-  return React.createElement('div', { className: 'bg-slate-900 border border-blue-500/30 rounded-lg overflow-hidden' },
-    React.createElement('div', { className: 'flex items-center justify-between px-4 py-2 bg-blue-500/10 border-b border-blue-500/30' },
+  // Determine status styling
+  const status = sessionStatus?.status || 'running';
+  const attempt = sessionStatus?.attempt || 1;
+  const maxRetries = 3; // Match agent-sessions.js MAX_RETRIES
+
+  const statusConfig = {
+    running: {
+      border: 'border-blue-500/30',
+      bg: 'bg-blue-500/10',
+      spinnerColor: 'border-blue-400',
+      textColor: 'text-blue-400',
+      label: attempt > 1 ? `Retry #${attempt}/${maxRetries}` : 'Generating...',
+      icon: null, // uses spinner
+    },
+    stalled: {
+      border: 'border-orange-500/30',
+      bg: 'bg-orange-500/10',
+      spinnerColor: 'border-orange-400',
+      textColor: 'text-orange-400',
+      label: 'Stalled - Agent not responding',
+      icon: '⚠️',
+    },
+    retrying: {
+      border: 'border-amber-500/30',
+      bg: 'bg-amber-500/10',
+      spinnerColor: 'border-amber-400',
+      textColor: 'text-amber-400',
+      label: retryCountdown !== null
+        ? `Retry #${sessionStatus?.retry?.attempt || 1}/${maxRetries} in ${formatTime(retryCountdown)}`
+        : 'Scheduling retry...',
+      icon: '🔄',
+    },
+    maxRetries: {
+      border: 'border-red-500/30',
+      bg: 'bg-red-500/10',
+      spinnerColor: 'border-red-400',
+      textColor: 'text-red-400',
+      label: 'Max retries reached - Manual intervention required',
+      icon: '❌',
+    },
+  };
+
+  const config = statusConfig[status] || statusConfig.running;
+
+  return React.createElement('div', { className: `bg-slate-900 border ${config.border} rounded-lg overflow-hidden` },
+    React.createElement('div', { className: `flex items-center justify-between px-4 py-2 ${config.bg} border-b ${config.border}` },
       React.createElement('div', { className: 'flex items-center gap-2' },
-        React.createElement('div', { className: 'w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin' }),
-        React.createElement('span', { className: 'text-sm text-blue-400 font-medium' }, 'Generating...')
+        config.icon
+          ? React.createElement('span', { className: 'text-sm' }, config.icon)
+          : React.createElement('div', { className: `w-3 h-3 border-2 ${config.spinnerColor} border-t-transparent rounded-full animate-spin` }),
+        React.createElement('span', { className: `text-sm ${config.textColor} font-medium` }, config.label)
       ),
-      React.createElement('span', { className: 'text-xs text-slate-500 font-mono' }, formatTime(elapsed))
+      React.createElement('div', { className: 'flex items-center gap-3' },
+        // Show attempt badge if retry
+        attempt > 1 && status === 'running' && React.createElement('span', {
+          className: 'px-2 py-0.5 text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full',
+        }, `Attempt ${attempt}/${maxRetries}`),
+        // Show tokens if available
+        sessionStatus?.tokens?.total > 0 && React.createElement('span', {
+          className: 'text-xs text-slate-500',
+        }, `${sessionStatus.tokens.total} tokens`),
+        React.createElement('span', { className: 'text-xs text-slate-500 font-mono' }, formatTime(elapsed))
+      )
     ),
+    // Show retry error message if retrying
+    status === 'retrying' && sessionStatus?.retry?.error && React.createElement('div', {
+      className: 'px-4 py-2 bg-amber-500/5 border-b border-amber-500/20 text-xs text-amber-300',
+    }, `Previous error: ${sessionStatus.retry.error}`),
+    // Show stall warning
+    status === 'stalled' && React.createElement('div', {
+      className: 'px-4 py-2 bg-orange-500/5 border-b border-orange-500/20 text-xs text-orange-300',
+    }, 'No output received for 5 minutes. A retry will be scheduled automatically.'),
+    // Output content
     output
       ? React.createElement('pre', {
           ref,
@@ -321,9 +632,9 @@ function StreamingPanel({ output }) {
         }, output.slice(-5000))
       : React.createElement('div', { className: 'flex flex-col items-center gap-3 py-8' },
           React.createElement('div', { className: 'flex gap-1' },
-            React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full animate-bounce', style: { animationDelay: '0ms' } }),
-            React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full animate-bounce', style: { animationDelay: '150ms' } }),
-            React.createElement('span', { className: 'w-2 h-2 bg-blue-400 rounded-full animate-bounce', style: { animationDelay: '300ms' } })
+            React.createElement('span', { className: `w-2 h-2 ${config.spinnerColor.replace('border-', 'bg-')} rounded-full animate-bounce`, style: { animationDelay: '0ms' } }),
+            React.createElement('span', { className: `w-2 h-2 ${config.spinnerColor.replace('border-', 'bg-')} rounded-full animate-bounce`, style: { animationDelay: '150ms' } }),
+            React.createElement('span', { className: `w-2 h-2 ${config.spinnerColor.replace('border-', 'bg-')} rounded-full animate-bounce`, style: { animationDelay: '300ms' } })
           ),
           React.createElement('span', { className: 'text-sm text-slate-500' }, 'AI is working...')
         )
@@ -332,11 +643,12 @@ function StreamingPanel({ output }) {
 
 // ============== Conversation Panel ==============
 
-function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
+function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'iterate', onContentUpdated }) {
   const [messages, setMessages] = React.useState([]);
   const [input, setInput] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [sending, setSending] = React.useState(false);
+  const [starting, setStarting] = React.useState(false);
   const [recapping, setRecapping] = React.useState(false);
   const [recapOutput, setRecapOutput] = React.useState('');
   const messagesEndRef = React.useRef(null);
@@ -344,27 +656,55 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
   // Convert stepName to API format (kebab-case)
   const apiStepName = stepName.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
 
-  // Check if this is a code step
-  const isCodeStep = ['implement', 'review'].includes(apiStepName);
+  // Check special step types
+  const isCodeStep = CODE_STEPS.includes(stepName) || ['implement', 'review'].includes(apiStepName);
+  const isBrainstorming = stepName === 'brainstorming' || apiStepName === 'brainstorming';
+
+  // Mode-specific config
+  const isReviewMode = mode === 'review';
+  const modeConfig = isReviewMode
+    ? { icon: '🔍', title: 'Adversarial Review', color: 'amber', placeholder: 'Challenge this content, ask critical questions...' }
+    : isBrainstorming
+      ? { icon: '💭', title: 'Brainstorming', color: 'cyan', placeholder: 'Share your ideas, ask questions, explore possibilities...' }
+      : { icon: '💬', title: 'Iterate with AI', color: 'violet', placeholder: 'Ask a question or request changes...' };
+
+  // API key suffix for separate conversations
+  const conversationKey = isReviewMode ? `${apiStepName}-review` : apiStepName;
 
   const loadConversation = async () => {
     try {
-      const data = await api.get(`/stories/${slug}/steps/${apiStepName}/conversation`);
+      const data = await api.get(`/stories/${slug}/steps/${conversationKey}/conversation`);
       setMessages(data.messages || []);
     } catch {}
     setLoading(false);
   };
 
-  React.useEffect(() => { loadConversation(); }, [slug, stepName]);
+  React.useEffect(() => { loadConversation(); }, [slug, stepName, mode]);
   React.useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  // Handle AI-initiated brainstorming
+  const handleStartChat = async () => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      const result = await api.post(`/stories/${slug}/steps/${conversationKey}/start-chat`, {
+        model: model || undefined,
+      });
+      setMessages([result.message]);
+    } catch (err) {
+      alert('Erreur: ' + (err.message || 'Impossible de démarrer'));
+    }
+    setStarting(false);
+  };
 
   const handleSend = async () => {
     if (!input.trim() || sending) return;
     setSending(true);
     try {
-      const result = await api.post(`/stories/${slug}/steps/${apiStepName}/chat`, {
+      const result = await api.post(`/stories/${slug}/steps/${conversationKey}/chat`, {
         message: input.trim(),
         model: model || undefined,
+        reviewMode: isReviewMode, // Tell backend this is review mode
       });
       setMessages(prev => [...prev,
         { role: 'user', content: input.trim(), createdAt: new Date().toISOString() },
@@ -380,7 +720,9 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
     setRecapping(true);
     setRecapOutput('');
     try {
-      const result = await streamPost(`/stories/${slug}/steps/${apiStepName}/recap`, {}, {
+      const result = await streamPost(`/stories/${slug}/steps/${conversationKey}/recap`, {
+        reviewMode: isReviewMode,
+      }, {
         onLog: (text) => {
           setRecapOutput(prev => (prev + text).slice(-10000));
         },
@@ -388,7 +730,7 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
       });
       if (result.ok) {
         setRecapOutput('');
-        // Reload conversation to get the summary message (for implement/review)
+        // Reload conversation to get the summary message
         await loadConversation();
         if (onContentUpdated) onContentUpdated();
       } else if (result.error) {
@@ -404,22 +746,40 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
 
   if (loading) return React.createElement('div', { className: 'p-4 text-center text-slate-500 text-sm' }, 'Loading conversation...');
 
-  return React.createElement('div', { className: 'bg-slate-800/50 rounded-lg border border-slate-700 overflow-hidden' },
-    React.createElement('div', { className: 'flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700' },
+  // Color classes based on mode
+  const borderColor = isReviewMode ? 'border-amber-500/30' : isBrainstorming ? 'border-cyan-500/30' : 'border-slate-700';
+  const headerBg = isReviewMode ? 'bg-amber-500/10' : isBrainstorming ? 'bg-cyan-500/10' : 'bg-slate-800';
+  const titleColor = isReviewMode ? 'text-amber-300' : isBrainstorming ? 'text-cyan-300' : 'text-slate-200';
+
+  // Get last assistant message with filesUsed for context display
+  const lastAssistantMsgWithFiles = [...messages].reverse().find(m => m.role === 'assistant' && m.filesUsed);
+
+  return React.createElement('div', { className: `bg-slate-800/50 rounded-lg border ${borderColor} overflow-hidden` },
+    React.createElement('div', { className: `flex items-center justify-between px-4 py-3 ${headerBg} border-b ${borderColor}` },
       React.createElement('div', { className: 'flex items-center gap-2' },
-        React.createElement('span', { className: 'text-sm font-medium text-slate-200' }, '💬 Iterate with AI'),
+        React.createElement('span', { className: `text-sm font-medium ${titleColor}` }, `${modeConfig.icon} ${modeConfig.title}`),
         messages.length > 0 && React.createElement('span', { className: 'text-xs text-slate-500 bg-slate-700 px-2 py-0.5 rounded-full' }, `${messages.length}`),
-        isCodeStep && React.createElement('span', { className: 'text-xs text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full' }, '🚀 Code mode')
+        isCodeStep && React.createElement('span', { className: 'text-xs text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full' }, '🚀 Code mode'),
+        isReviewMode && React.createElement('span', { className: 'text-xs text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full' }, '⚡ Critical'),
+        isBrainstorming && React.createElement('span', { className: 'text-xs text-cyan-400 bg-cyan-500/20 px-2 py-0.5 rounded-full' }, '💭 Ideation')
       ),
-      messages.length > 0 && !messages[messages.length - 1]?.isRecapSummary && React.createElement('button', {
+      React.createElement('div', { className: 'flex items-center gap-2' },
+        // Model selector in conversation header
+        onModelChange && React.createElement(ModelSelect, { model, onChange: onModelChange, disabled: sending || recapping }),
+        messages.length > 0 && !messages[messages.length - 1]?.isRecapSummary && React.createElement('button', {
         onClick: handleRecap,
         disabled: recapping,
         className: `flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 ${
-          isCodeStep
-            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
-            : 'bg-violet-500/20 text-violet-400 border border-violet-500/30 hover:bg-violet-500/30'
+          isReviewMode
+            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'
+            : isBrainstorming
+              ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30'
+              : isCodeStep
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+                : 'bg-violet-500/20 text-violet-400 border border-violet-500/30 hover:bg-violet-500/30'
         }`,
-      }, recapping ? '⏳ Applying...' : (isCodeStep ? '🚀 Apply to code' : '✨ Apply feedback'))
+      }, recapping ? '⏳ Generating...' : (isReviewMode ? '✓ Apply fixes' : isBrainstorming ? '📝 Save Summary' : isCodeStep ? '🚀 Apply to code' : '✨ Apply feedback'))
+      )
     ),
     // Show streaming output when recapping
     recapping && React.createElement('div', { className: 'p-4 bg-slate-900/50 border-b border-slate-700' },
@@ -432,7 +792,14 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
       }, recapOutput.slice(-2000))
     ),
     !recapping && React.createElement('div', { className: 'max-h-64 overflow-y-auto p-4 space-y-3' },
-      messages.length === 0 && React.createElement('p', { className: 'text-center text-slate-500 text-sm py-4' },
+      messages.length === 0 && isBrainstorming && React.createElement('div', { className: 'flex flex-col items-center gap-3 py-4' },
+        React.createElement('button', {
+          onClick: handleStartChat,
+          disabled: starting,
+          className: 'px-4 py-2 bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center gap-2',
+        }, starting ? '⏳ Chargement...' : '🚀 Démarrer le brainstorming')
+      ),
+      messages.length === 0 && !isBrainstorming && React.createElement('p', { className: 'text-center text-slate-500 text-sm py-4' },
         'Ask questions or request changes. Click "Apply feedback" to update the content.'
       ),
       ...messages.map((msg, i) => React.createElement('div', {
@@ -453,25 +820,44 @@ function ConversationPanel({ slug, stepName, model, onContentUpdated }) {
             React.createElement('span', null, 'Actions Applied')
           ),
           React.createElement('p', { className: 'text-sm whitespace-pre-wrap' }, msg.translatedContent || msg.content),
-          React.createElement('p', { className: 'text-xs text-slate-500 mt-1' }, new Date(msg.createdAt).toLocaleTimeString())
+          React.createElement('div', { className: 'flex items-center gap-2 mt-1' },
+            React.createElement('span', { className: 'text-xs text-slate-500' }, new Date(msg.createdAt).toLocaleTimeString()),
+            msg.role === 'assistant' && msg.tokenUsage && React.createElement('span', {
+              className: 'text-xs text-slate-500',
+              title: `Input: ${msg.tokenUsage.input || 0}, Output: ${msg.tokenUsage.output || 0}`,
+            }, `🎯 ${formatTokenCount(msg.tokenUsage.total)}`)
+          )
         )
       )),
+      // Show context files from last assistant message
+      lastAssistantMsgWithFiles?.filesUsed && React.createElement(FilesUsedPanel, {
+        filesUsed: lastAssistantMsgWithFiles.filesUsed,
+        expanded: false,
+      }),
       React.createElement('div', { ref: messagesEndRef })
     ),
-    React.createElement('div', { className: 'flex items-center gap-2 p-3 bg-slate-800 border-t border-slate-700' },
+    React.createElement('div', { className: `flex items-center gap-2 p-3 ${headerBg} border-t ${borderColor}` },
       React.createElement('input', {
         type: 'text',
         value: input,
         onChange: (e) => setInput(e.target.value),
         onKeyDown: (e) => e.key === 'Enter' && !e.shiftKey && handleSend(),
-        placeholder: 'Ask a question or request changes...',
-        className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-500 focus:outline-none',
+        placeholder: modeConfig.placeholder,
+        className: `flex-1 bg-slate-900 border rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none ${
+          isReviewMode ? 'border-amber-500/30 focus:border-amber-500'
+            : isBrainstorming ? 'border-cyan-500/30 focus:border-cyan-500'
+            : 'border-slate-700 focus:border-violet-500'
+        }`,
         disabled: sending,
       }),
       React.createElement('button', {
         onClick: handleSend,
         disabled: sending || !input.trim(),
-        className: 'px-4 py-2 bg-violet-500 text-white rounded-lg text-sm font-medium hover:bg-violet-600 disabled:opacity-50 transition-colors',
+        className: `px-4 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors ${
+          isReviewMode ? 'bg-amber-500 hover:bg-amber-600'
+            : isBrainstorming ? 'bg-cyan-500 hover:bg-cyan-600'
+            : 'bg-violet-500 hover:bg-violet-600'
+        }`,
       }, sending ? '⏳' : '➤')
     )
   );
@@ -488,6 +874,9 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
   const [saving, setSaving] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
 
+  // Model selection state
+  const [model, setModel] = React.useState('');
+
   // Translation state
   const [langConfig, setLangConfig] = React.useState(null);
   const [translating, setTranslating] = React.useState(false);
@@ -503,6 +892,7 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
     setEditContent(story?.init?.enriched || '');
     setDirty(false);
     setTranslated(null); // Reset translation when content changes
+    setModel(''); // Reset model selection when story changes
   }, [story?.init?.enriched]);
 
   const needsTranslation = langConfig?.needsTranslation && story?.init?.enriched;
@@ -514,6 +904,7 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
     try {
       const result = await streamPost(`/stories/${slug}/init/enrich`, {
         description,
+        model: model || undefined,
       }, {
         onLog: (text) => setOutput(prev => (prev + text).slice(-10000)),
         onStatus: () => {},
@@ -542,7 +933,6 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
               enriched: result.content,
               input: updatedStory.init?.input || '',
               attachments: updatedStory.init?.attachments || [],
-              figmaLinks: updatedStory.init?.figmaLinks || [],
             }
           };
         }
@@ -628,11 +1018,6 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
         attachments: story?.init?.attachments || [],
         onUpdate: onStoryUpdate,
       }),
-      React.createElement(FigmaLinksZone, {
-        slug,
-        links: story?.init?.figmaLinks || [],
-        onUpdate: onStoryUpdate,
-      }),
       React.createElement('textarea', {
         value: description,
         onChange: e => setDescription(e.target.value),
@@ -654,7 +1039,10 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
         )
       ),
       React.createElement('div', { className: 'flex items-center justify-between' },
-        React.createElement('span', { className: 'text-xs text-slate-500' }, `${description.length} characters`),
+        React.createElement('div', { className: 'flex items-center gap-3' },
+          React.createElement('span', { className: 'text-xs text-slate-500' }, `${description.length} characters`),
+          React.createElement(ModelSelect, { model, onChange: setModel, disabled: loading || saving || translating })
+        ),
         React.createElement('div', { className: 'flex items-center gap-3' },
           hasEnrichedContext && React.createElement('button', {
             onClick: onComplete,
@@ -785,14 +1173,24 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
 
 // ============== Step Section ==============
 
-function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLinks, onStoryUpdate, readonly = false }) {
+function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, onStoryUpdate, readonly = false, tokenUsage = null }) {
   const config = STEP_CONFIG[stepKey];
-  const [expanded, setExpanded] = React.useState(!step.completed && !step.skipped && !readonly);
+  const formattedTokens = formatTokenCount(tokenUsage?.total);
+
+  // Brainstorming is a special "chat-first" step - no Generate, direct conversation
+  const isBrainstorming = stepKey === 'brainstorming';
+  const hasContent = step.content && step.content.trim().length > 0;
+
+  // Only expand the current step (or first incomplete step if currentStep not in visible steps)
+  const isCurrentStep = stepKey === currentStep;
+  const [expanded, setExpanded] = React.useState(isCurrentStep && !readonly);
   const [description, setDescription] = React.useState('');
   const [model, setModel] = React.useState('');
   const [generating, setGenerating] = React.useState(false);
   const [output, setOutput] = React.useState('');
-  const [showConversation, setShowConversation] = React.useState(false);
+  // For brainstorming without content, show chat by default
+  const [showConversation, setShowConversation] = React.useState(isBrainstorming && !hasContent);
+  const [chatMode, setChatMode] = React.useState('iterate'); // 'iterate' | 'review'
   const [viewMode, setViewMode] = React.useState('preview'); // 'preview' | 'edit' | 'translate'
   const [editContent, setEditContent] = React.useState(step.content || '');
   const [saving, setSaving] = React.useState(false);
@@ -803,6 +1201,9 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
   const [langConfig, setLangConfig] = React.useState(null);
   const [translating, setTranslating] = React.useState(false);
   const [translated, setTranslated] = React.useState(null);
+
+  // Files used tracking (populated after generation)
+  const [filesUsed, setFilesUsed] = React.useState(null);
 
   // Convert stepKey to API format (kebab-case)
   const apiStepKey = stepKey.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
@@ -867,7 +1268,6 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
     setSkipping(false);
   };
 
-  const hasContent = step.content && step.content.trim().length > 0;
   const isCompleted = step.completed;
 
   const handleSaveManual = async () => {
@@ -888,6 +1288,7 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
   const handleGenerate = async () => {
     setGenerating(true);
     setOutput('');
+    setFilesUsed(null); // Reset filesUsed
 
     const result = await streamPost(`/stories/${slug}/steps/${apiStepKey}/generate`, {
       instructions: description.trim() || null,
@@ -899,6 +1300,12 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
 
     setOutput('');
     setGenerating(false);
+
+    // Store filesUsed from result if available
+    if (result.filesUsed) {
+      setFilesUsed(result.filesUsed);
+    }
+
     if (result.ok || result.story) {
       setDescription('');
       onStoryUpdate(result.story || await api.get(`/stories/${slug}`));
@@ -907,6 +1314,25 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
 
   const handleConversationUpdate = async () => {
     onStoryUpdate(await api.get(`/stories/${slug}`));
+  };
+
+  // Start brainstorming with AI-initiated conversation
+  const [startingBrainstorm, setStartingBrainstorm] = React.useState(false);
+  const handleStartBrainstorming = async () => {
+    setStartingBrainstorm(true);
+    try {
+      // Send initial prompt to get AI to start the conversation
+      await api.post(`/stories/${slug}/steps/brainstorming/chat`, {
+        message: 'Démarre le brainstorming pour cette feature. Propose-moi des idées et des questions à explorer basées sur le contexte de la story.',
+        model: model || undefined,
+      });
+      // Open the conversation panel - it will reload and show the messages
+      setShowConversation(true);
+    } catch (err) {
+      console.error('Failed to start brainstorming:', err);
+      alert('Erreur lors du démarrage du brainstorming');
+    }
+    setStartingBrainstorm(false);
   };
 
   const colorClasses = {
@@ -940,6 +1366,11 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
         isSkipped && React.createElement('span', { className: 'px-2 py-1 text-xs rounded-full bg-slate-600/50 text-slate-400 border border-slate-500/30' }, '⏭️ Skipped'),
         !isSkipped && isCompleted && React.createElement('span', { className: 'px-2 py-1 text-xs rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' }, '✓ Done'),
         step.currentVersion > 0 && React.createElement('span', { className: 'text-xs text-slate-500' }, `v${step.currentVersion}`),
+        // Token usage badge
+        formattedTokens && React.createElement('span', {
+          className: 'px-2 py-1 text-xs rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/30',
+          title: tokenUsage ? `Input: ${tokenUsage.input}, Output: ${tokenUsage.output}` : '',
+        }, `🎯 ${formattedTokens}`),
         React.createElement('span', { className: `transition-transform ${expanded ? 'rotate-180' : ''}` }, '▼')
       )
     ),
@@ -964,10 +1395,38 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
           ),
           React.createElement('div', { className: 'flex items-center gap-2' },
             dirty && React.createElement('span', { className: 'text-xs text-amber-400' }, '● unsaved'),
+            // Iterate button (violet)
             !readonly && React.createElement('button', {
-              onClick: () => setShowConversation(!showConversation),
-              className: `text-xs px-2 py-1 rounded ${showConversation ? 'bg-violet-500/20 text-violet-400' : 'text-slate-400 hover:text-slate-200'}`,
-            }, showConversation ? '✕ Close chat' : '💬 Iterate')
+              onClick: () => {
+                if (showConversation && chatMode === 'iterate') {
+                  setShowConversation(false);
+                } else {
+                  setChatMode('iterate');
+                  setShowConversation(true);
+                }
+              },
+              className: `text-xs px-2 py-1 rounded transition-colors ${
+                showConversation && chatMode === 'iterate'
+                  ? 'bg-violet-500/30 text-violet-300 border border-violet-500/50'
+                  : 'bg-violet-500/10 text-violet-400 border border-violet-500/30 hover:bg-violet-500/20'
+              }`,
+            }, showConversation && chatMode === 'iterate' ? '✕ Close' : '💬 Iterate'),
+            // Review button (amber) - always visible on steps with content
+            !readonly && React.createElement('button', {
+              onClick: () => {
+                if (showConversation && chatMode === 'review') {
+                  setShowConversation(false);
+                } else {
+                  setChatMode('review');
+                  setShowConversation(true);
+                }
+              },
+              className: `text-xs px-2 py-1 rounded transition-colors ${
+                showConversation && chatMode === 'review'
+                  ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50'
+                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
+              }`,
+            }, showConversation && chatMode === 'review' ? '✕ Close' : '🔍 Review')
           )
         ),
         // Preview mode
@@ -1032,14 +1491,42 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
         )
       ),
 
-      showConversation && hasContent && !readonly && React.createElement(ConversationPanel, {
+      // Show ConversationPanel: for brainstorming always (chat-first), for others only with content
+      showConversation && (hasContent || isBrainstorming) && !readonly && React.createElement(ConversationPanel, {
         slug,
         stepName: stepKey,
         model,
+        onModelChange: setModel,
+        mode: chatMode, // 'iterate' or 'review'
         onContentUpdated: handleConversationUpdate,
       }),
 
-      !readonly && React.createElement('div', { className: 'space-y-4 bg-slate-800/50 rounded-lg p-4 border border-slate-700' },
+      // Brainstorming: chat-first mode - show invite to chat, no Generate button
+      !readonly && isBrainstorming && !hasContent && React.createElement('div', {
+        className: 'bg-gradient-to-r from-cyan-500/10 to-violet-500/10 rounded-lg p-6 border border-cyan-500/30',
+      },
+        React.createElement('div', { className: 'text-center' },
+          React.createElement('div', { className: 'text-3xl mb-3' }, '💭'),
+          React.createElement('h3', { className: 'text-lg font-semibold text-slate-200 mb-2' }, 'Brainstorming Mode'),
+          React.createElement('p', { className: 'text-sm text-slate-400 mb-4' },
+            'Start a conversation to explore ideas. The AI will help you brainstorm, ask questions, and identify edge cases.'
+          )
+        ),
+        React.createElement('div', { className: 'flex items-center justify-center gap-4 mb-4' },
+          React.createElement(ModelSelect, { model, onChange: setModel, disabled: startingBrainstorm }),
+          !showConversation && React.createElement('button', {
+            onClick: handleStartBrainstorming,
+            disabled: startingBrainstorm,
+            className: 'px-6 py-3 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded-lg text-sm font-medium hover:bg-cyan-500/30 transition-colors disabled:opacity-50',
+          }, startingBrainstorm ? '⏳ Démarrage...' : '💬 Start Brainstorming')
+        ),
+        React.createElement('p', { className: 'text-xs text-slate-500 text-center' },
+          'When done, click "Save Summary" to generate the brainstorming.md summary.'
+        )
+      ),
+
+      // Regular steps: Generate section (not for brainstorming)
+      !readonly && !isBrainstorming && React.createElement('div', { className: 'space-y-4 bg-slate-800/50 rounded-lg p-4 border border-slate-700' },
         !hasContent && React.createElement(React.Fragment, null,
           React.createElement('div', { className: 'flex items-center gap-2 text-sm text-slate-400 mb-2' },
             React.createElement('span', null, '✨ Generate'),
@@ -1047,7 +1534,6 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
             React.createElement('span', null, 'Provide context and generate content')
           ),
           React.createElement(AttachmentZone, { slug, attachments: attachments || [], onUpdate: onStoryUpdate }),
-          React.createElement(FigmaLinksZone, { slug, links: figmaLinks || [], onUpdate: onStoryUpdate }),
           React.createElement('textarea', {
             value: description,
             onChange: e => setDescription(e.target.value),
@@ -1093,6 +1579,9 @@ function StepSection({ step, stepKey, slug, storyContext, attachments, figmaLink
               className: 'flex items-center gap-2 px-4 py-2 bg-slate-700/50 text-slate-400 border border-slate-600 rounded-lg text-sm hover:bg-slate-700 hover:text-slate-200 disabled:opacity-50 transition-colors',
             }, skipping ? '⏳ Skipping...' : '⏭️ Skip this step')
       ),
+
+      // Files used panel (shows context loaded during generation)
+      filesUsed && React.createElement(FilesUsedPanel, { filesUsed, expanded: false }),
 
       generating && React.createElement(StreamingPanel, { output })
     )
@@ -1197,6 +1686,162 @@ function PhaseSelector({ story, onStoryUpdate }) {
         })
       )
     )
+  );
+}
+
+// ============== Apps Scope Selector ==============
+
+function AppsScopeSelector({ story, onStoryUpdate, readonly = false }) {
+  const [open, setOpen] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [availableApps, setAvailableApps] = React.useState([]);
+  const [selectedApps, setSelectedApps] = React.useState(story.apps || []);
+  // F8: Track pending request to prevent race conditions
+  const pendingRef = React.useRef(null);
+
+  // F12: Load available apps with cleanup to prevent memory leak
+  React.useEffect(() => {
+    let cancelled = false;
+    api.get('/apps')
+      .then(apps => {
+        if (!cancelled) {
+          setAvailableApps(apps.filter(a => a.enabled !== false));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAvailableApps([]);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Sync with story when it updates
+  React.useEffect(() => {
+    setSelectedApps(story.apps || []);
+  }, [story.apps]);
+
+  // F13: Get valid story identifier
+  const getStoryId = () => {
+    const id = story.slug || story.id;
+    if (!id || typeof id !== 'string') {
+      console.error('Invalid story identifier');
+      return null;
+    }
+    return id;
+  };
+
+  const updateApps = async (newApps) => {
+    const storyId = getStoryId();
+    if (!storyId) return;
+
+    // F8: Cancel previous pending request logic
+    const requestId = Date.now();
+    pendingRef.current = requestId;
+
+    setLoading(true);
+    setError(null);
+    try {
+      await api.patch(`/stories/${storyId}/apps`, { apps: newApps });
+      // F8: Only update state if this is still the latest request
+      if (pendingRef.current === requestId) {
+        setSelectedApps(newApps);
+        if (onStoryUpdate) {
+          onStoryUpdate({ ...story, apps: newApps });
+        }
+      }
+    } catch (e) {
+      // F7: Show user feedback on error
+      if (pendingRef.current === requestId) {
+        setError('Failed to update apps');
+        console.error('Failed to update apps:', e);
+        // Revert to server state
+        setSelectedApps(story.apps || []);
+      }
+    }
+    if (pendingRef.current === requestId) {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleApp = (appName) => {
+    const newApps = selectedApps.includes(appName)
+      ? selectedApps.filter(a => a !== appName)
+      : [...selectedApps, appName];
+    updateApps(newApps);
+  };
+
+  const handleRemoveApp = (appName) => {
+    const newApps = selectedApps.filter(a => a !== appName);
+    updateApps(newApps);
+  };
+
+  // Find app info (for icon)
+  const getAppInfo = (appName) => availableApps.find(a => a.name === appName);
+
+  // Apps not yet selected
+  const unselectedApps = availableApps.filter(a => !selectedApps.includes(a.name));
+
+  if (readonly && selectedApps.length === 0) return null;
+
+  return React.createElement('div', { className: 'flex items-center gap-1.5 flex-wrap' },
+    // F7: Show error message if any
+    error && React.createElement('span', {
+      className: 'text-xs text-red-400 px-2 py-0.5 bg-red-500/10 rounded',
+      onClick: () => setError(null),
+      title: 'Click to dismiss',
+    }, error),
+    // Selected apps as chips
+    ...selectedApps.map(appName => {
+      const appInfo = getAppInfo(appName);
+      return React.createElement('span', {
+        key: appName,
+        className: 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30',
+      },
+        appInfo?.icon || '📦',
+        appName,
+        !readonly && React.createElement('button', {
+          onClick: () => handleRemoveApp(appName),
+          disabled: loading,
+          className: 'ml-0.5 hover:text-red-400 transition-colors disabled:opacity-50',
+          title: `Remove ${appName}`,
+        }, '×')
+      );
+    }),
+    // Add button (dropdown)
+    !readonly && unselectedApps.length > 0 && React.createElement('div', { className: 'relative' },
+      React.createElement('button', {
+        onClick: () => setOpen(!open),
+        disabled: loading,
+        className: 'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/30 hover:bg-slate-700 hover:text-slate-300 transition-colors disabled:opacity-50',
+        title: 'Add app to scope',
+      }, '+', 'App'),
+      open && React.createElement(React.Fragment, null,
+        React.createElement('div', {
+          className: 'fixed inset-0 z-40',
+          onClick: () => setOpen(false),
+        }),
+        React.createElement('div', {
+          className: 'absolute top-full left-0 mt-1 py-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl min-w-[140px] z-50',
+        },
+          ...unselectedApps.map(app =>
+            React.createElement('button', {
+              key: app.name,
+              onClick: () => { handleToggleApp(app.name); setOpen(false); },
+              className: 'w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 text-slate-300 hover:bg-slate-700/50 transition-colors',
+            },
+              React.createElement('span', null, app.icon || '📦'),
+              app.name
+            )
+          )
+        )
+      )
+    ),
+    // Show placeholder if no apps and not readonly
+    !readonly && selectedApps.length === 0 && unselectedApps.length === 0 && React.createElement('span', {
+      className: 'text-xs text-slate-500 italic',
+    }, 'No apps configured')
   );
 }
 
@@ -2260,14 +2905,19 @@ export function StoryView({ slug, context = 'product' }) {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const [initExpanded, setInitExpanded] = React.useState(false);
+  const [tokenUsage, setTokenUsage] = React.useState(null);
 
   const contextConfig = CONTEXT_CONFIG[context];
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const storyData = await api.get(`/stories/${slug}`);
+      const [storyData, tokensData] = await Promise.all([
+        api.get(`/stories/${slug}`),
+        api.get(`/stories/${slug}/tokens`).catch(() => null),
+      ]);
       setStory(storyData);
+      setTokenUsage(tokensData);
 
       // Auto-expand init panel if no enriched context yet
       const hasEnriched = storyData?.init?.enriched && storyData.init.enriched.trim().length > 0;
@@ -2353,6 +3003,12 @@ export function StoryView({ slug, context = 'product' }) {
               disabled: false,
               showCount: false,
             }),
+            // Apps Scope Selector - filters context for prompts
+            React.createElement(AppsScopeSelector, {
+              story,
+              onStoryUpdate: setStory,
+              readonly,
+            }),
             React.createElement('span', { className: `px-3 py-1 text-xs rounded-full ${contextConfig.gradient} ${contextConfig.text} ${contextConfig.border} border` },
               `${contextConfig.icon} ${contextConfig.label} View`
             ),
@@ -2360,7 +3016,12 @@ export function StoryView({ slug, context = 'product' }) {
             // QA Rejected badge - show when story was rejected from QA
             story.qaStatus === 'rejected' && React.createElement('span', {
               className: 'px-3 py-1 text-xs rounded-full bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse',
-            }, '🔴 QA Rejected')
+            }, '🔴 QA Rejected'),
+            // Total token usage badge
+            tokenUsage?.total?.total > 0 && React.createElement('span', {
+              className: 'px-3 py-1 text-xs rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/30',
+              title: `Total: ${tokenUsage.total.total} (Input: ${tokenUsage.total.input}, Output: ${tokenUsage.total.output})`,
+            }, `🎯 ${formatTokenCount(tokenUsage.total.total)} tokens`)
           ),
           React.createElement('h1', { className: 'text-2xl font-bold text-white mb-1' }, story.title || story.name || slug),
           story.description && React.createElement('p', { className: 'text-slate-400' }, story.description)
@@ -2410,6 +3071,14 @@ export function StoryView({ slug, context = 'product' }) {
       onStoryUpdate: setStory,
     }),
 
+    // Worktrunk Panel (only in dev context with edit access)
+    context === 'dev' && accessLevel === 'edit' && React.createElement(StoryWorktrunkPanel, {
+      storyId: story.id,
+      onWorktrunkChange: (enabled) => {
+        loadData(); // Reload story data when worktrunk status changes
+      },
+    }),
+
     // Product Actions (only in product context with edit access, discovery phase)
     context === 'product' && accessLevel === 'edit' && React.createElement(ProductActions, {
       story,
@@ -2432,16 +3101,25 @@ export function StoryView({ slug, context = 'product' }) {
           history: [],
           currentVersion: 0,
         };
+        // Normalize currentStep from status.yaml (may use legacy names like 'brief')
+        const STEP_NAME_MAP = { brief: 'init', 'ba-spec': 'specFunc', 'tech-spec': 'specTech' };
+        const rawCurrentStep = story.currentStep || story.current_step || 'init';
+        const currentStep = STEP_NAME_MAP[rawCurrentStep] || rawCurrentStep;
+
+        // Convert stepKey to kebab-case for token lookup (status.yaml uses kebab-case)
+        const apiStepKey = stepKey.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
+
         return React.createElement(StepSection, {
           key: stepKey,
           stepKey,
           step,
           slug,
+          currentStep,
           storyContext: story.init?.enriched || story.description || '',
           attachments: story.init?.attachments,
-          figmaLinks: story.init?.figmaLinks,
           onStoryUpdate: setStory,
           readonly,
+          tokenUsage: tokenUsage?.steps?.[apiStepKey] || tokenUsage?.steps?.[stepKey],
         });
       })
     )

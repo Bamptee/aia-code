@@ -324,7 +324,6 @@ export class MigrationService {
           space: story.space,
           steps: story.steps,
           linkedFeatureId: story.linkedFeatureId,
-          figmaUrl: story.figmaUrl,
         })),
         createdAt: epic.createdAt,
         updatedAt: epic.updatedAt,

@@ -84,7 +84,7 @@ function StoryCard({ story, onStatusChange, onClick, onDelete, onMove }) {
 
   // Calculate step completion
   const steps = story.steps || {};
-  const stepKeys = ['brief', 'baSpec', 'questions'];
+  const stepKeys = ['init', 'brainstorming', 'specFunc'];
   const completedSteps = stepKeys.filter(k => steps[k]?.completed).length;
   const skippedSteps = stepKeys.filter(k => steps[k]?.skipped).length;
 

@@ -1,49 +1,40 @@
 const STEP_GUIDANCE = {
   en: {
-    brief: {
-      summary: 'Product brief completed',
-      next: 'ba-spec',
+    init: {
+      summary: 'Feature initialized',
+      next: 'brainstorming',
       actions: [
-        'Review the brief for completeness',
+        'Review the init for completeness',
         'Run: aia next <feature>',
       ],
       tips: ['If too vague, iterate with more context'],
     },
-    'ba-spec': {
-      summary: 'Business analysis completed',
-      next: 'questions',
-      actions: [
-        'Check requirements are measurable',
-        'Run: aia next <feature>',
-      ],
-      tips: ['Missing acceptance criteria? Iterate.'],
-    },
-    questions: {
-      summary: 'Questions identified',
-      next: 'tech-spec',
+    brainstorming: {
+      summary: 'Brainstorming completed',
+      next: 'spec-func',
       actions: [
         'Answer key questions in init.md or as iteration instructions',
         'Run: aia next <feature>',
       ],
       tips: ['Unanswered questions will affect quality of next steps'],
     },
-    'tech-spec': {
+    'spec-func': {
+      summary: 'Functional spec completed',
+      next: 'spec-tech',
+      actions: [
+        'Check requirements are measurable',
+        'Run: aia next <feature>',
+      ],
+      tips: ['Missing acceptance criteria? Iterate.'],
+    },
+    'spec-tech': {
       summary: 'Technical specification ready',
-      next: 'challenge',
+      next: 'dev-plan',
       actions: [
         'Review technical choices and constraints',
         'Run: aia next <feature>',
       ],
       tips: ['Consider performance and scalability implications'],
-    },
-    challenge: {
-      summary: 'Challenges identified',
-      next: 'dev-plan',
-      actions: [
-        'Address critical challenges before proceeding',
-        'Run: aia next <feature>',
-      ],
-      tips: ['Unresolved challenges may cause issues during implementation'],
     },
     'dev-plan': {
       summary: 'Development plan ready',
@@ -75,50 +66,41 @@ const STEP_GUIDANCE = {
     },
   },
   fr: {
-    brief: {
-      summary: 'Brief produit terminé',
-      next: 'ba-spec',
+    init: {
+      summary: 'Feature initialisée',
+      next: 'brainstorming',
       actions: [
-        'Vérifier que le brief est complet',
+        'Vérifier que l\'init est complet',
         'Lancer : aia next <feature>',
       ],
       tips: ['Si trop vague, itérer avec plus de contexte'],
     },
-    'ba-spec': {
-      summary: 'Analyse métier terminée',
-      next: 'questions',
-      actions: [
-        'Vérifier que les exigences sont mesurables',
-        'Lancer : aia next <feature>',
-      ],
-      tips: ['Critères d\'acceptation manquants ? Itérer.'],
-    },
-    questions: {
-      summary: 'Questions identifiées',
-      next: 'tech-spec',
+    brainstorming: {
+      summary: 'Brainstorming terminé',
+      next: 'spec-func',
       actions: [
         'Répondre aux questions clés dans init.md ou via instructions d\'itération',
         'Lancer : aia next <feature>',
       ],
       tips: ['Les questions sans réponse affecteront la qualité des étapes suivantes'],
     },
-    'tech-spec': {
+    'spec-func': {
+      summary: 'Spec fonctionnelle terminée',
+      next: 'spec-tech',
+      actions: [
+        'Vérifier que les exigences sont mesurables',
+        'Lancer : aia next <feature>',
+      ],
+      tips: ['Critères d\'acceptation manquants ? Itérer.'],
+    },
+    'spec-tech': {
       summary: 'Spécification technique prête',
-      next: 'challenge',
+      next: 'dev-plan',
       actions: [
         'Revoir les choix techniques et contraintes',
         'Lancer : aia next <feature>',
       ],
       tips: ['Considérer les implications de performance et scalabilité'],
-    },
-    challenge: {
-      summary: 'Défis identifiés',
-      next: 'dev-plan',
-      actions: [
-        'Traiter les défis critiques avant de continuer',
-        'Lancer : aia next <feature>',
-      ],
-      tips: ['Les défis non résolus peuvent causer des problèmes lors de l\'implémentation'],
     },
     'dev-plan': {
       summary: 'Plan de développement prêt',

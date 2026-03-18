@@ -87,7 +87,7 @@ export async function updateFlowType(feature, flowType, root = process.cwd()) {
   // Set current_step based on flow type if not already started
   const allPending = Object.values(status.steps).every(s => s === STEP_STATUS.PENDING);
   if (allPending) {
-    status.current_step = flowType === 'quick' ? 'dev-plan' : 'brief';
+    status.current_step = flowType === 'quick' ? 'dev-plan' : 'init';
   }
 
   const content = yaml.stringify(status);

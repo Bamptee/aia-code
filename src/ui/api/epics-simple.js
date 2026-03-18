@@ -28,8 +28,10 @@ import { createStory, getStoriesDir } from '../../services/feature.js';
 import { QABoosterService } from '../../epic/services/qa-booster-service.js';
 import { loadStatus, getStoryDirPath, updateStepStatus } from '../../services/status.js';
 import { loadConfig } from '../../models.js';
+import { getApps } from '../../services/apps.js';
 import { callModel } from '../../services/model-call.js';
 import { runStep } from '../../services/runner.js';
+import { loadPromptTemplate, loadInitSpecs } from '../../prompt-builder.js';
 
 /**
  * Register all Epic-related API routes (simplified YAML system)
@@ -470,21 +472,24 @@ IMPORTANT:
 - Write in ${config.document_output_language || 'English'}`;
 
       // Call model to enrich
-      const model = body.model || config.models?.brief?.[0]?.model || 'claude-default';
+      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
 
       sseSend('status', { status: 'generating', message: 'AI is structuring the story...' });
 
-      const enrichedContent = await callModel(model, enrichPrompt, {
+      const callResult = await callModel(model, enrichPrompt, {
         verbose: false,
         apply: false,
         onData
       });
+      const enrichedContent = callResult.output;
 
       // Save enriched content to init.md
       await fs.writeFile(initPath, enrichedContent.trim(), 'utf-8');
 
-      // Mark as enriched in status.yaml
+      // Mark as enriched in status.yaml and step as done
       status.initEnriched = true;
+      status.steps = status.steps || {};
+      status.steps.init = 'done';
       status.updatedAt = new Date().toISOString();
       await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
@@ -522,7 +527,7 @@ IMPORTANT:
       // If enrich is requested, use AI
       if (body.enrich) {
         const config = await loadConfig(root);
-        const model = body.model || config.models?.brief?.[0]?.model || 'claude-default';
+        const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
 
         const enrichPrompt = `You are a product discovery assistant helping to structure a story/feature idea.
 
@@ -560,11 +565,14 @@ IMPORTANT:
 - Output ONLY the markdown document, no explanations
 - Write in ${config.document_output_language || 'English'}`;
 
-        const enrichedContent = await callModel(model, enrichPrompt, { verbose: false, apply: false });
+        const callResult = await callModel(model, enrichPrompt, { verbose: false, apply: false });
+        const enrichedContent = callResult.output;
         await fs.writeFile(initPath, enrichedContent.trim(), 'utf-8');
 
-        // Mark as enriched in status.yaml
+        // Mark as enriched in status.yaml and step as done
         status.initEnriched = true;
+        status.steps = status.steps || {};
+        status.steps.init = 'done';
         status.updatedAt = new Date().toISOString();
         await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
@@ -582,8 +590,10 @@ ${inputText}
 `;
         await fs.writeFile(initPath, initContent, 'utf-8');
 
-        // Keep initEnriched as false
+        // Mark step as done even if not enriched (content exists)
         status.initEnriched = false;
+        status.steps = status.steps || {};
+        status.steps.init = 'done';
         status.updatedAt = new Date().toISOString();
         await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
@@ -630,6 +640,8 @@ ${inputText}
       const rawStatus = await fs.readFile(statusPath, 'utf-8');
       const status = yaml.parse(rawStatus);
       status.initEnriched = true; // Mark as having content
+      status.steps = status.steps || {};
+      status.steps.init = 'done';
       status.updatedAt = new Date().toISOString();
       await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
@@ -683,8 +695,9 @@ IMPORTANT:
 DOCUMENT TO TRANSLATE:
 ${content}`;
 
-      const model = config.models?.brief?.[0]?.model || 'claude-default';
-      const translated = await callModel(model, translatePrompt, { verbose: false, apply: false });
+      const model = config.models?.init?.[0]?.model || 'claude-default';
+      const callResult = await callModel(model, translatePrompt, { verbose: false, apply: false });
+      const translated = callResult.output;
 
       json(res, {
         needed: true,
@@ -716,6 +729,45 @@ ${content}`;
         communication_language: 'English',
         needsTranslation: false
       });
+    }
+  });
+
+  /**
+   * GET /api/stories/:slug/tokens - Get token usage for a story
+   */
+  router.get('/api/stories/:slug/tokens', async (req, res, { params, root }) => {
+    try {
+      const status = await loadStatus(params.slug, root);
+      if (!status) {
+        return error(res, 'Story not found', 404);
+      }
+
+      // Get tokenUsage from status.yaml
+      const tokenUsage = status.tokenUsage || {};
+
+      // Calculate totals
+      let totalInput = 0;
+      let totalOutput = 0;
+      let totalTokens = 0;
+
+      for (const stepData of Object.values(tokenUsage)) {
+        if (stepData && typeof stepData === 'object') {
+          totalInput += stepData.input || 0;
+          totalOutput += stepData.output || 0;
+          totalTokens += stepData.total || 0;
+        }
+      }
+
+      json(res, {
+        steps: tokenUsage,
+        total: {
+          input: totalInput,
+          output: totalOutput,
+          total: totalTokens,
+        },
+      });
+    } catch (err) {
+      error(res, err.message, 500);
     }
   });
 
@@ -751,7 +803,19 @@ ${content}`;
     };
 
     try {
-      const output = await runStep(params.step, params.slug, {
+      // Reset step if already done (allows regeneration from UI)
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const statusPath = path.join(storyDir, 'status.yaml');
+      const rawStatus = await fs.readFile(statusPath, 'utf-8');
+      const status = yaml.parse(rawStatus);
+      if (status.steps?.[params.step] === 'done') {
+        status.steps[params.step] = 'pending';
+        status.updatedAt = new Date().toISOString();
+        await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+        sseSend(res, 'log', { type: 'info', text: `Reset step ${params.step} for regeneration` });
+      }
+
+      const result = await runStep(params.step, params.slug, {
         description: body.instructions || body.description || '',
         model: body.model || undefined,
         verbose: true,
@@ -760,8 +824,35 @@ ${content}`;
         onData,
       });
 
-      // Return without story to force frontend to reload via GET
-      sseSend(res, 'done', { step: params.step, output: output?.slice(0, 500) });
+      // runStep now returns { output, filesUsed, tokenUsage }
+      const output = typeof result === 'string' ? result : result?.output;
+      const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+      const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
+
+      // Save token usage to status.yaml
+      if (tokenUsage) {
+        try {
+          const storyDir = await getStoryDirPath(params.slug, root);
+          const statusPath = path.join(storyDir, 'status.yaml');
+          const rawStatus = await fs.readFile(statusPath, 'utf-8');
+          const status = yaml.parse(rawStatus);
+          status.tokenUsage = status.tokenUsage || {};
+          status.tokenUsage[params.step] = tokenUsage;
+          status.updatedAt = new Date().toISOString();
+          await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+          sseSend(res, 'log', { type: 'info', text: `Tokens: ${tokenUsage.total} (in: ${tokenUsage.input}, out: ${tokenUsage.output})` });
+        } catch (tokenErr) {
+          console.error(`[Generate] Failed to save token usage: ${tokenErr.message}`);
+        }
+      }
+
+      // Return with filesUsed for UI transparency
+      sseSend(res, 'done', {
+        step: params.step,
+        output: output?.slice(0, 500),
+        filesUsed,
+        tokenUsage,
+      });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
     }
@@ -791,7 +882,7 @@ ${content}`;
 
       // Run step with iteration instructions
       const instructions = body.instructions?.trim() || 'Please review and improve this content. Fix any issues, clarify unclear sections, and enhance overall quality.';
-      const output = await runStep(params.step, params.slug, {
+      const result = await runStep(params.step, params.slug, {
         description: instructions,
         iterateOn: currentContent,
         model: body.model || undefined,
@@ -801,8 +892,38 @@ ${content}`;
         onData,
       });
 
-      // Return without story to force frontend to reload via GET
-      sseSend(res, 'done', { step: params.step, output: output?.slice(0, 500) });
+      // runStep now returns { output, filesUsed, tokenUsage }
+      const output = typeof result === 'string' ? result : result?.output;
+      const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+      const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
+
+      // Accumulate token usage in status.yaml
+      if (tokenUsage) {
+        try {
+          const statusPath = path.join(storyDir, 'status.yaml');
+          const rawStatus = await fs.readFile(statusPath, 'utf-8');
+          const status = yaml.parse(rawStatus);
+          status.tokenUsage = status.tokenUsage || {};
+          const existing = status.tokenUsage[params.step] || { input: 0, output: 0, total: 0 };
+          status.tokenUsage[params.step] = {
+            input: existing.input + (tokenUsage.input || 0),
+            output: existing.output + (tokenUsage.output || 0),
+            total: existing.total + (tokenUsage.total || 0),
+          };
+          status.updatedAt = new Date().toISOString();
+          await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+          sseSend(res, 'log', { type: 'info', text: `Tokens: +${tokenUsage.total} (total: ${status.tokenUsage[params.step].total})` });
+        } catch (tokenErr) {
+          console.error(`[Iterate] Failed to save token usage: ${tokenErr.message}`);
+        }
+      }
+
+      // Return with filesUsed for UI transparency
+      sseSend(res, 'done', {
+        step: params.step,
+        output: output?.slice(0, 500),
+        filesUsed,
+      });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
     }
@@ -861,9 +982,15 @@ ${content}`;
         return error(res, 'message is required', 400);
       }
 
+      // Detect review mode from step suffix or body flag
+      const isReviewMode = params.step.endsWith('-review') || body.reviewMode === true;
+      const actualStep = params.step.replace(/-review$/, '');
+
+      console.log(`[Chat] Mode: ${isReviewMode ? 'REVIEW' : 'ITERATE'}, Step: ${params.step} -> ${actualStep}`);
+
       const storyDir = await getStoryDirPath(params.slug, root);
       const convPath = path.join(storyDir, `${params.step}-conversation.json`);
-      const stepPath = path.join(storyDir, `${params.step}.md`);
+      const stepPath = path.join(storyDir, `${actualStep}.md`); // Use actualStep without -review suffix
 
       // Load existing conversation
       let conversation = { messages: [] };
@@ -875,18 +1002,113 @@ ${content}`;
       let stepContent = '';
       if (await fs.pathExists(stepPath)) {
         stepContent = await fs.readFile(stepPath, 'utf-8');
+        console.log(`[Chat] ✓ Loaded step content: ${stepPath} (${stepContent.length} chars)`);
+      } else {
+        console.log(`[Chat] ⚠ Step file not found: ${stepPath}`);
+      }
+
+      // Load prior steps context for review mode
+      let priorStepsContext = '';
+      if (isReviewMode && stepContent) {
+        const STEP_ORDER = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
+        const currentStepIndex = STEP_ORDER.indexOf(actualStep);
+
+        if (currentStepIndex > 0) {
+          const priorSteps = STEP_ORDER.slice(0, currentStepIndex);
+          const priorSections = [];
+
+          for (const priorStep of priorSteps) {
+            const priorFile = path.join(storyDir, `${priorStep}.md`);
+            if (await fs.pathExists(priorFile)) {
+              const priorContent = await fs.readFile(priorFile, 'utf-8');
+              if (priorContent && priorContent.length > 0) {
+                // Truncate if too long
+                const truncated = priorContent.length > 2000
+                  ? priorContent.slice(0, 2000) + '\n\n[... truncated ...]'
+                  : priorContent;
+                priorSections.push(`### ${priorStep}\n${truncated}`);
+                console.log(`[Chat] ✓ Loaded prior step: ${priorStep}.md (${priorContent.length} chars)`);
+              }
+            }
+          }
+
+          if (priorSections.length > 0) {
+            priorStepsContext = '\n\nPRIOR STEPS CONTEXT:\n' + priorSections.join('\n\n');
+          }
+        }
+      }
+
+      // Load git diff for code steps in review mode
+      let gitDiffContext = '';
+      const isCodeStep = ['implement', 'review'].includes(actualStep);
+      if (isReviewMode && isCodeStep) {
+        try {
+          const { getGitDiff } = await import('../../prompt-builder.js');
+          const diff = await getGitDiff(root);
+          if (diff) {
+            gitDiffContext = `\n\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\``;
+            console.log(`[Chat] ✓ Loaded git diff: ${diff.length} chars`);
+          }
+        } catch (err) {
+          console.log(`[Chat] Error loading git diff: ${err.message}`);
+        }
       }
 
       // Load config for language
       const config = await loadConfig(root);
       const commLang = config.communication_language || 'English';
 
-      // Check if this is a code step
-      const isCodeStep = ['implement', 'review'].includes(params.step);
-
       // Build AI prompt with context about the workflow
-      const chatPrompt = isCodeStep
-        ? `You are a helpful assistant discussing code implementation for the "${params.step}" phase.
+      let chatPrompt;
+
+      if (isReviewMode) {
+        // Review mode: adversarial/critical review
+        if (!stepContent) {
+          chatPrompt = `Le contenu du step "${actualStep}" n'a pas pu être chargé.
+
+Causes possibles:
+- Le step n'a pas encore été exécuté (cliquez sur "Generate" d'abord)
+- Le fichier ${actualStep}.md n'existe pas
+
+USER MESSAGE: ${body.message}
+
+RESPONSE LANGUAGE: ${commLang}
+
+Explique ce problème à l'utilisateur de manière claire.`;
+        } else {
+          chatPrompt = `You are a CRITICAL REVIEWER performing an adversarial review. Your job is to find problems, weaknesses, and gaps.
+
+STEP BEING REVIEWED: ${actualStep}
+${priorStepsContext}
+
+CONTENT TO REVIEW:
+---
+${stepContent}
+---
+${gitDiffContext}
+
+CONVERSATION HISTORY:
+${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
+
+USER MESSAGE: ${body.message}
+
+RESPONSE LANGUAGE: ${commLang}
+
+YOUR ROLE: Be a tough, skeptical reviewer. You should:
+- Challenge assumptions and decisions
+- Identify missing edge cases
+- Point out ambiguities and inconsistencies
+- Question technical choices
+- Find potential bugs or issues
+- Suggest concrete improvements
+
+Be direct and specific. Format issues as:
+**[SEVERITY: high/medium/low]** Issue description
+- Impact: What could go wrong
+- Suggestion: How to fix it`;
+        }
+      } else if (isCodeStep) {
+        chatPrompt = `You are a helpful assistant discussing code implementation for the "${actualStep}" phase.
 
 CURRENT STEP DOCUMENT:
 ${stepContent}
@@ -909,8 +1131,9 @@ INSTRUCTIONS:
 - Be specific about what changes would be needed
 - When ready to apply, remind them to click "Apply feedback"
 - Respond in ${commLang}
-- Keep responses concise and actionable`
-        : `You are a helpful assistant discussing the "${params.step}" document.
+- Keep responses concise and actionable`;
+      } else {
+        chatPrompt = `You are a helpful assistant discussing the "${actualStep}" document.
 
 CURRENT DOCUMENT CONTENT:
 ${stepContent}
@@ -933,15 +1156,118 @@ INSTRUCTIONS:
 - When ready to apply, remind them to click "Apply feedback"
 - Respond in ${commLang}
 - Keep responses concise but helpful`;
+      }
 
       // Use model from request body, or fall back to config
-      const model = body.model || config.models?.brief?.[0]?.model || 'claude-default';
-      const aiResponse = await callModel(model, chatPrompt, { verbose: false, apply: false });
+      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
+      const callResult = await callModel(model, chatPrompt, { verbose: false, apply: false });
+      const aiResponse = callResult.output;
 
-      // Save messages
+      // Build filesUsed for transparency
+      const filesUsed = {
+        promptTemplate: null,
+        initFile: null,
+        stepContent: stepContent ? `${actualStep}.md` : null,
+        contextFiles: [],
+      };
+
+      // Save messages with tokenUsage and filesUsed
       const userMsg = { role: 'user', content: body.message, createdAt: new Date().toISOString() };
-      const aiMsg = { role: 'assistant', content: aiResponse.trim(), createdAt: new Date().toISOString() };
+      const aiMsg = {
+        role: 'assistant',
+        content: aiResponse.trim(),
+        createdAt: new Date().toISOString(),
+        tokenUsage: callResult.tokenUsage,
+        filesUsed,
+      };
       conversation.messages.push(userMsg, aiMsg);
+      await fs.writeJson(convPath, conversation, { spaces: 2 });
+
+      json(res, { message: aiMsg });
+    } catch (err) {
+      error(res, err.message, 500);
+    }
+  });
+
+  /**
+   * POST /api/stories/:slug/steps/:step/start-chat - AI initiates brainstorming conversation
+   */
+  router.post('/api/stories/:slug/steps/:step/start-chat', async (req, res, { params, root, parseBody }) => {
+    try {
+      const body = await parseBody();
+
+      // Validate: only available for brainstorming step
+      if (params.step !== 'brainstorming') {
+        return error(res, 'start-chat only available for brainstorming', 400);
+      }
+
+      // Validate model if provided
+      if (body.model && typeof body.model !== 'string') {
+        return error(res, 'model must be a string', 400);
+      }
+
+      let promptTemplate;
+      try {
+        const result = await loadPromptTemplate(params.step, root);
+        promptTemplate = result.content;
+      } catch (err) {
+        return error(res, `Failed to load brainstorming prompt: ${err.message}`, 500);
+      }
+
+      // Load init.md (non-blocking if not found)
+      const initContent = await loadInitSpecs(params.slug, root);
+
+      // Load config for language
+      const config = await loadConfig(root);
+      const commLang = config.communication_language || 'English';
+
+      // Build contextual prompt
+      let chatPrompt = `${promptTemplate}\n\n`;
+
+      if (initContent) {
+        chatPrompt += `INIT DOCUMENT (story context):\n---\n${initContent}\n---\n\n`;
+      }
+
+      chatPrompt += `INSTRUCTIONS:
+- You are initiating a brainstorming session for this feature
+- Analyze the init document and identify key areas that need clarification
+- Ask 3-5 focused questions to guide the discussion
+- Be specific and actionable
+- Respond in ${commLang}`;
+
+      // Use model from request body, or fall back to config
+      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
+
+      let callResult;
+      try {
+        callResult = await callModel(model, chatPrompt, { verbose: false, apply: false });
+      } catch (err) {
+        return error(res, `Model call failed: ${err.message}`, 500);
+      }
+
+      const aiResponse = callResult.output;
+
+      // Build filesUsed for transparency
+      const filesUsed = {
+        promptTemplate: 'brainstorming.md',
+        initFile: initContent ? 'init.md' : null,
+        stepContent: null,
+        contextFiles: [],
+      };
+
+      // Create message with tokenUsage and filesUsed
+      const aiMsg = {
+        role: 'assistant',
+        content: aiResponse.trim(),
+        createdAt: new Date().toISOString(),
+        tokenUsage: callResult.tokenUsage,
+        filesUsed,
+      };
+
+      // Save conversation
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const convPath = path.join(storyDir, `${params.step}-conversation.json`);
+      const conversation = { messages: [aiMsg] };
       await fs.writeJson(convPath, conversation, { spaces: 2 });
 
       json(res, { message: aiMsg });
@@ -994,8 +1320,9 @@ IMPORTANT:
 DOCUMENT TO TRANSLATE:
 ${content}`;
 
-      const model = config.models?.brief?.[0]?.model || 'claude-default';
-      const translated = await callModel(model, translatePrompt, { verbose: false, apply: false });
+      const model = config.models?.init?.[0]?.model || 'claude-default';
+      const callResult = await callModel(model, translatePrompt, { verbose: false, apply: false });
+      const translated = callResult.output;
 
       json(res, {
         needed: true,
@@ -1052,7 +1379,7 @@ ${content}`;
 
         // Load config for model selection
         const config = await loadConfig(root);
-        const model = config.models?.implement?.[0]?.model || config.models?.brief?.[0]?.model || 'claude-sonnet-4-20250514';
+        const model = config.models?.implement?.[0]?.model || config.models?.init?.[0]?.model || 'claude-sonnet-4-20250514';
 
         // Load current step content for context
         let stepContent = '';
@@ -1085,12 +1412,13 @@ INSTRUCTIONS:
         console.log('[Recap] Calling model in agent mode:', model);
 
         // Call model directly in agent mode (bypasses runStep's "already done" check)
-        const output = await callModel(model, codeInstructions, {
+        const callResult = await callModel(model, codeInstructions, {
           verbose: true,
           apply: true,
           onData,
           cwd: root,
         });
+        const output = callResult.output;
 
         // Add summary message to conversation before clearing
         const summaryMsg = {
@@ -1118,7 +1446,7 @@ INSTRUCTIONS:
         const recapInstructions = `Apply the following feedback from conversation:\n\n${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')}`;
 
         // Use runStep with iterateOn to update the document
-        const output = await runStep(params.step, params.slug, {
+        const result = await runStep(params.step, params.slug, {
           description: recapInstructions,
           iterateOn: stepContent,
           verbose: true,
@@ -1127,10 +1455,14 @@ INSTRUCTIONS:
           onData,
         });
 
+        // runStep now returns { output, filesUsed }
+        const output = typeof result === 'string' ? result : result?.output;
+        const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+
         // Clear conversation after recap
         await fs.writeJson(convPath, { messages: [] }, { spaces: 2 });
 
-        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500) });
+        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500), filesUsed });
       }
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
@@ -1241,19 +1573,22 @@ INSTRUCTIONS:
       }
 
       // Build steps with content
+      // V3 workflow steps: init, brainstorming, spec-func, spec-tech, dev-plan, implement, review
       const stepsData = {};
-      const stepNames = ['brief', 'ba-spec', 'questions', 'tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
+      const stepNames = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
       for (const stepName of stepNames) {
         const stepPath = path.join(storyDir, `${stepName}.md`);
         let content = '';
         if (await fs.pathExists(stepPath)) {
           content = await fs.readFile(stepPath, 'utf-8');
         }
+        // Convert kebab-case to camelCase for status lookup (spec-func -> specFunc)
+        const statusKey = stepName.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
         stepsData[stepName] = {
-          status: status.steps?.[stepName] || 'pending',
+          status: status.steps?.[statusKey] || status.steps?.[stepName] || 'pending',
           content,
-          completed: status.steps?.[stepName] === 'done',
-          skipped: status.steps?.[stepName] === 'skipped',
+          completed: (status.steps?.[statusKey] || status.steps?.[stepName]) === 'done',
+          skipped: (status.steps?.[statusKey] || status.steps?.[stepName]) === 'skipped',
         };
       }
 
@@ -1267,7 +1602,6 @@ INSTRUCTIONS:
         input: (isEnriched || isDefaultTemplate) ? '' : initContent,
         enriched: isEnriched ? initContent : null,
         attachments: [],
-        figmaLinks: [],
       };
 
       // Get epic info if story has an epic
@@ -1368,10 +1702,11 @@ INSTRUCTIONS:
         }
         status.phase = body.phase;
         // Update current_step based on phase
+        // V3 workflow: init, brainstorming, spec-func, spec-tech, dev-plan, implement, review
         if (body.phase === 'discovery') {
-          status.current_step = 'brief';
+          status.current_step = 'init';
         } else if (body.phase === 'development') {
-          status.current_step = 'tech-spec';
+          status.current_step = 'spec-tech';
         } else if (body.phase === 'qa') {
           status.current_step = 'review';
         }
@@ -1381,6 +1716,53 @@ INSTRUCTIONS:
       await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
 
       json(res, { id: params.slug, ...status });
+    } catch (err) {
+      error(res, err.message, 500);
+    }
+  });
+
+  /**
+   * PATCH /api/stories/:slug/apps - Update story apps scope
+   */
+  router.patch('/api/stories/:slug/apps', async (req, res, { params, root, parseBody }) => {
+    try {
+      const body = await parseBody();
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const statusPath = path.join(storyDir, 'status.yaml');
+
+      const raw = await fs.readFile(statusPath, 'utf-8');
+      const status = yaml.parse(raw);
+
+      // Validate apps - must be an array of strings
+      if (!Array.isArray(body.apps)) {
+        return error(res, 'apps must be an array', 400);
+      }
+
+      // F11: Limit array size to prevent abuse
+      const MAX_APPS = 50;
+      if (body.apps.length > MAX_APPS) {
+        return error(res, `apps array exceeds maximum size (${MAX_APPS})`, 400);
+      }
+
+      // Filter to valid strings
+      const requestedApps = body.apps.filter(a => typeof a === 'string' && a.trim()).map(a => a.trim());
+
+      // F9: Validate that app names exist in config
+      const configuredApps = await getApps(root);
+      const validAppNames = new Set(configuredApps.map(a => a.name));
+      const validatedApps = requestedApps.filter(name => validAppNames.has(name));
+
+      // Warn if some apps were invalid (but still proceed)
+      const invalidApps = requestedApps.filter(name => !validAppNames.has(name));
+      if (invalidApps.length > 0) {
+        console.warn(`[API] Invalid app names ignored: ${invalidApps.join(', ')}`);
+      }
+
+      status.apps = validatedApps;
+      status.updatedAt = new Date().toISOString();
+      await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+
+      json(res, { id: params.slug, apps: status.apps });
     } catch (err) {
       error(res, err.message, 500);
     }
@@ -1444,7 +1826,7 @@ INSTRUCTIONS:
       const status = await loadStatus(params.slug, root);
 
       // Check if discovery steps are complete
-      const discoverySteps = ['brief', 'ba-spec', 'questions'];
+      const discoverySteps = ['init', 'brainstorming', 'spec-func'];
       const missingSteps = discoverySteps.filter(step =>
         status.steps?.[step] !== 'done' && status.steps?.[step] !== 'skipped'
       );
@@ -1465,7 +1847,7 @@ INSTRUCTIONS:
     try {
       const status = await loadStatus(params.slug, root);
 
-      const discoverySteps = ['brief', 'ba-spec', 'questions'];
+      const discoverySteps = ['init', 'brainstorming', 'spec-func'];
       const allComplete = discoverySteps.every(step =>
         status.steps?.[step] === 'done' || status.steps?.[step] === 'skipped'
       );
@@ -1491,7 +1873,7 @@ INSTRUCTIONS:
       const status = yaml.parse(raw);
 
       status.phase = 'development';
-      status.current_step = 'tech-spec';
+      status.current_step = 'spec-tech'; // V3 workflow
       status.space = 'development';
       status.updatedAt = new Date().toISOString();
 
@@ -1515,7 +1897,7 @@ INSTRUCTIONS:
       const status = yaml.parse(raw);
 
       status.phase = 'development';
-      status.current_step = 'tech-spec';
+      status.current_step = 'spec-tech'; // V3 workflow
       status.space = 'development';
       status.updatedAt = new Date().toISOString();
 
@@ -1583,14 +1965,6 @@ INSTRUCTIONS:
     } catch {
       json(res, { configured: false });
     }
-  });
-
-  /**
-   * GET /api/figma/status - Check Figma configuration
-   */
-  router.get('/api/figma/status', async (req, res) => {
-    const configured = !!process.env.FIGMA_TOKEN;
-    json(res, { configured });
   });
 
   /**
@@ -2087,7 +2461,7 @@ INSTRUCTIONS:
 
   /**
    * POST /api/stories/:slug/generate-qa - Generate QA plan for a story
-   * Reads ba-spec.md and tech-spec.md from the story directory and generates a qa.md file
+   * Reads spec-func.md and spec-tech.md from the story directory and generates a qa.md file
    * @param {string} [body.profile] - QA profile: 'product', 'api', 'security', 'full'
    * @param {string[]} [body.categories] - Custom categories (overrides profile)
    */
@@ -2096,24 +2470,24 @@ INSTRUCTIONS:
       const body = await parseBody();
       const storyDir = await getStoryDirPath(params.slug, root);
 
-      // Read ba-spec.md (specs) and tech-spec.md (tech) files
-      const baSpecPath = path.join(storyDir, 'ba-spec.md');
-      const techSpecPath = path.join(storyDir, 'tech-spec.md');
+      // Read spec-func.md (specs) and spec-tech.md (tech) files (V3 workflow)
+      const specFuncPath = path.join(storyDir, 'spec-func.md');
+      const specTechPath = path.join(storyDir, 'spec-tech.md');
 
       let specsContent = '';
       let techContent = '';
 
-      if (await fs.pathExists(baSpecPath)) {
-        specsContent = await fs.readFile(baSpecPath, 'utf-8');
+      if (await fs.pathExists(specFuncPath)) {
+        specsContent = await fs.readFile(specFuncPath, 'utf-8');
       }
 
-      if (await fs.pathExists(techSpecPath)) {
-        techContent = await fs.readFile(techSpecPath, 'utf-8');
+      if (await fs.pathExists(specTechPath)) {
+        techContent = await fs.readFile(specTechPath, 'utf-8');
       }
 
       // Check if we have at least one source file
       if (!specsContent.trim() && !techContent.trim()) {
-        return error(res, 'No source content found. Please generate ba-spec.md or tech-spec.md first.', 400);
+        return error(res, 'No source content found. Please generate spec-func.md or spec-tech.md first.', 400);
       }
 
       // Load story status for feature name

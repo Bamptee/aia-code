@@ -14,13 +14,11 @@ export class POCService {
    * @param {import('../providers/file-storage-provider.js').FileStorageProvider} storage
    * @param {import('./story-service.js').StoryService} storyService
    * @param {import('../providers/ai-provider.js').AIProvider} aiProvider
-   * @param {import('../providers/figma-provider.js').FigmaProvider} [figmaProvider]
    */
-  constructor(storage, storyService, aiProvider, figmaProvider = null) {
+  constructor(storage, storyService, aiProvider) {
     this.storage = storage;
     this.storyService = storyService;
     this.aiProvider = aiProvider;
-    this.figmaProvider = figmaProvider;
   }
 
   /**
@@ -28,11 +26,10 @@ export class POCService {
    * @param {string} storyId - Story ID
    * @param {Object} [options] - Generation options
    * @param {string} [options.context=''] - Additional context for generation
-   * @param {boolean} [options.includeFigmaData=true] - Include Figma design data if available
    * @returns {Promise<{story: Object, poc: string, metadata: Object}>} Generated POC
    */
   async generate(storyId, options = {}) {
-    const { context = '', includeFigmaData = true } = options;
+    const { context = '' } = options;
 
     const { epic, story } = await this.storyService.findStoryWithEpic(storyId);
 
@@ -43,21 +40,8 @@ export class POCService {
     // Gather specification content
     const specContent = this._buildSpecification(story);
 
-    // Add Figma data if available
-    let figmaContext = '';
-    if (includeFigmaData && story.figmaUrl && this.figmaProvider) {
-      try {
-        const figmaData = await this.figmaProvider.getCached(story.figmaUrl);
-        if (figmaData) {
-          figmaContext = `\n\nFigma Design Data:\n${this.figmaProvider.generateSummary(figmaData)}`;
-        }
-      } catch {
-        // Ignore Figma errors, proceed without design data
-      }
-    }
-
     // Generate POC
-    const fullContext = [context, figmaContext, this._getCodebaseContext()].filter(Boolean).join('\n\n');
+    const fullContext = [context, this._getCodebaseContext()].filter(Boolean).join('\n\n');
 
     const poc = await this.aiProvider.generatePOC(specContent, fullContext);
 
@@ -209,14 +193,14 @@ Generate the updated POC:`;
 
     const issues = [];
 
-    // Check if brief is completed
-    if (!story.steps.brief.completed && !story.steps.brief.skipped) {
-      issues.push('Brief step is not completed or skipped');
+    // Check if init is completed
+    if (!story.steps.init.completed && !story.steps.init.skipped) {
+      issues.push('Init step is not completed or skipped');
     }
 
-    // BA spec is recommended
-    if (!story.steps.baSpec.completed && !story.steps.baSpec.skipped) {
-      issues.push('BA Spec step is not completed or skipped (recommended for better POC)');
+    // Spec-func is recommended
+    if (!story.steps.specFunc.completed && !story.steps.specFunc.skipped) {
+      issues.push('Spec-Func step is not completed or skipped (recommended for better POC)');
     }
 
     // Check AI provider
@@ -243,16 +227,16 @@ Generate the updated POC:`;
     }
 
     // Add step contents
-    if (story.steps.brief.completed && story.steps.brief.content) {
-      parts.push(`\n## Feature Brief\n${story.steps.brief.content}`);
+    if (story.steps.init.completed && story.steps.init.content) {
+      parts.push(`\n## Feature Init\n${story.steps.init.content}`);
     }
 
-    if (story.steps.baSpec.completed && story.steps.baSpec.content) {
-      parts.push(`\n## BA Specification\n${story.steps.baSpec.content}`);
+    if (story.steps.specFunc.completed && story.steps.specFunc.content) {
+      parts.push(`\n## Functional Specification\n${story.steps.specFunc.content}`);
     }
 
-    if (story.steps.questions.completed && story.steps.questions.content) {
-      parts.push(`\n## Clarifying Questions & Answers\n${story.steps.questions.content}`);
+    if (story.steps.brainstorming.completed && story.steps.brainstorming.content) {
+      parts.push(`\n## Brainstorming & Questions\n${story.steps.brainstorming.content}`);
     }
 
     return parts.join('\n');

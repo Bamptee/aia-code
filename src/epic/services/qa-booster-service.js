@@ -477,11 +477,12 @@ export class QABoosterService {
 
       // Call AI
       console.log(`[QA] Generating test plan for "${context.featureName}" using ${model}...`);
-      const generatedContent = await callModel(model, prompt, {
+      const callResult = await callModel(model, prompt, {
         verbose: false,
         apply: false,
         cwd: this.root,
       });
+      const generatedContent = callResult.output;
 
       // Resolve output path
       const outputPath = this.resolveOutputPath(context.featurePath);
@@ -575,11 +576,12 @@ export class QABoosterService {
     const model = await this.resolveModel(options.model);
 
     console.log(`[QA] Generating preview for "${featureName}" using ${model}...`);
-    const content = await callModel(model, prompt, {
+    const callResult = await callModel(model, prompt, {
       verbose: false,
       apply: false,
       cwd: this.root,
     });
+    const content = callResult.output;
 
     const testCount = (content.match(/- \[[ x]\] \*\*\[TC-/g) || []).length;
 

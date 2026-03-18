@@ -77,10 +77,10 @@ describe('POCService', () => {
         type: 'feature',
       });
 
-      // Complete brief step
-      await storyService.updateStep(story.id, 'brief', {
+      // Complete init step
+      await storyService.updateStep(story.id, 'init', {
         completed: true,
-        content: 'This is the feature brief content',
+        content: 'This is the feature init content',
       });
 
       const result = await pocService.generate(story.id);
@@ -208,22 +208,22 @@ describe('POCService', () => {
   });
 
   describe('checkReadiness', () => {
-    test('returns ready when brief is completed', async () => {
+    test('returns ready when init is completed', async () => {
       const epic = await epicService.create({ name: 'Test Epic' });
       const story = await storyService.create(epic.id, {
         title: 'Test Feature',
         type: 'feature',
       });
 
-      await storyService.updateStep(story.id, 'brief', { completed: true, content: 'Brief' });
-      await storyService.updateStep(story.id, 'baSpec', { skipped: true });
+      await storyService.updateStep(story.id, 'init', { completed: true, content: 'Init' });
+      await storyService.updateStep(story.id, 'specFunc', { skipped: true });
 
       const result = await pocService.checkReadiness(story.id);
 
       assert.strictEqual(result.ready, true);
     });
 
-    test('returns not ready when brief is not completed', async () => {
+    test('returns not ready when init is not completed', async () => {
       const epic = await epicService.create({ name: 'Test Epic' });
       const story = await storyService.create(epic.id, {
         title: 'Test Feature',
@@ -233,7 +233,7 @@ describe('POCService', () => {
       const result = await pocService.checkReadiness(story.id);
 
       assert.strictEqual(result.ready, false);
-      assert.ok(result.issues.some((i) => i.includes('Brief')));
+      assert.ok(result.issues.some((i) => i.includes('Init')));
     });
   });
 

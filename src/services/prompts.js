@@ -3,7 +3,7 @@ import fs from 'fs-extra';
 import { AIA_DIR, FEATURE_STEPS } from '../constants.js';
 
 const DEFAULT_PROMPTS = {
-  brief: `You are a product manager. Write a product brief for this feature.
+  init: `You are a product manager. Write an initial feature description.
 
 Include:
 - Problem statement: what pain point does this solve?
@@ -15,20 +15,7 @@ Include:
 
 Keep it concise and actionable. Use the project context and knowledge to align with existing architecture.`,
 
-  'ba-spec': `You are a business analyst. Write a detailed business analysis specification based on the brief.
-
-Include:
-- Functional requirements: numbered list of what the system must do
-- Non-functional requirements: performance, security, scalability expectations
-- Business rules: validation rules, edge cases, constraints
-- Data requirements: what data is needed, where it comes from, how it flows
-- User workflows: step-by-step flows for each key user story
-- Acceptance criteria: clear, testable criteria for each requirement
-- Dependencies: external systems, APIs, or teams involved
-
-Be specific and measurable. Every requirement should be testable.`,
-
-  questions: `You are a senior architect reviewing the brief and BA spec.
+  brainstorming: `You are a senior architect reviewing the init.
 
 Generate a list of critical questions that must be answered before implementation.
 
@@ -43,7 +30,20 @@ Organize by category:
 
 For each question, explain why it matters and suggest a default answer if possible.`,
 
-  'tech-spec': `You are a senior software architect. Write a detailed technical specification.
+  'spec-func': `You are a business analyst. Write a detailed functional specification.
+
+Include:
+- Functional requirements: numbered list of what the system must do
+- Non-functional requirements: performance, security, scalability expectations
+- Business rules: validation rules, edge cases, constraints
+- Data requirements: what data is needed, where it comes from, how it flows
+- User workflows: step-by-step flows for each key user story
+- Acceptance criteria: clear, testable criteria for each requirement
+- Dependencies: external systems, APIs, or teams involved
+
+Be specific and measurable. Every requirement should be testable.`,
+
+  'spec-tech': `You are a senior software architect. Write a detailed technical specification.
 
 Include:
 - Architecture overview: how this feature fits into the existing system
@@ -57,24 +57,6 @@ Include:
 - Testing strategy: unit tests, integration tests, key scenarios to cover
 
 Use the project's existing patterns from the knowledge files. Be specific with code-level details.`,
-
-  challenge: `You are a devil's advocate reviewer. Challenge the technical specification.
-
-Your job is to find weaknesses, gaps, and risks:
-- Architectural risks: single points of failure, scaling bottlenecks, coupling issues
-- Security vulnerabilities: injection risks, auth bypass, data leaks
-- Missing edge cases: race conditions, concurrent access, data corruption
-- Performance concerns: N+1 queries, missing indexes, memory leaks
-- Operational risks: deployment complexity, rollback strategy, monitoring gaps
-- Over-engineering: unnecessary complexity, premature optimization
-- Under-engineering: missing error handling, insufficient validation
-
-For each issue found:
-1. Describe the problem
-2. Explain the potential impact
-3. Suggest a concrete fix
-
-Be constructive but thorough. It's better to catch issues now than in production.`,
 
   'dev-plan': `You are a tech lead. Create a step-by-step implementation plan.
 

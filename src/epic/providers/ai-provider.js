@@ -76,7 +76,7 @@ How will we know this feature is successful?
 
 Be concise but thorough. Focus on discovery, not implementation.`,
 
-  brief: `You are a technical product brief generator. Generate a concise feature brief based on the following inputs.
+  init: `You are a technical product init generator. Generate a concise feature init based on the following inputs.
 
 {context}
 
@@ -90,13 +90,13 @@ Requirements:
 - Keep technical details minimal but mention key constraints if any
 - Use clear, non-technical language where possible
 
-Generate the feature brief:`,
+Generate the feature init:`,
 
-  baSpec: `You are a business analyst creating technical specifications. Generate a BA specification based on the following feature brief and context.
+  specFunc: `You are a business analyst creating functional specifications. Generate a functional specification based on the following feature init and context.
 
 {context}
 
-Feature Brief:
+Feature Init:
 {input}
 
 Requirements:
@@ -107,9 +107,9 @@ Requirements:
 - Define success metrics
 - Use clear, actionable language
 
-Generate the BA specification:`,
+Generate the functional specification:`,
 
-  questions: `You are a senior engineer reviewing a feature specification. Generate clarifying questions based on the following specification.
+  brainstorming: `You are a senior engineer reviewing a feature specification. Generate clarifying questions based on the following specification.
 
 {context}
 
@@ -383,51 +383,47 @@ Note: Configure an AI provider (Anthropic or OpenAI) for actual generation.`;
   /**
    * Enriches story initial input
    * @param {string} input - User's initial input/idea
-   * @param {string} [figmaContext=''] - Optional Figma design context
    * @returns {Promise<string>} Enriched structured content
    */
-  async enrichStoryInit(input, figmaContext = '') {
-    let prompt = PROMPT_TEMPLATES.storyInit.replace('{input}', input);
-    if (figmaContext) {
-      prompt += `\n\nFigma Design Information:\n${figmaContext}`;
-    }
+  async enrichStoryInit(input) {
+    const prompt = PROMPT_TEMPLATES.storyInit.replace('{input}', input);
     return this.generate(prompt);
   }
 
   /**
-   * Generates a feature brief
+   * Generates a feature init
    * @param {string} input - Input description or requirements
    * @param {string} [context=''] - Additional context (init.enriched, etc.)
-   * @returns {Promise<string>} Generated brief
+   * @returns {Promise<string>} Generated init
    */
-  async generateBrief(input, context = '') {
-    const prompt = PROMPT_TEMPLATES.brief
+  async generateInit(input, context = '') {
+    const prompt = PROMPT_TEMPLATES.init
       .replace('{input}', input)
       .replace('{context}', context ? `Context:\n${context}\n` : '');
     return this.generate(prompt);
   }
 
   /**
-   * Generates a BA specification
-   * @param {string} brief - Feature brief to expand
+   * Generates a functional specification
+   * @param {string} init - Feature init to expand
    * @param {string} [context=''] - Additional context
    * @returns {Promise<string>} Generated specification
    */
-  async generateBASpec(brief, context = '') {
-    const prompt = PROMPT_TEMPLATES.baSpec
-      .replace('{input}', brief)
+  async generateSpecFunc(init, context = '') {
+    const prompt = PROMPT_TEMPLATES.specFunc
+      .replace('{input}', init)
       .replace('{context}', context ? `Context:\n${context}\n` : '');
     return this.generate(prompt);
   }
 
   /**
-   * Generates clarifying questions
+   * Generates brainstorming questions
    * @param {string} spec - Specification to review
    * @param {string} [context=''] - Additional context
    * @returns {Promise<string>} Generated questions
    */
-  async generateQuestions(spec, context = '') {
-    const prompt = PROMPT_TEMPLATES.questions
+  async generateBrainstorming(spec, context = '') {
+    const prompt = PROMPT_TEMPLATES.brainstorming
       .replace('{input}', spec)
       .replace('{context}', context ? `Context:\n${context}\n` : '');
     return this.generate(prompt);

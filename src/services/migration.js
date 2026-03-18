@@ -152,7 +152,7 @@ async function migrateStoryToYaml(story, epicSlug, root) {
     phase,
     type: story.type || 'feature',
     flow: phase === 'discovery' ? 'full' : 'full',
-    current_step: phase === 'discovery' ? 'brief' : 'tech-spec',
+    current_step: phase === 'discovery' ? 'init' : 'spec-tech',
     createdAt: story.createdAt || new Date().toISOString(),
     updatedAt: story.updatedAt || new Date().toISOString(),
     steps: {
@@ -186,10 +186,6 @@ async function migrateStoryToYaml(story, epicSlug, root) {
     initContent += `## Discovery Document\n\n${story.init.enriched}\n\n`;
   } else if (story.init?.input) {
     initContent += `## Initial Input\n\n${story.init.input}\n\n`;
-  }
-
-  if (story.figmaUrl) {
-    initContent += `## Figma\n\n[Design Link](${story.figmaUrl})\n\n`;
   }
 
   initContent += `## Constraints\n\n`;

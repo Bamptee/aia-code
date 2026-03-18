@@ -11,8 +11,6 @@ import { StoryIndexService } from '../epic/services/story-index-service.js';
 import { EpicService } from '../epic/services/epic-service.js';
 import { StoryService } from '../epic/services/story-service.js';
 import { AIProvider } from '../epic/providers/ai-provider.js';
-import { FigmaProvider } from '../epic/providers/figma-provider.js';
-import { isValidFigmaUrl } from '../epic/models/validators.js';
 
 /**
  * Creates and initializes services
@@ -23,8 +21,7 @@ function createServices() {
   const epicService = new EpicService(storage, storyIndexService);
   const storyService = new StoryService(storage, storyIndexService, epicService);
   const aiProvider = new AIProvider();
-  const figmaProvider = new FigmaProvider(storage);
-  return { storage, storyService, epicService, aiProvider, figmaProvider };
+  return { storage, storyService, epicService, aiProvider };
 }
 
 /**
@@ -138,10 +135,9 @@ export function registerStoryCommand(program) {
         console.log(`Space: ${s.space}`);
         if (s.description) console.log(`Description: ${s.description}`);
         if (s.linkedFeatureId) console.log(`Linked to: ${s.linkedFeatureId}`);
-        if (s.figmaUrl) console.log(`Figma: ${s.figmaUrl}`);
 
         // Init section
-        if (s.init?.input || s.init?.enriched || s.init?.attachments?.length || s.init?.figmaLinks?.length) {
+        if (s.init?.input || s.init?.enriched || s.init?.attachments?.length) {
           console.log(chalk.bold('\nInit:'));
           if (s.init.input) {
             const preview = s.init.input.substring(0, 80);
@@ -152,9 +148,6 @@ export function registerStoryCommand(program) {
           }
           if (s.init.attachments?.length > 0) {
             console.log(`  Attachments: ${s.init.attachments.length} file(s)`);
-          }
-          if (s.init.figmaLinks?.length > 0) {
-            console.log(`  Figma Links: ${s.init.figmaLinks.length} link(s)`);
           }
         }
 
@@ -219,7 +212,7 @@ export function registerStoryCommand(program) {
   // story step
   story
     .command('step <id> <stepName>')
-    .description('Update a story step (brief|baSpec|questions)')
+    .description('Update a story step (init|brainstorming|specFunc|specTech|devPlan|implement|review)')
     .option('-c, --complete', 'Mark as completed')
     .option('-s, --skip', 'Mark as skipped')
     .option('--content <content>', 'Step content')
@@ -351,14 +344,14 @@ export function registerStoryCommand(program) {
   story
     .command('generate-step <id> <stepName>')
     .alias('gen')
-    .description('Generate step content with AI (brief|baSpec|questions)')
+    .description('Generate step content with AI (init|brainstorming|specFunc)')
     .option('--context <context>', 'Additional context for AI')
     .action(async (id, stepName, options) => {
       try {
         const { storyService, aiProvider } = createServices();
 
         // Validate step name
-        const validSteps = ['brief', 'baSpec', 'questions'];
+        const validSteps = ['init', 'brainstorming', 'specFunc'];
         if (!validSteps.includes(stepName)) {
           console.error(chalk.red(`Invalid step name. Must be one of: ${validSteps.join(', ')}`));
           process.exit(1);
@@ -398,23 +391,23 @@ export function registerStoryCommand(program) {
         // Generate based on step type
         let generatedContent;
         switch (stepName) {
-          case 'brief':
-            generatedContent = await aiProvider.generateBrief(input, context);
+          case 'init':
+            generatedContent = await aiProvider.generateInit(input, context);
             break;
-          case 'baSpec':
-            if (story.steps?.brief?.content) {
-              input = `${input}\nExisting Brief:\n${story.steps.brief.content}`;
+          case 'specFunc':
+            if (story.steps?.init?.content) {
+              input = `${input}\nExisting Init:\n${story.steps.init.content}`;
             }
-            generatedContent = await aiProvider.generateBASpec(input, context);
+            generatedContent = await aiProvider.generateSpecFunc(input, context);
             break;
-          case 'questions':
-            if (story.steps?.brief?.content) {
-              input = `${input}\nBrief:\n${story.steps.brief.content}`;
+          case 'brainstorming':
+            if (story.steps?.init?.content) {
+              input = `${input}\nInit:\n${story.steps.init.content}`;
             }
-            if (story.steps?.baSpec?.content) {
-              input = `${input}\nBA Specification:\n${story.steps.baSpec.content}`;
+            if (story.steps?.specFunc?.content) {
+              input = `${input}\nFunctional Specification:\n${story.steps.specFunc.content}`;
             }
-            generatedContent = await aiProvider.generateQuestions(input, context);
+            generatedContent = await aiProvider.generateBrainstorming(input, context);
             break;
         }
 
@@ -449,7 +442,7 @@ export function registerStoryCommand(program) {
         const { storyService, aiProvider } = createServices();
 
         // Validate step name
-        const validSteps = ['brief', 'baSpec', 'questions'];
+        const validSteps = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', 'review'];
         if (!validSteps.includes(stepName)) {
           console.error(chalk.red(`Invalid step name. Must be one of: ${validSteps.join(', ')}`));
           process.exit(1);
@@ -512,7 +505,7 @@ export function registerStoryCommand(program) {
       try {
         const { storyService } = createServices();
 
-        const validSteps = ['brief', 'baSpec', 'questions'];
+        const validSteps = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', 'review'];
         if (!validSteps.includes(stepName)) {
           console.error(chalk.red(`Invalid step name. Must be one of: ${validSteps.join(', ')}`));
           process.exit(1);
@@ -550,7 +543,7 @@ export function registerStoryCommand(program) {
       try {
         const { storyService } = createServices();
 
-        const validSteps = ['brief', 'baSpec', 'questions'];
+        const validSteps = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', 'review'];
         if (!validSteps.includes(stepName)) {
           console.error(chalk.red(`Invalid step name. Must be one of: ${validSteps.join(', ')}`));
           process.exit(1);
@@ -574,7 +567,7 @@ export function registerStoryCommand(program) {
   story
     .command('generate-all <id>')
     .alias('gen-all')
-    .description('Generate all steps content with AI (brief, baSpec, questions)')
+    .description('Generate all steps content with AI (init, brainstorming, specFunc)')
     .option('--context <context>', 'Additional context for AI')
     .action(async (id, options) => {
       try {
@@ -611,178 +604,42 @@ export function registerStoryCommand(program) {
           baseInput += `Additional context: ${options.context}\n`;
         }
 
-        // Generate Brief
-        console.log(chalk.bold('1. Generating Brief...'));
-        const brief = await aiProvider.generateBrief(baseInput, context);
-        await storyService.addStepVersion(id, 'brief', brief, 'Generate all - Brief', aiProvider.getModel());
+        // Generate Init
+        console.log(chalk.bold('1. Generating Init...'));
+        const init = await aiProvider.generateInit(baseInput, context);
+        await storyService.addStepVersion(id, 'init', init, 'Generate all - Init', aiProvider.getModel());
         console.log(chalk.dim('   Done (v1 saved)'));
 
-        // Generate BA-Spec (using brief)
-        console.log(chalk.bold('2. Generating BA-Spec...'));
-        const baSpecInput = `${baseInput}\nExisting Brief:\n${brief}`;
-        const baSpec = await aiProvider.generateBASpec(baSpecInput, context);
-        await storyService.addStepVersion(id, 'baSpec', baSpec, 'Generate all - BA-Spec', aiProvider.getModel());
+        // Generate Spec-Func (using init)
+        console.log(chalk.bold('2. Generating Spec-Func...'));
+        const specFuncInput = `${baseInput}\nExisting Init:\n${init}`;
+        const specFunc = await aiProvider.generateSpecFunc(specFuncInput, context);
+        await storyService.addStepVersion(id, 'specFunc', specFunc, 'Generate all - Spec-Func', aiProvider.getModel());
         console.log(chalk.dim('   Done (v1 saved)'));
 
-        // Generate Questions (using brief + baSpec)
-        console.log(chalk.bold('3. Generating Questions...'));
-        const questionsInput = `${baseInput}\nBrief:\n${brief}\nBA Specification:\n${baSpec}`;
-        const questions = await aiProvider.generateQuestions(questionsInput, context);
-        await storyService.addStepVersion(id, 'questions', questions, 'Generate all - Questions', aiProvider.getModel());
+        // Generate Brainstorming (using init + specFunc)
+        console.log(chalk.bold('3. Generating Brainstorming...'));
+        const brainstormingInput = `${baseInput}\nInit:\n${init}\nFunctional Specification:\n${specFunc}`;
+        const brainstorming = await aiProvider.generateBrainstorming(brainstormingInput, context);
+        await storyService.addStepVersion(id, 'brainstorming', brainstorming, 'Generate all - Brainstorming', aiProvider.getModel());
         console.log(chalk.dim('   Done (v1 saved)'));
 
         console.log();
 
         // Display generated content
-        console.log(chalk.bold.underline('Generated Brief:'));
-        console.log(chalk.white(brief));
+        console.log(chalk.bold.underline('Generated Init:'));
+        console.log(chalk.white(init));
         console.log();
 
-        console.log(chalk.bold.underline('Generated BA-Spec:'));
-        console.log(chalk.white(baSpec));
+        console.log(chalk.bold.underline('Generated Spec-Func:'));
+        console.log(chalk.white(specFunc));
         console.log();
 
-        console.log(chalk.bold.underline('Generated Questions:'));
-        console.log(chalk.white(questions));
+        console.log(chalk.bold.underline('Generated Brainstorming:'));
+        console.log(chalk.white(brainstorming));
         console.log();
 
         console.log(chalk.green('✓ All steps generated and saved with version history'));
-      } catch (err) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  // story figma (Manage Figma links)
-  const figmaCmd = story
-    .command('figma')
-    .description('Manage Figma links for story init');
-
-  // story figma add
-  figmaCmd
-    .command('add <storyId> <url>')
-    .description('Add a Figma link to story init')
-    .option('-l, --label <label>', 'Optional label for the link')
-    .action(async (storyId, url, options) => {
-      try {
-        const { storyService, figmaProvider } = createServices();
-
-        // Validate URL
-        if (!isValidFigmaUrl(url)) {
-          console.error(chalk.red('Invalid Figma URL. Must be a figma.com URL.'));
-          process.exit(1);
-        }
-
-        // Check if Figma is configured
-        let cacheKey = null;
-        let figmaData = null;
-
-        if (figmaProvider.isConfigured()) {
-          console.log(chalk.cyan('Fetching Figma design data...'));
-          cacheKey = figmaProvider.getCacheKey(url);
-          try {
-            figmaData = await figmaProvider.fetchDesign(url);
-            console.log(chalk.green(`✓ Design data cached: ${figmaData.name}`));
-            console.log(chalk.dim(`  Components: ${figmaData.components?.length || 0}`));
-            console.log(chalk.dim(`  Frames: ${figmaData.frames?.length || 0}`));
-          } catch (err) {
-            console.log(chalk.yellow(`⚠ Could not fetch design data: ${err.message}`));
-          }
-        } else {
-          console.log(chalk.yellow('⚠ FIGMA_TOKEN not set - saving URL only (no design data for AI)'));
-        }
-
-        await storyService.addFigmaLink(storyId, url, options.label || null, cacheKey);
-        console.log(chalk.green(`✓ Figma link added`));
-        if (options.label) {
-          console.log(chalk.dim(`  Label: ${options.label}`));
-        }
-        console.log(chalk.dim(`  URL: ${url}`));
-      } catch (err) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  // story figma status
-  figmaCmd
-    .command('status')
-    .description('Check Figma API configuration status')
-    .action(async () => {
-      try {
-        const { figmaProvider } = createServices();
-
-        console.log(chalk.bold('\nFigma Configuration:\n'));
-
-        if (figmaProvider.isConfigured()) {
-          console.log(chalk.green('  ✓ FIGMA_TOKEN is configured'));
-          console.log(chalk.dim('  Design data will be fetched and cached for AI enrichment'));
-        } else {
-          console.log(chalk.yellow('  ⚠ FIGMA_TOKEN is not set'));
-          console.log(chalk.dim('  Links will be saved as URLs only (no design data for AI)'));
-          console.log();
-          console.log(chalk.bold('  To configure:'));
-          console.log(chalk.cyan('  export FIGMA_TOKEN=your-personal-access-token'));
-          console.log(chalk.dim('  Get your token from: Figma Settings > Account > Personal Access Tokens'));
-        }
-        console.log();
-      } catch (err) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  // story figma list
-  figmaCmd
-    .command('list <storyId>')
-    .alias('ls')
-    .description('List Figma links for a story')
-    .action(async (storyId) => {
-      try {
-        const { storyService, figmaProvider } = createServices();
-        const { figmaLinks } = await storyService.getInitAssets(storyId);
-
-        if (figmaLinks.length === 0) {
-          console.log(chalk.yellow('No Figma links attached.'));
-          return;
-        }
-
-        console.log(chalk.bold(`\nFigma Links (${figmaLinks.length}):\n`));
-        for (const link of figmaLinks) {
-          const label = link.label ? chalk.cyan(`[${link.label}] `) : '';
-          const cached = link.cacheKey ? chalk.green(' [cached]') : chalk.dim(' [no cache]');
-          console.log(`  ${label}${link.url}${cached}`);
-          console.log(chalk.dim(`    Added: ${new Date(link.addedAt).toLocaleString()}`));
-
-          // Show cached data summary if available
-          if (link.cacheKey && figmaProvider.isConfigured()) {
-            try {
-              const cachedData = await figmaProvider.getCached(link.url);
-              if (cachedData) {
-                console.log(chalk.dim(`    Design: ${cachedData.name} | Components: ${cachedData.components?.length || 0} | Frames: ${cachedData.frames?.length || 0}`));
-              }
-            } catch {
-              // Ignore cache read errors
-            }
-          }
-        }
-        console.log();
-      } catch (err) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  // story figma remove
-  figmaCmd
-    .command('remove <storyId> <url>')
-    .alias('rm')
-    .description('Remove a Figma link from story init')
-    .action(async (storyId, url) => {
-      try {
-        const { storyService } = createServices();
-        await storyService.removeFigmaLink(storyId, url);
-        console.log(chalk.green(`✓ Figma link removed`));
       } catch (err) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -915,12 +772,12 @@ export function registerStoryCommand(program) {
   // story assets (Show all init assets)
   story
     .command('assets <storyId>')
-    .description('Show all init assets (attachments and Figma links)')
+    .description('Show all init assets (attachments)')
     .action(async (storyId) => {
       try {
         const { storyService } = createServices();
         const story = await storyService.getById(storyId);
-        const { attachments, figmaLinks } = await storyService.getInitAssets(storyId);
+        const { attachments } = await storyService.getInitAssets(storyId);
 
         console.log(chalk.bold(`\nInit Assets for: ${story.title}\n`));
 
@@ -935,18 +792,6 @@ export function registerStoryCommand(program) {
           }
           console.log();
         }
-
-        // Figma links
-        console.log(chalk.bold.underline(`Figma Links (${figmaLinks.length}):`));
-        if (figmaLinks.length === 0) {
-          console.log(chalk.dim('  None'));
-        } else {
-          for (const link of figmaLinks) {
-            const label = link.label ? chalk.cyan(`[${link.label}] `) : '';
-            console.log(`  ${label}${link.url}`);
-          }
-        }
-        console.log();
 
         // Attachments
         console.log(chalk.bold.underline(`Attachments (${attachments.length}):`));

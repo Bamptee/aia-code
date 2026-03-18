@@ -10,8 +10,12 @@ import {
   STORY_STATUS,
   STORY_SPACE,
   STORY_STEPS,
+  STEP_KEY_MAP,
+  STEP_API_MAP,
+  PRODUCT_STEPS,
   isValidStoryStatus,
   isValidStepName,
+  normalizeStepName,
   normalizeStoryStatus,
 } from '../models/validators.js';
 import {
@@ -256,7 +260,7 @@ export class StoryService {
   /**
    * Updates a Story step
    * @param {string} storyId - Story ID
-   * @param {string} stepName - Step name: 'brief', 'baSpec', or 'questions'
+   * @param {string} stepName - Step name: 'init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', 'implement', or 'review'
    * @param {Object} stepData - Step data
    * @param {boolean} [stepData.completed] - Mark as completed
    * @param {boolean} [stepData.skipped] - Mark as skipped
@@ -635,6 +639,9 @@ export class StoryService {
       throw new ValidationError(`Invalid step name: ${stepName}. Must be one of: ${STORY_STEPS.join(', ')}`);
     }
 
+    // Normalize step name to camelCase for consistent storage
+    const normalizedStep = normalizeStepName(stepName);
+
     const { epic, story } = await this.findStoryWithEpic(storyId);
 
     if (!story) {
@@ -642,8 +649,8 @@ export class StoryService {
     }
 
     // Ensure step exists (backwards compatibility for stories created before 8 steps)
-    if (!story.steps[stepName]) {
-      story.steps[stepName] = {
+    if (!story.steps[normalizedStep]) {
+      story.steps[normalizedStep] = {
         completed: false,
         skipped: false,
         content: null,
@@ -652,7 +659,7 @@ export class StoryService {
       };
     }
 
-    const step = story.steps[stepName];
+    const step = story.steps[normalizedStep];
 
     // Ensure history array exists (for backwards compatibility)
     if (!step.history) {
@@ -680,6 +687,107 @@ export class StoryService {
 
     await this.storage.writeEpic(epic);
     return story;
+  }
+
+  /**
+   * Updates token usage for a step
+   * @param {string} storyId - Story ID
+   * @param {string} stepName - Step name
+   * @param {Object} tokenUsage - Token usage data
+   * @param {number} tokenUsage.input - Input tokens
+   * @param {number} tokenUsage.output - Output tokens
+   * @param {number} [tokenUsage.total] - Total tokens (calculated if not provided)
+   * @param {boolean} [accumulate=false] - If true, add to existing usage instead of replacing
+   * @returns {Promise<import('../models/story.js').Story>} Updated story
+   * @throws {NotFoundError} If Story not found
+   * @throws {ValidationError} If step name is invalid
+   */
+  async updateStepTokenUsage(storyId, stepName, tokenUsage, accumulate = false) {
+    if (!isValidStepName(stepName)) {
+      throw new ValidationError(`Invalid step name: ${stepName}. Must be one of: ${STORY_STEPS.join(', ')}`);
+    }
+
+    const normalizedStep = normalizeStepName(stepName);
+    const { epic, story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    // Ensure step exists
+    if (!story.steps[normalizedStep]) {
+      story.steps[normalizedStep] = {
+        completed: false,
+        skipped: false,
+        content: null,
+        history: [],
+        currentVersion: 0,
+      };
+    }
+
+    const step = story.steps[normalizedStep];
+
+    // Calculate total if not provided
+    const total = tokenUsage.total ?? (tokenUsage.input + tokenUsage.output);
+
+    if (accumulate && step.tokenUsage) {
+      // Add to existing usage
+      step.tokenUsage = {
+        input: (step.tokenUsage.input || 0) + (tokenUsage.input || 0),
+        output: (step.tokenUsage.output || 0) + (tokenUsage.output || 0),
+        total: (step.tokenUsage.total || 0) + total,
+      };
+    } else {
+      // Replace usage
+      step.tokenUsage = {
+        input: tokenUsage.input || 0,
+        output: tokenUsage.output || 0,
+        total,
+      };
+    }
+
+    story.updatedAt = new Date().toISOString();
+    epic.updatedAt = new Date().toISOString();
+
+    await this.storage.writeEpic(epic);
+    return story;
+  }
+
+  /**
+   * Gets token usage for all steps of a story
+   * @param {string} storyId - Story ID
+   * @returns {Promise<{steps: Object, total: Object}>} Token usage by step and total
+   * @throws {NotFoundError} If Story not found
+   */
+  async getTokenUsage(storyId) {
+    const { story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    const steps = {};
+    let totalInput = 0;
+    let totalOutput = 0;
+    let totalTokens = 0;
+
+    for (const [stepName, stepData] of Object.entries(story.steps || {})) {
+      if (stepData.tokenUsage) {
+        steps[stepName] = stepData.tokenUsage;
+        totalInput += stepData.tokenUsage.input || 0;
+        totalOutput += stepData.tokenUsage.output || 0;
+        totalTokens += stepData.tokenUsage.total || 0;
+      }
+    }
+
+    return {
+      steps,
+      total: {
+        input: totalInput,
+        output: totalOutput,
+        total: totalTokens,
+      },
+    };
   }
 
   /**
@@ -747,73 +855,208 @@ export class StoryService {
     return story.steps[stepName]?.history || [];
   }
 
+  // ============== V3 Phase Methods ==============
+
   /**
-   * Adds a Figma link to story init
+   * Gets the current phase of a story based on its current step
    * @param {string} storyId - Story ID
-   * @param {string} url - Figma URL
-   * @param {string|null} label - Optional label
-   * @param {string|null} cacheKey - Optional cache key
-   * @returns {Promise<import('../models/story.js').Story>} Updated story
+   * @returns {Promise<string>} Phase: 'product' or 'dev'
    * @throws {NotFoundError} If Story not found
    */
-  async addFigmaLink(storyId, url, label = null, cacheKey = null) {
-    const { epic, story } = await this.findStoryWithEpic(storyId);
+  async getCurrentPhase(storyId) {
+    const { story } = await this.findStoryWithEpic(storyId);
 
     if (!story) {
       throw new NotFoundError(`Story ${storyId} not found`);
     }
 
-    // Ensure init object exists
-    if (!story.init) {
-      story.init = { input: null, enriched: null, model: null, enrichedAt: null, attachments: [], figmaLinks: [] };
-    }
-    if (!story.init.figmaLinks) {
-      story.init.figmaLinks = [];
-    }
-
-    // Check if already exists
-    if (story.init.figmaLinks.some((l) => l.url === url)) {
-      throw new ValidationError('This Figma link is already attached');
+    // Determine current step (first incomplete step)
+    for (const stepName of STORY_STEPS) {
+      const step = story.steps[stepName];
+      if (!step?.completed && !step?.skipped) {
+        return PRODUCT_STEPS.includes(stepName) ? 'product' : 'dev';
+      }
     }
 
-    story.init.figmaLinks.push({
-      url,
-      label,
-      cacheKey,
-      addedAt: new Date().toISOString(),
-    });
-
-    story.updatedAt = new Date().toISOString();
-    epic.updatedAt = new Date().toISOString();
-
-    await this.storage.writeEpic(epic);
-    return story;
+    // All steps completed - dev phase
+    return 'dev';
   }
 
   /**
-   * Removes a Figma link from story init
+   * Gets list of skipped steps for a story
    * @param {string} storyId - Story ID
-   * @param {string} url - Figma URL to remove
-   * @returns {Promise<import('../models/story.js').Story>} Updated story
+   * @returns {Promise<string[]>} List of skipped step names
    * @throws {NotFoundError} If Story not found
    */
-  async removeFigmaLink(storyId, url) {
+  async getSkippedSteps(storyId) {
+    const { story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    const skipped = [];
+    for (const stepName of STORY_STEPS) {
+      if (story.steps[stepName]?.skipped) {
+        skipped.push(stepName);
+      }
+    }
+    return skipped;
+  }
+
+  /**
+   * Skips to a target step, marking intermediate steps as skipped
+   * @param {string} storyId - Story ID
+   * @param {string} targetStep - Target step name
+   * @returns {Promise<{story: Object, warning: Object|null}>} Updated story and skip warning
+   * @throws {NotFoundError} If Story not found
+   * @throws {ValidationError} If step name is invalid
+   */
+  async skipToStep(storyId, targetStep) {
+    // Normalize step name
+    const normalizedTarget = normalizeStepName(targetStep);
+
+    if (!STORY_STEPS.includes(normalizedTarget)) {
+      throw new ValidationError(`Invalid step name: ${targetStep}. Must be one of: ${STORY_STEPS.join(', ')}`);
+    }
+
     const { epic, story } = await this.findStoryWithEpic(storyId);
 
     if (!story) {
       throw new NotFoundError(`Story ${storyId} not found`);
     }
 
-    if (!story.init?.figmaLinks) {
-      return story;
+    // Find current step (first non-completed, non-skipped)
+    let currentStepIndex = -1;
+    for (let i = 0; i < STORY_STEPS.length; i++) {
+      const stepName = STORY_STEPS[i];
+      const step = story.steps[stepName];
+      if (!step?.completed && !step?.skipped) {
+        currentStepIndex = i;
+        break;
+      }
     }
 
-    story.init.figmaLinks = story.init.figmaLinks.filter((l) => l.url !== url);
+    const targetIndex = STORY_STEPS.indexOf(normalizedTarget);
+
+    // Can't skip backwards
+    if (targetIndex <= currentStepIndex) {
+      return { story, warning: null };
+    }
+
+    // Mark intermediate steps as skipped
+    const skippedSteps = [];
+    for (let i = currentStepIndex; i < targetIndex; i++) {
+      if (i >= 0) {
+        const stepName = STORY_STEPS[i];
+        // init cannot be skipped
+        if (stepName === 'init') continue;
+
+        if (!story.steps[stepName]) {
+          story.steps[stepName] = {
+            completed: false,
+            skipped: false,
+            content: null,
+            history: [],
+            currentVersion: 0,
+          };
+        }
+        story.steps[stepName].skipped = true;
+        story.steps[stepName].completed = false;
+        skippedSteps.push(stepName);
+      }
+    }
+
+    // Track skipped steps in story metadata
+    story.skippedSteps = story.skippedSteps || [];
+    story.skippedSteps = [...new Set([...story.skippedSteps, ...skippedSteps])];
+
     story.updatedAt = new Date().toISOString();
     epic.updatedAt = new Date().toISOString();
 
     await this.storage.writeEpic(epic);
-    return story;
+
+    // Calculate warning
+    let warning = null;
+    if (skippedSteps.includes('specFunc') && skippedSteps.includes('specTech')) {
+      warning = {
+        level: 'high',
+        message: 'Contexte tres limite - Pas de spec fonctionnelle ni technique',
+        autoAnalysis: true,
+      };
+    } else if (skippedSteps.includes('specTech')) {
+      warning = {
+        level: 'medium',
+        message: 'Pas de spec technique - Analyse automatique du codebase',
+        autoAnalysis: true,
+      };
+    } else if (skippedSteps.includes('specFunc')) {
+      warning = {
+        level: 'low',
+        message: 'Pas de spec fonctionnelle - Contexte limite',
+        autoAnalysis: false,
+      };
+    }
+
+    return { story, warning, skippedSteps };
+  }
+
+  /**
+   * Checks if skip to target step is allowed
+   * @param {string} storyId - Story ID
+   * @param {string} targetStep - Target step name
+   * @returns {Promise<{canSkip: boolean, warning: Object|null}>}
+   */
+  async canSkipTo(storyId, targetStep) {
+    const normalizedTarget = normalizeStepName(targetStep);
+
+    if (!STORY_STEPS.includes(normalizedTarget)) {
+      return { canSkip: false, warning: null };
+    }
+
+    // init cannot be the target of a skip
+    if (normalizedTarget === 'init') {
+      return { canSkip: false, warning: null };
+    }
+
+    const { story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      return { canSkip: false, warning: null };
+    }
+
+    // Check if init is completed (required before any skip)
+    if (!story.steps?.init?.completed) {
+      return { canSkip: false, warning: { level: 'error', message: 'Init must be completed first' } };
+    }
+
+    // Calculate warning for what would be skipped
+    let currentStepIndex = -1;
+    for (let i = 0; i < STORY_STEPS.length; i++) {
+      const stepName = STORY_STEPS[i];
+      const step = story.steps[stepName];
+      if (!step?.completed && !step?.skipped) {
+        currentStepIndex = i;
+        break;
+      }
+    }
+
+    const targetIndex = STORY_STEPS.indexOf(normalizedTarget);
+
+    if (targetIndex <= currentStepIndex) {
+      return { canSkip: false, warning: null };
+    }
+
+    const wouldSkip = STORY_STEPS.slice(currentStepIndex + 1, targetIndex).filter(s => s !== 'init');
+
+    let warning = null;
+    if (wouldSkip.includes('specFunc') && wouldSkip.includes('specTech')) {
+      warning = { level: 'high', message: 'Contexte tres limite', autoAnalysis: true };
+    } else if (wouldSkip.includes('specTech')) {
+      warning = { level: 'medium', message: 'Pas de spec technique', autoAnalysis: true };
+    }
+
+    return { canSkip: true, warning, wouldSkip };
   }
 
   /**
@@ -836,7 +1079,7 @@ export class StoryService {
 
     // Ensure init object exists
     if (!story.init) {
-      story.init = { input: null, enriched: null, model: null, enrichedAt: null, attachments: [], figmaLinks: [] };
+      story.init = { input: null, enriched: null, model: null, enrichedAt: null, attachments: [] };
     }
     if (!story.init.attachments) {
       story.init.attachments = [];
@@ -881,9 +1124,9 @@ export class StoryService {
   }
 
   /**
-   * Gets init attachments and Figma links
+   * Gets init attachments
    * @param {string} storyId - Story ID
-   * @returns {Promise<{attachments: Array, figmaLinks: Array}>}
+   * @returns {Promise<{attachments: Array}>}
    * @throws {NotFoundError} If Story not found
    */
   async getInitAssets(storyId) {
@@ -895,7 +1138,6 @@ export class StoryService {
 
     return {
       attachments: story.init?.attachments || [],
-      figmaLinks: story.init?.figmaLinks || [],
     };
   }
 
@@ -1085,5 +1327,99 @@ export class StoryService {
 
     await this.storage.writeEpic(epic);
     return story;
+  }
+
+  // ============== Worktrunk Methods ==============
+
+  /**
+   * Enables worktrunk for a story
+   * @param {string} storyId - Story ID
+   * @param {string} branch - Worktree branch name
+   * @param {string} path - Absolute path to the worktree
+   * @param {Array<{app: string, branch: string}>} [submoduleBranches] - Submodule branches
+   * @returns {Promise<import('../models/story.js').Story>} Updated story
+   * @throws {NotFoundError} If Story not found
+   */
+  async enableWorktrunk(storyId, branch, path, submoduleBranches = []) {
+    const { epic, story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    // Find the story in the epic and update it
+    const storyIndex = epic.stories.findIndex((s) => s.id === storyId);
+    if (storyIndex === -1) {
+      throw new NotFoundError(`Story ${storyId} not found in epic`);
+    }
+
+    story.worktrunk = {
+      enabled: true,
+      branch,
+      path,
+      createdAt: new Date().toISOString(),
+      submoduleBranches,
+    };
+    story.updatedAt = new Date().toISOString();
+    epic.stories[storyIndex] = story;
+    epic.updatedAt = new Date().toISOString();
+
+    await this.storage.writeEpic(epic);
+    return story;
+  }
+
+  /**
+   * Disables worktrunk for a story
+   * @param {string} storyId - Story ID
+   * @returns {Promise<import('../models/story.js').Story>} Updated story
+   * @throws {NotFoundError} If Story not found
+   */
+  async disableWorktrunk(storyId) {
+    const { epic, story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    // Find the story in the epic and update it
+    const storyIndex = epic.stories.findIndex((s) => s.id === storyId);
+    if (storyIndex === -1) {
+      throw new NotFoundError(`Story ${storyId} not found in epic`);
+    }
+
+    story.worktrunk = null;
+    story.updatedAt = new Date().toISOString();
+    epic.stories[storyIndex] = story;
+    epic.updatedAt = new Date().toISOString();
+
+    await this.storage.writeEpic(epic);
+    return story;
+  }
+
+  /**
+   * Gets worktrunk status for a story
+   * @param {string} storyId - Story ID
+   * @returns {Promise<import('../models/story.js').StoryWorktrunk|null>} Worktrunk config or null
+   * @throws {NotFoundError} If Story not found
+   */
+  async getWorktrunkStatus(storyId) {
+    const { story } = await this.findStoryWithEpic(storyId);
+
+    if (!story) {
+      throw new NotFoundError(`Story ${storyId} not found`);
+    }
+
+    return story.worktrunk || null;
+  }
+
+  /**
+   * Checks if worktrunk is enabled for a story
+   * @param {string} storyId - Story ID
+   * @returns {Promise<boolean>} True if worktrunk is enabled
+   * @throws {NotFoundError} If Story not found
+   */
+  async isWorktrunkEnabled(storyId) {
+    const worktrunk = await this.getWorktrunkStatus(storyId);
+    return worktrunk?.enabled === true;
   }
 }

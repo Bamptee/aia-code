@@ -26,11 +26,10 @@ import { STORY_STATUS, STORY_SPACE, STORY_TYPE } from './validators.js';
 
 /**
  * @typedef {Object} StorySteps
- * @property {StepState} brief - Brief step state
- * @property {StepState} baSpec - BA-spec step state
- * @property {StepState} questions - Questions step state
- * @property {StepState} techSpec - Tech-spec step state
- * @property {StepState} challenge - Challenge step state
+ * @property {StepState} init - Init step state
+ * @property {StepState} brainstorming - Brainstorming step state
+ * @property {StepState} specFunc - Spec-func step state
+ * @property {StepState} specTech - Spec-tech step state
  * @property {StepState} devPlan - Dev plan step state
  * @property {StepState} implement - Implementation step state
  * @property {StepState} review - Review step state
@@ -64,21 +63,21 @@ import { STORY_STATUS, STORY_SPACE, STORY_TYPE } from './validators.js';
  */
 
 /**
- * @typedef {Object} StoryFigmaLink
- * @property {string} url - Figma URL
- * @property {string|null} label - Optional label/description
- * @property {string|null} cacheKey - Cache key for Figma data
- * @property {string} addedAt - ISO 8601 timestamp
- */
-
-/**
  * @typedef {Object} StoryInit
  * @property {string|null} input - User's initial input/description
  * @property {string|null} enriched - AI-enriched version of the input
  * @property {string|null} model - Model used for enrichment
  * @property {string|null} enrichedAt - When the input was enriched
  * @property {Array<StoryAttachment>} attachments - Attached files
- * @property {Array<StoryFigmaLink>} figmaLinks - Figma design links
+ */
+
+/**
+ * @typedef {Object} StoryWorktrunk
+ * @property {boolean} enabled - Whether worktrunk is enabled
+ * @property {string|null} branch - Worktree branch name (e.g., 'story/{storyId}')
+ * @property {string|null} path - Absolute path to the worktree
+ * @property {string|null} createdAt - ISO 8601 timestamp when worktree was created
+ * @property {Array<{app: string, branch: string}>} submoduleBranches - Branches created in submodules
  */
 
 /**
@@ -92,12 +91,11 @@ import { STORY_STATUS, STORY_SPACE, STORY_TYPE } from './validators.js';
  * @property {StoryInit} init - Initial input and enriched description
  * @property {StorySteps} steps - Step completion tracking
  * @property {string|null} linkedFeatureId - For Bugs: parent Feature reference
- * @property {string|null} figmaUrl - Figma design link
- * @property {string|null} figmaCacheKey - Reference to cached Figma data
  * @property {Array<QAAction>} qaHistory - QA action history
  * @property {Array<string>} attachments - Array of attachment filenames
  * @property {boolean} taskMode - Whether story uses task-based workflow
  * @property {TaskSummary|null} taskSummary - Summary of task counts
+ * @property {StoryWorktrunk|null} worktrunk - Worktrunk configuration for isolated development
  * @property {string} createdAt - ISO 8601 timestamp
  * @property {string} updatedAt - ISO 8601 timestamp
  */
@@ -142,25 +140,22 @@ export function createStory(data) {
       model: null,
       enrichedAt: null,
       attachments: [],
-      figmaLinks: [],
     },
     steps: {
-      brief: createStepState(),
-      baSpec: createStepState(),
-      questions: createStepState(),
-      techSpec: createStepState(),
-      challenge: createStepState(),
+      init: createStepState(),
+      brainstorming: createStepState(),
+      specFunc: createStepState(),
+      specTech: createStepState(),
       devPlan: createStepState(),
       implement: createStepState(),
       review: createStepState(),
     },
     linkedFeatureId: data.linkedFeatureId || null,
-    figmaUrl: null,
-    figmaCacheKey: null,
     qaHistory: [],
     attachments: [],
     taskMode: false,
     taskSummary: null,
+    worktrunk: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -188,38 +183,30 @@ export function createBugFromRejection(feature, reason) {
       model: null,
       enrichedAt: null,
       attachments: [],
-      figmaLinks: [],
     },
     steps: {
-      brief: {
+      init: {
         completed: true,
         skipped: false,
         content: reason.trim(),
         history: [],
         currentVersion: 0,
       },
-      baSpec: {
+      brainstorming: {
         completed: false,
         skipped: true,
         content: null,
         history: [],
         currentVersion: 0,
       },
-      questions: {
+      specFunc: {
         completed: false,
         skipped: true,
         content: null,
         history: [],
         currentVersion: 0,
       },
-      techSpec: {
-        completed: false,
-        skipped: true,
-        content: null,
-        history: [],
-        currentVersion: 0,
-      },
-      challenge: {
+      specTech: {
         completed: false,
         skipped: true,
         content: null,
@@ -249,12 +236,11 @@ export function createBugFromRejection(feature, reason) {
       },
     },
     linkedFeatureId: feature.id,
-    figmaUrl: null,
-    figmaCacheKey: null,
     qaHistory: [],
     attachments: [],
     taskMode: false,
     taskSummary: null,
+    worktrunk: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -296,15 +282,23 @@ export function updateTaskSummary(story, summary) {
 }
 
 /**
+ * Product steps that must be completed before promotion to development
+ * @type {string[]}
+ */
+const PRODUCT_STEPS_FOR_PROMOTION = ['init', 'brainstorming', 'specFunc'];
+
+/**
  * Checks if a Story can be promoted to development
+ * Only checks product steps (init, brainstorming, specFunc), not dev steps
  * @param {Story} story - Story to check
  * @returns {{canPromote: boolean, missingSteps: string[]}} Result
  */
 export function canPromoteStory(story) {
   const missingSteps = [];
 
-  for (const [stepName, stepState] of Object.entries(story.steps)) {
-    if (!stepState.completed && !stepState.skipped) {
+  for (const stepName of PRODUCT_STEPS_FOR_PROMOTION) {
+    const stepState = story.steps[stepName];
+    if (stepState && !stepState.completed && !stepState.skipped) {
       missingSteps.push(stepName);
     }
   }
@@ -367,5 +361,51 @@ export function createQAAction(action, reason = null, createdBugId = null) {
     reason,
     createdBugId,
     performedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Creates a worktrunk configuration for a story
+ * @param {string} branch - Worktree branch name
+ * @param {string} path - Absolute path to the worktree
+ * @param {Array<{app: string, branch: string}>} [submoduleBranches] - Submodule branches created
+ * @returns {StoryWorktrunk} Worktrunk configuration
+ */
+export function createWorktrunk(branch, path, submoduleBranches = []) {
+  return {
+    enabled: true,
+    branch,
+    path,
+    createdAt: new Date().toISOString(),
+    submoduleBranches,
+  };
+}
+
+/**
+ * Enables worktrunk for a story
+ * @param {Story} story - Story to enable worktrunk for
+ * @param {string} branch - Worktree branch name
+ * @param {string} path - Absolute path to the worktree
+ * @param {Array<{app: string, branch: string}>} [submoduleBranches] - Submodule branches
+ * @returns {Story} Updated story
+ */
+export function enableWorktrunk(story, branch, path, submoduleBranches = []) {
+  return {
+    ...story,
+    worktrunk: createWorktrunk(branch, path, submoduleBranches),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Disables worktrunk for a story
+ * @param {Story} story - Story to disable worktrunk for
+ * @returns {Story} Updated story
+ */
+export function disableWorktrunk(story) {
+  return {
+    ...story,
+    worktrunk: null,
+    updatedAt: new Date().toISOString(),
   };
 }

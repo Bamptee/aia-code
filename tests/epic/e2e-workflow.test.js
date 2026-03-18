@@ -71,23 +71,23 @@ describe('E2E Workflows', () => {
       assert.strictEqual(story.space, STORY_SPACE.EXPERIMENTATION);
 
       // Step 4: Complete experimentation steps
-      await storyService.updateStep(story.id, 'brief', {
+      await storyService.updateStep(story.id, 'init', {
         completed: true,
         content: 'Login form with validation and error handling',
       });
-      await storyService.updateStep(story.id, 'baSpec', {
+      await storyService.updateStep(story.id, 'specFunc', {
         completed: true,
         content: 'AC: 1. Email validation, 2. Password min 8 chars, 3. Error messages',
       });
-      await storyService.updateStep(story.id, 'questions', {
+      await storyService.updateStep(story.id, 'brainstorming', {
         skipped: true,
       });
 
       // Verify steps
       const updatedStory = await storyService.getById(story.id);
-      assert.strictEqual(updatedStory.steps.brief.completed, true);
-      assert.strictEqual(updatedStory.steps.baSpec.completed, true);
-      assert.strictEqual(updatedStory.steps.questions.skipped, true);
+      assert.strictEqual(updatedStory.steps.init.completed, true);
+      assert.strictEqual(updatedStory.steps.specFunc.completed, true);
+      assert.strictEqual(updatedStory.steps.brainstorming.skipped, true);
 
       // Step 5: Promote to development
       const promotedStory = await storyService.promote(story.id);
@@ -127,9 +127,9 @@ describe('E2E Workflows', () => {
       });
 
       // Fast-track through experimentation (skip all)
-      await storyService.updateStep(story.id, 'brief', { skipped: true });
-      await storyService.updateStep(story.id, 'baSpec', { skipped: true });
-      await storyService.updateStep(story.id, 'questions', { skipped: true });
+      await storyService.updateStep(story.id, 'init', { skipped: true });
+      await storyService.updateStep(story.id, 'specFunc', { skipped: true });
+      await storyService.updateStep(story.id, 'brainstorming', { skipped: true });
 
       // Promote and move to testing
       await storyService.promote(story.id);
@@ -211,9 +211,9 @@ describe('E2E Workflows', () => {
       assert.strictEqual(linkedBugs[0].id, bug.id);
 
       // Bug workflow - skip experimentation steps
-      await storyService.updateStep(bug.id, 'brief', { skipped: true });
-      await storyService.updateStep(bug.id, 'baSpec', { skipped: true });
-      await storyService.updateStep(bug.id, 'questions', { skipped: true });
+      await storyService.updateStep(bug.id, 'init', { skipped: true });
+      await storyService.updateStep(bug.id, 'specFunc', { skipped: true });
+      await storyService.updateStep(bug.id, 'brainstorming', { skipped: true });
 
       // Promote and fix
       await storyService.promote(bug.id);

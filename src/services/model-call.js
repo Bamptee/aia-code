@@ -8,5 +8,19 @@ export async function callModel(model, prompt, { verbose = false, apply = false,
 
   console.log(chalk.yellow(`[AI] Calling ${displayName} (${mode} mode)...`));
 
-  return resolved.provider.generate(prompt, resolved.model, { verbose, apply, onData, cwd });
+  const result = await resolved.provider.generate(prompt, resolved.model, { verbose, apply, onData, cwd });
+
+  // Handle new format with tokenUsage (from stream-json mode)
+  if (result && typeof result === 'object' && 'output' in result) {
+    return {
+      output: result.output,
+      tokenUsage: result.tokenUsage || null,
+    };
+  }
+
+  // Legacy format: string output
+  return {
+    output: result,
+    tokenUsage: null,
+  };
 }

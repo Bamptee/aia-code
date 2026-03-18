@@ -9,7 +9,7 @@ const STATUS_CLASSES = {
 };
 
 // Duplicated from constants.js to avoid async fetch on initial render
-const DEVELOPMENT_STEPS = ['tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
+const DEVELOPMENT_STEPS = ['spec-tech', 'dev-plan', 'implement', 'review'];
 const FEATURE_TYPES = ['feature', 'bug'];
 const DEFAULT_FEATURE_TYPE = 'feature';
 const DELETION_FILTER = { ACTIVE: 'active', DELETED: 'deleted', ALL: 'all' };
@@ -706,28 +706,16 @@ function CreateFeatureModal({ apps, onCreated, onClose }) {
       // Step 3: Name and description
       step === 3 && React.createElement('div', { className: 'space-y-4 modal-step-active' },
         React.createElement('div', null,
-          React.createElement('label', { className: 'text-xs text-slate-400 block mb-1' }, 'Name *'),
+          React.createElement('label', { className: 'text-xs text-slate-400 block mb-1' }, 'Title *'),
           React.createElement('input', {
             type: 'text',
             value: name,
-            onChange: e => {
-              // Sanitize input: lowercase, replace invalid chars, collapse hyphens
-              // Don't trim leading/trailing hyphens here - let user type freely
-              const sanitized = e.target.value
-                .toLowerCase()
-                .replace(/[^a-z0-9-]/g, '')
-                .replace(/-+/g, '-');
-              setName(sanitized);
-            },
-            onBlur: () => {
-              // Trim leading/trailing hyphens on blur
-              setName(n => n.replace(/^-+|-+$/g, ''));
-            },
-            placeholder: type === 'bug' ? 'bug-name' : 'feature-name',
+            onChange: e => setName(e.target.value),
+            placeholder: type === 'bug' ? 'Describe the bug...' : 'Feature title',
+            maxLength: 200,
             autoFocus: true,
             className: 'w-full bg-slate-900 border border-aia-border rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-aia-accent focus:outline-none',
           }),
-          React.createElement('p', { className: 'text-xs text-slate-500 mt-1' }, 'Lowercase with hyphens (e.g. fix-login-bug)'),
         ),
         err && React.createElement('p', { className: 'text-red-400 text-xs' }, err),
       ),

@@ -60,12 +60,12 @@ function isFeatureCompleted(status) {
   const skippedSteps = status.skippedSteps || [];
 
   // Relevant steps depend on phase:
-  // - discovery phase: DISCOVERY_STEPS (brief, ba-spec, questions)
-  // - development phase: DEVELOPMENT_STEPS (tech-spec, challenge, dev-plan, implement, review)
+  // - discovery phase: DISCOVERY_STEPS (init, brainstorming, spec-func)
+  // - development phase: DEVELOPMENT_STEPS (spec-tech, dev-plan, implement, review)
   const phase = status.phase || 'discovery';
   const relevantStepKeys = phase === 'discovery'
-    ? ['brief', 'ba-spec', 'questions']
-    : ['tech-spec', 'challenge', 'dev-plan', 'implement', 'review'];
+    ? ['init', 'brainstorming', 'spec-func']
+    : ['spec-tech', 'dev-plan', 'implement', 'review'];
 
   // Filter to only the relevant steps
   const relevantSteps = relevantStepKeys.map(k => [k, steps[k] || 'pending']);
@@ -87,7 +87,7 @@ import { callModel } from '../../services/model-call.js';
 import { loadConfig } from '../../models.js';
 import { json, error } from '../router.js';
 import { isWtInstalled, hasWorktree, getFeatureBranch } from '../../services/worktrunk.js';
-import { getSession, isRunning, addSseClient, removeSseClient } from '../../services/agent-sessions.js';
+import { getSession, isRunning, addSseClient, removeSseClient, getRetryInfo, isClaimed } from '../../services/agent-sessions.js';
 
 const MAX_DESCRIPTION_LENGTH = 50000; // 50KB
 
@@ -207,17 +207,44 @@ export function registerFeatureRoutes(router) {
     }
   });
 
-  // Get agent running status for a feature
+  // Get agent running status for a feature (Symphony SPEC compliant)
   router.get('/api/features/:name/agent-status', (req, res, { params }) => {
     const session = getSession(params.name);
-    if (!session) {
-      return json(res, { running: false });
+    const retryInfo = getRetryInfo(params.name);
+    const claimed = isClaimed(params.name);
+
+    // Determine overall status
+    let status = 'idle';
+    if (session) {
+      status = session.status; // 'running' | 'stalled' | 'completing'
+    } else if (retryInfo) {
+      status = 'retrying';
     }
+
+    if (!session && !retryInfo) {
+      return json(res, {
+        status: 'idle',
+        running: false,
+        claimed,
+      });
+    }
+
     json(res, {
-      running: true,
-      step: session.step,
-      startedAt: session.startedAt,
-      logs: session.logs,
+      status,
+      running: !!session,
+      claimed,
+      step: session?.step || retryInfo?.step,
+      startedAt: session?.startedAt,
+      lastEventAt: session?.lastEventAt,
+      tokens: session?.tokens || { input: 0, output: 0, total: 0 },
+      attempt: session?.attempt || retryInfo?.attempt || 1,
+      logs: session?.logs || [],
+      retry: retryInfo ? {
+        attempt: retryInfo.attempt,
+        dueAt: retryInfo.dueAt,
+        error: retryInfo.error,
+        countdown: Math.max(0, Math.round((retryInfo.dueAt - Date.now()) / 1000)),
+      } : null,
     });
   });
 
@@ -436,16 +463,17 @@ IMPORTANT:
 - Output ONLY the markdown document, no explanations
 - Write the ENTIRE document in ${config.document_output_language || 'English'} regardless of the input language`;
 
-      // Call model to enrich (use brief model config or default)
-      const model = config.models?.brief?.[0]?.model || 'claude-default';
+      // Call model to enrich (use init model config or default)
+      const model = config.models?.init?.[0]?.model || 'claude-default';
 
       sseSend(res, 'status', { status: 'generating', message: 'AI is structuring the feature...' });
 
-      const enrichedContent = await callModel(model, enrichPrompt, {
+      const callResult = await callModel(model, enrichPrompt, {
         verbose: false,
         apply: false,
         onData
       });
+      const enrichedContent = callResult.output;
 
       // Save enriched content to init.md
       const storyDir = await getStoryDirPath(params.name, root);

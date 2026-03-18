@@ -93,8 +93,8 @@ export const DEFAULT_FEATURE_TYPE = 'feature';
  * @readonly
  */
 export const STORY_PHASES = Object.freeze({
-  PRODUCT: 'product',
-  DEV: 'dev',
+  DISCOVERY: 'discovery',
+  DEVELOPMENT: 'development',
 });
 
 /**

@@ -182,33 +182,78 @@ async function isSpecTechSkipped(feature, root) {
 }
 
 /**
- * Load optimized feature files for review step
- * Includes only essential context to reduce prompt size
+ * Load optimized feature files for review step.
+ * Includes essential context with implement.md in full for proper code review.
+ * @param {string} featureDir - Path to the story/feature directory
+ * @returns {Promise<{content: string, priorSteps: string[], loadedFiles: Array<{step: string, file: string, chars: number}>}>}
+ * Returns empty content if featureDir is invalid. Never throws.
  */
 async function loadFeatureFilesForReview(featureDir) {
-  const sections = [];
+  // F1: Validate input
+  if (!featureDir || typeof featureDir !== 'string') {
+    console.warn('[PromptBuilder] loadFeatureFilesForReview called with invalid featureDir');
+    return { content: '', priorSteps: [], loadedFiles: [] };
+  }
 
-  // Include spec-tech summary (key decisions only)
+  const sections = [];
+  const loadedFiles = [];
+
+  // 1. Load init.md for feature context
+  const init = await readIfExists(path.join(featureDir, 'init.md'));
+  if (init) {
+    sections.push('## Initial Specs\n' + init);
+    loadedFiles.push({ step: 'init', file: 'init.md', chars: init.length });
+    console.log(`[PromptBuilder]   - Loaded prior step: init.md (${init.length} chars)`);
+  }
+
+  // 2. Load spec-tech.md summary (key technical decisions)
   const specTech = await readIfExists(path.join(featureDir, 'spec-tech.md'));
   if (specTech) {
     const summary = extractTechSpecSummary(specTech);
     sections.push('## Spec Tech Summary\n' + summary);
+    loadedFiles.push({ step: 'spec-tech', file: 'spec-tech.md', chars: specTech.length });
+    console.log(`[PromptBuilder]   - Loaded prior step: spec-tech.md (${specTech.length} chars, summarized)`);
   }
 
-  // Include dev-plan task list only
+  // 3. Load dev-plan.md task list
   const devPlan = await readIfExists(path.join(featureDir, 'dev-plan.md'));
   if (devPlan) {
     const taskList = extractTaskList(devPlan);
-    sections.push('## Implementation Tasks\n' + taskList);
+    sections.push('## Dev Plan Tasks\n' + taskList);
+    loadedFiles.push({ step: 'dev-plan', file: 'dev-plan.md', chars: devPlan.length });
+    console.log(`[PromptBuilder]   - Loaded prior step: dev-plan.md (${devPlan.length} chars, tasks extracted)`);
   }
 
-  // Skip: init, brainstorming, spec-func (already incorporated in spec-tech and dev-plan)
+  // 4. Load implement.md in FULL (this is the code output to review)
+  const implement = await readIfExists(path.join(featureDir, 'implement.md'));
+  if (implement) {
+    // F3: Warn if implement.md is very large (may cause token limits)
+    if (implement.length > 50000) {
+      console.warn(`[PromptBuilder] implement.md is large (${implement.length} chars) - may approach token limits`);
+    }
+    sections.push('## Implementation Output\n' + implement);
+    loadedFiles.push({ step: 'implement', file: 'implement.md', chars: implement.length });
+    console.log(`[PromptBuilder]   - Loaded prior step: implement.md (${implement.length} chars, FULL)`);
+  }
 
-  return sections.join('\n\n');
+  // Build priorSteps array from what was actually loaded
+  const priorSteps = ['init', 'spec-tech', 'dev-plan', 'implement'].filter(s =>
+    loadedFiles.some(f => f.step === s)
+  );
+
+  return {
+    content: sections.join('\n\n'),
+    priorSteps,
+    loadedFiles,
+  };
 }
 
 /**
- * Extract key decisions from tech-spec (summary only)
+ * Extract key decisions from tech-spec (summary only).
+ * Captures relevant sections (Solution, Architecture, etc.) up to ~100 lines each.
+ * The 100-line limit balances context richness vs prompt size for review.
+ * @param {string} techSpec - Full tech-spec content
+ * @returns {string} Summarized tech-spec content
  */
 function extractTechSpecSummary(techSpec) {
   const lines = techSpec.split('\n');
@@ -227,7 +272,7 @@ function extractTechSpecSummary(techSpec) {
     } else if (inRelevantSection) {
       if (line.startsWith('#')) {
         inRelevantSection = false;
-      } else if (lineCount < 20) {
+      } else if (lineCount < 100) {
         summaryLines.push(line);
         lineCount++;
       }

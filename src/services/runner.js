@@ -7,7 +7,7 @@ import { buildPrompt, buildTaskPrompt } from '../prompt-builder.js';
 import { callModel } from './model-call.js';
 import { loadStatus, updateStepStatus, updatePhaseStatus, getPhaseByNumber, initializePhasesFromDevPlan, getStoryDirPath } from './status.js';
 import { logExecution } from '../logger.js';
-import { startSession, endSession, appendLog, claim, isClaimed, updateTokens, scheduleRetry } from './agent-sessions.js';
+import { startSession, endSession, appendLog, claim, isClaimed, isRunning, updateTokens, scheduleRetry } from './agent-sessions.js';
 import { hasWorktree, getWorktreePath, getFeatureBranch } from './worktrunk.js';
 
 /**
@@ -134,14 +134,14 @@ export async function runStep(step, feature, { description, instructions, histor
     throw new Error(`Unknown step "${step}". Valid steps: ${FEATURE_STEPS.join(', ')}`);
   }
 
-  // Check if story is already claimed (prevent double-dispatch)
-  // Skip this check for retries as they reuse the existing claim
-  if (isClaimed(feature) && !isRetry) {
+  // Check if story is actively running (prevent double-dispatch)
+  // Only block if there's an active session, not just a stale claim
+  if (!isRetry && isClaimed(feature) && isRunning(feature)) {
     throw new Error(`Story "${feature}" already has an active session. Wait for it to complete or cancel it.`);
   }
 
   // Claim the story for this execution (only on first attempt, not retries)
-  if (!isRetry) {
+  if (!isRetry && !isClaimed(feature)) {
     claim(feature);
   }
 
@@ -171,11 +171,7 @@ export async function runStep(step, feature, { description, instructions, histor
     console.log(chalk.cyan(`Running phase ${phase}: ${phaseData.title}`));
   }
 
-  if (status.steps[step] === STEP_STATUS.DONE && phase === null) {
-    throw new Error(
-      `Step "${step}" already done for feature "${feature}". Use "aia reset ${step} ${feature}" to re-run.`,
-    );
-  }
+  // Allow re-running steps even if done (no blocking validation)
 
   await updateStepStatus(feature, step, STEP_STATUS.IN_PROGRESS, root);
 

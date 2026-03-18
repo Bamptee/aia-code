@@ -981,9 +981,15 @@ ${content}`;
         return error(res, 'message is required', 400);
       }
 
+      // Detect review mode from step suffix or body flag
+      const isReviewMode = params.step.endsWith('-review') || body.reviewMode === true;
+      const actualStep = params.step.replace(/-review$/, '');
+
+      console.log(`[Chat] Mode: ${isReviewMode ? 'REVIEW' : 'ITERATE'}, Step: ${params.step} -> ${actualStep}`);
+
       const storyDir = await getStoryDirPath(params.slug, root);
       const convPath = path.join(storyDir, `${params.step}-conversation.json`);
-      const stepPath = path.join(storyDir, `${params.step}.md`);
+      const stepPath = path.join(storyDir, `${actualStep}.md`); // Use actualStep without -review suffix
 
       // Load existing conversation
       let conversation = { messages: [] };
@@ -995,18 +1001,113 @@ ${content}`;
       let stepContent = '';
       if (await fs.pathExists(stepPath)) {
         stepContent = await fs.readFile(stepPath, 'utf-8');
+        console.log(`[Chat] ✓ Loaded step content: ${stepPath} (${stepContent.length} chars)`);
+      } else {
+        console.log(`[Chat] ⚠ Step file not found: ${stepPath}`);
+      }
+
+      // Load prior steps context for review mode
+      let priorStepsContext = '';
+      if (isReviewMode && stepContent) {
+        const STEP_ORDER = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
+        const currentStepIndex = STEP_ORDER.indexOf(actualStep);
+
+        if (currentStepIndex > 0) {
+          const priorSteps = STEP_ORDER.slice(0, currentStepIndex);
+          const priorSections = [];
+
+          for (const priorStep of priorSteps) {
+            const priorFile = path.join(storyDir, `${priorStep}.md`);
+            if (await fs.pathExists(priorFile)) {
+              const priorContent = await fs.readFile(priorFile, 'utf-8');
+              if (priorContent && priorContent.length > 0) {
+                // Truncate if too long
+                const truncated = priorContent.length > 2000
+                  ? priorContent.slice(0, 2000) + '\n\n[... truncated ...]'
+                  : priorContent;
+                priorSections.push(`### ${priorStep}\n${truncated}`);
+                console.log(`[Chat] ✓ Loaded prior step: ${priorStep}.md (${priorContent.length} chars)`);
+              }
+            }
+          }
+
+          if (priorSections.length > 0) {
+            priorStepsContext = '\n\nPRIOR STEPS CONTEXT:\n' + priorSections.join('\n\n');
+          }
+        }
+      }
+
+      // Load git diff for code steps in review mode
+      let gitDiffContext = '';
+      const isCodeStep = ['implement', 'review'].includes(actualStep);
+      if (isReviewMode && isCodeStep) {
+        try {
+          const { getGitDiff } = await import('../../prompt-builder.js');
+          const diff = await getGitDiff(root);
+          if (diff) {
+            gitDiffContext = `\n\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\``;
+            console.log(`[Chat] ✓ Loaded git diff: ${diff.length} chars`);
+          }
+        } catch (err) {
+          console.log(`[Chat] Error loading git diff: ${err.message}`);
+        }
       }
 
       // Load config for language
       const config = await loadConfig(root);
       const commLang = config.communication_language || 'English';
 
-      // Check if this is a code step
-      const isCodeStep = ['implement', 'review'].includes(params.step);
-
       // Build AI prompt with context about the workflow
-      const chatPrompt = isCodeStep
-        ? `You are a helpful assistant discussing code implementation for the "${params.step}" phase.
+      let chatPrompt;
+
+      if (isReviewMode) {
+        // Review mode: adversarial/critical review
+        if (!stepContent) {
+          chatPrompt = `Le contenu du step "${actualStep}" n'a pas pu être chargé.
+
+Causes possibles:
+- Le step n'a pas encore été exécuté (cliquez sur "Generate" d'abord)
+- Le fichier ${actualStep}.md n'existe pas
+
+USER MESSAGE: ${body.message}
+
+RESPONSE LANGUAGE: ${commLang}
+
+Explique ce problème à l'utilisateur de manière claire.`;
+        } else {
+          chatPrompt = `You are a CRITICAL REVIEWER performing an adversarial review. Your job is to find problems, weaknesses, and gaps.
+
+STEP BEING REVIEWED: ${actualStep}
+${priorStepsContext}
+
+CONTENT TO REVIEW:
+---
+${stepContent}
+---
+${gitDiffContext}
+
+CONVERSATION HISTORY:
+${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
+
+USER MESSAGE: ${body.message}
+
+RESPONSE LANGUAGE: ${commLang}
+
+YOUR ROLE: Be a tough, skeptical reviewer. You should:
+- Challenge assumptions and decisions
+- Identify missing edge cases
+- Point out ambiguities and inconsistencies
+- Question technical choices
+- Find potential bugs or issues
+- Suggest concrete improvements
+
+Be direct and specific. Format issues as:
+**[SEVERITY: high/medium/low]** Issue description
+- Impact: What could go wrong
+- Suggestion: How to fix it`;
+        }
+      } else if (isCodeStep) {
+        chatPrompt = `You are a helpful assistant discussing code implementation for the "${actualStep}" phase.
 
 CURRENT STEP DOCUMENT:
 ${stepContent}
@@ -1029,8 +1130,9 @@ INSTRUCTIONS:
 - Be specific about what changes would be needed
 - When ready to apply, remind them to click "Apply feedback"
 - Respond in ${commLang}
-- Keep responses concise and actionable`
-        : `You are a helpful assistant discussing the "${params.step}" document.
+- Keep responses concise and actionable`;
+      } else {
+        chatPrompt = `You are a helpful assistant discussing the "${actualStep}" document.
 
 CURRENT DOCUMENT CONTENT:
 ${stepContent}
@@ -1053,6 +1155,7 @@ INSTRUCTIONS:
 - When ready to apply, remind them to click "Apply feedback"
 - Respond in ${commLang}
 - Keep responses concise but helpful`;
+      }
 
       // Use model from request body, or fall back to config
       const model = body.model || config.models?.init?.[0]?.model || 'claude-default';

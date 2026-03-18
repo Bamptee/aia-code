@@ -459,7 +459,7 @@ IMPORTANT: Base your specification on these detected technologies. Do NOT invent
 `;
 }
 
-async function getGitDiff(root) {
+export async function getGitDiff(root) {
   // 1. Try uncommitted changes (staged + unstaged), excluding .aia
   const uncommitted = await execGit(['diff', 'HEAD', '--', '.', ':!.aia'], root);
   if (uncommitted) return uncommitted;

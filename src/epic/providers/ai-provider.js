@@ -383,14 +383,10 @@ Note: Configure an AI provider (Anthropic or OpenAI) for actual generation.`;
   /**
    * Enriches story initial input
    * @param {string} input - User's initial input/idea
-   * @param {string} [figmaContext=''] - Optional Figma design context
    * @returns {Promise<string>} Enriched structured content
    */
-  async enrichStoryInit(input, figmaContext = '') {
-    let prompt = PROMPT_TEMPLATES.storyInit.replace('{input}', input);
-    if (figmaContext) {
-      prompt += `\n\nFigma Design Information:\n${figmaContext}`;
-    }
+  async enrichStoryInit(input) {
+    const prompt = PROMPT_TEMPLATES.storyInit.replace('{input}', input);
     return this.generate(prompt);
   }
 

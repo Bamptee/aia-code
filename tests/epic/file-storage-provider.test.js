@@ -38,7 +38,6 @@ describe('FileStorageProvider', () => {
       assert.ok(await fs.pathExists(storage.aiaDir), '.aia directory should exist');
       assert.ok(await fs.pathExists(storage.epicsDir), 'epics directory should exist');
       assert.ok(await fs.pathExists(storage.cacheDir), 'cache directory should exist');
-      assert.ok(await fs.pathExists(storage.figmaCacheDir), 'figma cache directory should exist');
       assert.ok(await fs.pathExists(storage.attachmentsDir), 'attachments directory should exist');
       assert.ok(await fs.pathExists(storage.indexDir), 'index directory should exist');
     });
@@ -178,44 +177,6 @@ describe('FileStorageProvider', () => {
       await storage.ensureDirectories();
       const index = await storage.readStoryIndex();
       assert.deepStrictEqual(index, {});
-    });
-  });
-
-  describe('Figma cache operations', () => {
-    test('writes and reads Figma cache', async () => {
-      const cache = {
-        cacheKey: 'figma_abc123',
-        figmaUrl: 'https://www.figma.com/file/abc123',
-        extractedData: { name: 'Design' },
-        cachedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 86400000).toISOString(), // 24h from now
-      };
-
-      await storage.writeFigmaCache(cache);
-      const read = await storage.readFigmaCache('figma_abc123');
-
-      assert.deepStrictEqual(read, cache);
-    });
-
-    test('returns null for expired cache', async () => {
-      const cache = {
-        cacheKey: 'figma_expired',
-        figmaUrl: 'https://www.figma.com/file/expired',
-        extractedData: { name: 'Old Design' },
-        cachedAt: new Date(Date.now() - 86400000).toISOString(), // 24h ago
-        expiresAt: new Date(Date.now() - 1000).toISOString(), // Expired
-      };
-
-      await storage.writeFigmaCache(cache);
-      const read = await storage.readFigmaCache('figma_expired');
-
-      assert.strictEqual(read, null);
-    });
-
-    test('returns null for non-existent cache', async () => {
-      await storage.ensureDirectories();
-      const read = await storage.readFigmaCache('non-existent');
-      assert.strictEqual(read, null);
     });
   });
 

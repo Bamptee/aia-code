@@ -166,13 +166,6 @@ export const DEV_STEPS = Object.freeze(['specTech', 'devPlan', 'implement', 'rev
 const HTML_TAG_PATTERN = /<[^>]*>/;
 
 /**
- * Figma URL validation pattern
- * Matches: https://www.figma.com/file/{key} or /design/{key}
- * @private
- */
-const FIGMA_URL_PATTERN = /^https:\/\/(www\.)?figma\.com\/(file|design)\/[a-zA-Z0-9]+/;
-
-/**
  * Task status enum values
  * @readonly
  * @enum {string}
@@ -389,18 +382,6 @@ export function validateQARejection(reason) {
     valid: errors.length === 0,
     errors,
   };
-}
-
-/**
- * Validates a Figma URL
- * @param {string} url - URL to validate
- * @returns {boolean} True if valid Figma URL
- */
-export function isValidFigmaUrl(url) {
-  if (!url || typeof url !== 'string') {
-    return false;
-  }
-  return FIGMA_URL_PATTERN.test(url);
 }
 
 /**

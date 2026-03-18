@@ -63,21 +63,12 @@ import { STORY_STATUS, STORY_SPACE, STORY_TYPE } from './validators.js';
  */
 
 /**
- * @typedef {Object} StoryFigmaLink
- * @property {string} url - Figma URL
- * @property {string|null} label - Optional label/description
- * @property {string|null} cacheKey - Cache key for Figma data
- * @property {string} addedAt - ISO 8601 timestamp
- */
-
-/**
  * @typedef {Object} StoryInit
  * @property {string|null} input - User's initial input/description
  * @property {string|null} enriched - AI-enriched version of the input
  * @property {string|null} model - Model used for enrichment
  * @property {string|null} enrichedAt - When the input was enriched
  * @property {Array<StoryAttachment>} attachments - Attached files
- * @property {Array<StoryFigmaLink>} figmaLinks - Figma design links
  */
 
 /**
@@ -100,8 +91,6 @@ import { STORY_STATUS, STORY_SPACE, STORY_TYPE } from './validators.js';
  * @property {StoryInit} init - Initial input and enriched description
  * @property {StorySteps} steps - Step completion tracking
  * @property {string|null} linkedFeatureId - For Bugs: parent Feature reference
- * @property {string|null} figmaUrl - Figma design link
- * @property {string|null} figmaCacheKey - Reference to cached Figma data
  * @property {Array<QAAction>} qaHistory - QA action history
  * @property {Array<string>} attachments - Array of attachment filenames
  * @property {boolean} taskMode - Whether story uses task-based workflow
@@ -151,7 +140,6 @@ export function createStory(data) {
       model: null,
       enrichedAt: null,
       attachments: [],
-      figmaLinks: [],
     },
     steps: {
       init: createStepState(),
@@ -163,8 +151,6 @@ export function createStory(data) {
       review: createStepState(),
     },
     linkedFeatureId: data.linkedFeatureId || null,
-    figmaUrl: null,
-    figmaCacheKey: null,
     qaHistory: [],
     attachments: [],
     taskMode: false,
@@ -197,7 +183,6 @@ export function createBugFromRejection(feature, reason) {
       model: null,
       enrichedAt: null,
       attachments: [],
-      figmaLinks: [],
     },
     steps: {
       init: {
@@ -251,8 +236,6 @@ export function createBugFromRejection(feature, reason) {
       },
     },
     linkedFeatureId: feature.id,
-    figmaUrl: null,
-    figmaCacheKey: null,
     qaHistory: [],
     attachments: [],
     taskMode: false,

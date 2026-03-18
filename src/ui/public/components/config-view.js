@@ -337,6 +337,64 @@ function ProjectScope({ onSaved }) {
   );
 }
 
+function MCPFigmaSection() {
+  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
+    React.createElement('div', { className: 'flex items-center gap-2' },
+      React.createElement('span', { className: 'text-2xl' }, '\uD83C\uDFA8'),
+      React.createElement('h3', { className: 'text-sm font-semibold text-purple-400' }, 'Figma Integration (MCP)')
+    ),
+
+    React.createElement('p', { className: 'text-sm text-slate-300' },
+      'To use Figma with AI agents, install the Figma MCP in your CLI. Once installed, simply paste your Figma links in the chat.'
+    ),
+
+    React.createElement('div', { className: 'space-y-3' },
+      // Claude Code
+      React.createElement('div', { className: 'bg-slate-900 border border-slate-700 rounded-lg p-3' },
+        React.createElement('div', { className: 'flex items-center gap-2 mb-2' },
+          React.createElement('span', { className: 'text-lg' }, '\uD83E\uDDE0'),
+          React.createElement('span', { className: 'text-sm font-medium text-slate-200' }, 'Claude Code')
+        ),
+        React.createElement('code', { className: 'block bg-slate-800 rounded px-3 py-2 text-xs text-emerald-400 font-mono' },
+          'claude plugin install figma@claude-plugins-official'
+        )
+      ),
+
+      // Codex
+      React.createElement('div', { className: 'bg-slate-900 border border-slate-700 rounded-lg p-3' },
+        React.createElement('div', { className: 'flex items-center gap-2 mb-2' },
+          React.createElement('span', { className: 'text-lg' }, '\uD83D\uDCBB'),
+          React.createElement('span', { className: 'text-sm font-medium text-slate-200' }, 'OpenAI Codex')
+        ),
+        React.createElement('a', {
+          href: 'https://platform.openai.com/docs/guides/tools/model-context-protocol',
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          className: 'text-xs text-blue-400 hover:text-blue-300 underline',
+        }, 'View OpenAI MCP documentation \u2192')
+      ),
+
+      // Gemini
+      React.createElement('div', { className: 'bg-slate-900 border border-slate-700 rounded-lg p-3' },
+        React.createElement('div', { className: 'flex items-center gap-2 mb-2' },
+          React.createElement('span', { className: 'text-lg' }, '\u2728'),
+          React.createElement('span', { className: 'text-sm font-medium text-slate-200' }, 'Google Gemini')
+        ),
+        React.createElement('a', {
+          href: 'https://ai.google.dev/docs/mcp',
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          className: 'text-xs text-blue-400 hover:text-blue-300 underline',
+        }, 'View Google MCP documentation \u2192')
+      )
+    ),
+
+    React.createElement('p', { className: 'text-xs text-slate-500' },
+      'Note: The Figma MCP allows AI to read and analyze your Figma designs directly from the chat.'
+    )
+  );
+}
+
 export function ConfigView() {
   const [contextFiles, setContextFiles] = React.useState([]);
   const [knowledgeCategories, setKnowledgeCategories] = React.useState([]);
@@ -387,6 +445,9 @@ export function ConfigView() {
 
     // Project Scope
     React.createElement(ProjectScope, { onSaved: handlePreferencesSaved }),
+
+    // MCP Figma Integration
+    React.createElement(MCPFigmaSection),
 
     // config.yaml (advanced)
     React.createElement(YamlEditor, {

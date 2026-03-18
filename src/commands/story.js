@@ -11,8 +11,6 @@ import { StoryIndexService } from '../epic/services/story-index-service.js';
 import { EpicService } from '../epic/services/epic-service.js';
 import { StoryService } from '../epic/services/story-service.js';
 import { AIProvider } from '../epic/providers/ai-provider.js';
-import { FigmaProvider } from '../epic/providers/figma-provider.js';
-import { isValidFigmaUrl } from '../epic/models/validators.js';
 
 /**
  * Creates and initializes services
@@ -23,8 +21,7 @@ function createServices() {
   const epicService = new EpicService(storage, storyIndexService);
   const storyService = new StoryService(storage, storyIndexService, epicService);
   const aiProvider = new AIProvider();
-  const figmaProvider = new FigmaProvider(storage);
-  return { storage, storyService, epicService, aiProvider, figmaProvider };
+  return { storage, storyService, epicService, aiProvider };
 }
 
 /**
@@ -138,10 +135,9 @@ export function registerStoryCommand(program) {
         console.log(`Space: ${s.space}`);
         if (s.description) console.log(`Description: ${s.description}`);
         if (s.linkedFeatureId) console.log(`Linked to: ${s.linkedFeatureId}`);
-        if (s.figmaUrl) console.log(`Figma: ${s.figmaUrl}`);
 
         // Init section
-        if (s.init?.input || s.init?.enriched || s.init?.attachments?.length || s.init?.figmaLinks?.length) {
+        if (s.init?.input || s.init?.enriched || s.init?.attachments?.length) {
           console.log(chalk.bold('\nInit:'));
           if (s.init.input) {
             const preview = s.init.input.substring(0, 80);
@@ -152,9 +148,6 @@ export function registerStoryCommand(program) {
           }
           if (s.init.attachments?.length > 0) {
             console.log(`  Attachments: ${s.init.attachments.length} file(s)`);
-          }
-          if (s.init.figmaLinks?.length > 0) {
-            console.log(`  Figma Links: ${s.init.figmaLinks.length} link(s)`);
           }
         }
 
@@ -653,142 +646,6 @@ export function registerStoryCommand(program) {
       }
     });
 
-  // story figma (Manage Figma links)
-  const figmaCmd = story
-    .command('figma')
-    .description('Manage Figma links for story init');
-
-  // story figma add
-  figmaCmd
-    .command('add <storyId> <url>')
-    .description('Add a Figma link to story init')
-    .option('-l, --label <label>', 'Optional label for the link')
-    .action(async (storyId, url, options) => {
-      try {
-        const { storyService, figmaProvider } = createServices();
-
-        // Validate URL
-        if (!isValidFigmaUrl(url)) {
-          console.error(chalk.red('Invalid Figma URL. Must be a figma.com URL.'));
-          process.exit(1);
-        }
-
-        // Check if Figma is configured
-        let cacheKey = null;
-        let figmaData = null;
-
-        if (figmaProvider.isConfigured()) {
-          console.log(chalk.cyan('Fetching Figma design data...'));
-          cacheKey = figmaProvider.getCacheKey(url);
-          try {
-            figmaData = await figmaProvider.fetchDesign(url);
-            console.log(chalk.green(`✓ Design data cached: ${figmaData.name}`));
-            console.log(chalk.dim(`  Components: ${figmaData.components?.length || 0}`));
-            console.log(chalk.dim(`  Frames: ${figmaData.frames?.length || 0}`));
-          } catch (err) {
-            console.log(chalk.yellow(`⚠ Could not fetch design data: ${err.message}`));
-          }
-        } else {
-          console.log(chalk.yellow('⚠ FIGMA_TOKEN not set - saving URL only (no design data for AI)'));
-        }
-
-        await storyService.addFigmaLink(storyId, url, options.label || null, cacheKey);
-        console.log(chalk.green(`✓ Figma link added`));
-        if (options.label) {
-          console.log(chalk.dim(`  Label: ${options.label}`));
-        }
-        console.log(chalk.dim(`  URL: ${url}`));
-      } catch (err) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  // story figma status
-  figmaCmd
-    .command('status')
-    .description('Check Figma API configuration status')
-    .action(async () => {
-      try {
-        const { figmaProvider } = createServices();
-
-        console.log(chalk.bold('\nFigma Configuration:\n'));
-
-        if (figmaProvider.isConfigured()) {
-          console.log(chalk.green('  ✓ FIGMA_TOKEN is configured'));
-          console.log(chalk.dim('  Design data will be fetched and cached for AI enrichment'));
-        } else {
-          console.log(chalk.yellow('  ⚠ FIGMA_TOKEN is not set'));
-          console.log(chalk.dim('  Links will be saved as URLs only (no design data for AI)'));
-          console.log();
-          console.log(chalk.bold('  To configure:'));
-          console.log(chalk.cyan('  export FIGMA_TOKEN=your-personal-access-token'));
-          console.log(chalk.dim('  Get your token from: Figma Settings > Account > Personal Access Tokens'));
-        }
-        console.log();
-      } catch (err) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  // story figma list
-  figmaCmd
-    .command('list <storyId>')
-    .alias('ls')
-    .description('List Figma links for a story')
-    .action(async (storyId) => {
-      try {
-        const { storyService, figmaProvider } = createServices();
-        const { figmaLinks } = await storyService.getInitAssets(storyId);
-
-        if (figmaLinks.length === 0) {
-          console.log(chalk.yellow('No Figma links attached.'));
-          return;
-        }
-
-        console.log(chalk.bold(`\nFigma Links (${figmaLinks.length}):\n`));
-        for (const link of figmaLinks) {
-          const label = link.label ? chalk.cyan(`[${link.label}] `) : '';
-          const cached = link.cacheKey ? chalk.green(' [cached]') : chalk.dim(' [no cache]');
-          console.log(`  ${label}${link.url}${cached}`);
-          console.log(chalk.dim(`    Added: ${new Date(link.addedAt).toLocaleString()}`));
-
-          // Show cached data summary if available
-          if (link.cacheKey && figmaProvider.isConfigured()) {
-            try {
-              const cachedData = await figmaProvider.getCached(link.url);
-              if (cachedData) {
-                console.log(chalk.dim(`    Design: ${cachedData.name} | Components: ${cachedData.components?.length || 0} | Frames: ${cachedData.frames?.length || 0}`));
-              }
-            } catch {
-              // Ignore cache read errors
-            }
-          }
-        }
-        console.log();
-      } catch (err) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
-  // story figma remove
-  figmaCmd
-    .command('remove <storyId> <url>')
-    .alias('rm')
-    .description('Remove a Figma link from story init')
-    .action(async (storyId, url) => {
-      try {
-        const { storyService } = createServices();
-        await storyService.removeFigmaLink(storyId, url);
-        console.log(chalk.green(`✓ Figma link removed`));
-      } catch (err) {
-        console.error(chalk.red(err.message));
-        process.exit(1);
-      }
-    });
-
   // story attach (Add attachment)
   story
     .command('attach <storyId> <filePath>')
@@ -915,12 +772,12 @@ export function registerStoryCommand(program) {
   // story assets (Show all init assets)
   story
     .command('assets <storyId>')
-    .description('Show all init assets (attachments and Figma links)')
+    .description('Show all init assets (attachments)')
     .action(async (storyId) => {
       try {
         const { storyService } = createServices();
         const story = await storyService.getById(storyId);
-        const { attachments, figmaLinks } = await storyService.getInitAssets(storyId);
+        const { attachments } = await storyService.getInitAssets(storyId);
 
         console.log(chalk.bold(`\nInit Assets for: ${story.title}\n`));
 
@@ -935,18 +792,6 @@ export function registerStoryCommand(program) {
           }
           console.log();
         }
-
-        // Figma links
-        console.log(chalk.bold.underline(`Figma Links (${figmaLinks.length}):`));
-        if (figmaLinks.length === 0) {
-          console.log(chalk.dim('  None'));
-        } else {
-          for (const link of figmaLinks) {
-            const label = link.label ? chalk.cyan(`[${link.label}] `) : '';
-            console.log(`  ${label}${link.url}`);
-          }
-        }
-        console.log();
 
         // Attachments
         console.log(chalk.bold.underline(`Attachments (${attachments.length}):`));

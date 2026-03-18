@@ -14,13 +14,11 @@ export class POCService {
    * @param {import('../providers/file-storage-provider.js').FileStorageProvider} storage
    * @param {import('./story-service.js').StoryService} storyService
    * @param {import('../providers/ai-provider.js').AIProvider} aiProvider
-   * @param {import('../providers/figma-provider.js').FigmaProvider} [figmaProvider]
    */
-  constructor(storage, storyService, aiProvider, figmaProvider = null) {
+  constructor(storage, storyService, aiProvider) {
     this.storage = storage;
     this.storyService = storyService;
     this.aiProvider = aiProvider;
-    this.figmaProvider = figmaProvider;
   }
 
   /**
@@ -28,11 +26,10 @@ export class POCService {
    * @param {string} storyId - Story ID
    * @param {Object} [options] - Generation options
    * @param {string} [options.context=''] - Additional context for generation
-   * @param {boolean} [options.includeFigmaData=true] - Include Figma design data if available
    * @returns {Promise<{story: Object, poc: string, metadata: Object}>} Generated POC
    */
   async generate(storyId, options = {}) {
-    const { context = '', includeFigmaData = true } = options;
+    const { context = '' } = options;
 
     const { epic, story } = await this.storyService.findStoryWithEpic(storyId);
 
@@ -43,21 +40,8 @@ export class POCService {
     // Gather specification content
     const specContent = this._buildSpecification(story);
 
-    // Add Figma data if available
-    let figmaContext = '';
-    if (includeFigmaData && story.figmaUrl && this.figmaProvider) {
-      try {
-        const figmaData = await this.figmaProvider.getCached(story.figmaUrl);
-        if (figmaData) {
-          figmaContext = `\n\nFigma Design Data:\n${this.figmaProvider.generateSummary(figmaData)}`;
-        }
-      } catch {
-        // Ignore Figma errors, proceed without design data
-      }
-    }
-
     // Generate POC
-    const fullContext = [context, figmaContext, this._getCodebaseContext()].filter(Boolean).join('\n\n');
+    const fullContext = [context, this._getCodebaseContext()].filter(Boolean).join('\n\n');
 
     const poc = await this.aiProvider.generatePOC(specContent, fullContext);
 

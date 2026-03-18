@@ -11,7 +11,6 @@ import { StoryService } from '../epic/services/story-service.js';
 import { POCService } from '../epic/services/poc-service.js';
 import { POCEnvironmentService } from '../epic/services/poc-environment-service.js';
 import { AIProvider, AI_PROVIDER_TYPE } from '../epic/providers/ai-provider.js';
-import { FigmaProvider } from '../epic/providers/figma-provider.js';
 
 /**
  * Creates and initializes services
@@ -22,8 +21,7 @@ function createServices() {
   const epicService = new EpicService(storage, storyIndexService);
   const storyService = new StoryService(storage, storyIndexService, epicService);
   const aiProvider = new AIProvider();
-  const figmaProvider = new FigmaProvider(storage);
-  const pocService = new POCService(storage, storyService, aiProvider, figmaProvider);
+  const pocService = new POCService(storage, storyService, aiProvider);
   const pocEnvService = new POCEnvironmentService(storage, storyService);
   return { storage, storyService, pocService, pocEnvService, aiProvider };
 }
@@ -40,7 +38,6 @@ export function registerPOCCommand(program) {
     .description('Generate POC code for a story')
     .option('-o, --output <filename>', 'Output filename', 'poc.js')
     .option('-c, --context <context>', 'Additional context')
-    .option('--no-figma', 'Exclude Figma design data')
     .option('--dry-run', 'Preview without saving')
     .option('--isolated', 'Create isolated environment for POC execution')
     .option('--prototype', 'Lightweight mode - minimal environment without full setup')
@@ -60,7 +57,6 @@ export function registerPOCCommand(program) {
         if (options.dryRun) {
           const result = await pocService.generate(storyId, {
             context: options.context,
-            includeFigmaData: options.figma,
           });
           console.log(chalk.bold('\nGenerated POC:\n'));
           console.log(result.poc);
@@ -68,11 +64,9 @@ export function registerPOCCommand(program) {
         } else {
           const result = await pocService.generateAndSave(storyId, options.output, {
             context: options.context,
-            includeFigmaData: options.figma,
           });
           console.log(chalk.green(`✓ POC generated and saved: ${result.savedAs}`));
           console.log(chalk.dim(`  Model: ${result.metadata.model}`));
-          console.log(chalk.dim(`  Figma data: ${result.metadata.hadFigmaData ? 'included' : 'not included'}`));
 
           // Create isolated environment if requested
           if (options.isolated || options.prototype) {

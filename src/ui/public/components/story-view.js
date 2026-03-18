@@ -510,75 +510,6 @@ function AttachmentZone({ slug, attachments = [], onUpdate, readonly = false }) 
   );
 }
 
-// ============== Figma Links Zone ==============
-
-function FigmaLinksZone({ slug, links = [], onUpdate, readonly = false }) {
-  const [url, setUrl] = React.useState('');
-  const [adding, setAdding] = React.useState(false);
-  const [error, setError] = React.useState(null);
-
-  const handleAdd = async () => {
-    if (!url.trim() || readonly) return;
-    setAdding(true);
-    setError(null);
-    try {
-      const res = await api.post(`/stories/${slug}/init/figma`, { url: url.trim() });
-      if (res.story) onUpdate(res.story);
-      setUrl('');
-    } catch (e) {
-      setError(e.message);
-    }
-    setAdding(false);
-  };
-
-  const handleRemove = async (linkUrl) => {
-    if (readonly) return;
-    try {
-      const res = await api.delete(`/stories/${slug}/init/figma`, { url: linkUrl });
-      if (res.story) onUpdate(res.story);
-    } catch (e) {
-      setError(e.message);
-    }
-  };
-
-  return React.createElement('div', { className: 'space-y-2' },
-    !readonly && React.createElement('div', { className: 'flex items-center gap-2' },
-      React.createElement('input', {
-        type: 'text',
-        value: url,
-        onChange: e => setUrl(e.target.value),
-        onKeyDown: e => e.key === 'Enter' && handleAdd(),
-        placeholder: 'Paste Figma link...',
-        className: 'flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-violet-500 focus:outline-none',
-      }),
-      React.createElement('button', {
-        onClick: handleAdd,
-        disabled: adding || !url.trim(),
-        className: 'px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors text-sm disabled:opacity-50',
-      }, adding ? '...' : '🎨 Add')
-    ),
-
-    error && React.createElement('p', { className: 'text-red-400 text-xs' }, error),
-
-    links.length > 0 && React.createElement('div', { className: 'flex flex-wrap gap-2' },
-      ...links.map(l => React.createElement('a', {
-        key: l.url,
-        href: l.url,
-        target: '_blank',
-        rel: 'noopener',
-        className: 'flex items-center gap-2 px-2 py-1 bg-purple-500/10 border border-purple-500/30 rounded-lg text-xs text-purple-400 hover:bg-purple-500/20',
-      },
-        '🎨',
-        l.label || 'Figma',
-        !readonly && React.createElement('button', {
-          onClick: (e) => { e.preventDefault(); handleRemove(l.url); },
-          className: 'text-red-400 hover:text-red-300 ml-1',
-        }, '×')
-      ))
-    )
-  );
-}
-
 // ============== Streaming Output Panel ==============
 
 /**
@@ -1002,7 +933,6 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
               enriched: result.content,
               input: updatedStory.init?.input || '',
               attachments: updatedStory.init?.attachments || [],
-              figmaLinks: updatedStory.init?.figmaLinks || [],
             }
           };
         }
@@ -1086,11 +1016,6 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
       React.createElement(AttachmentZone, {
         slug,
         attachments: story?.init?.attachments || [],
-        onUpdate: onStoryUpdate,
-      }),
-      React.createElement(FigmaLinksZone, {
-        slug,
-        links: story?.init?.figmaLinks || [],
         onUpdate: onStoryUpdate,
       }),
       React.createElement('textarea', {
@@ -1248,7 +1173,7 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
 
 // ============== Step Section ==============
 
-function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, figmaLinks, onStoryUpdate, readonly = false, tokenUsage = null }) {
+function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, onStoryUpdate, readonly = false, tokenUsage = null }) {
   const config = STEP_CONFIG[stepKey];
   const formattedTokens = formatTokenCount(tokenUsage?.total);
 
@@ -1609,7 +1534,6 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
             React.createElement('span', null, 'Provide context and generate content')
           ),
           React.createElement(AttachmentZone, { slug, attachments: attachments || [], onUpdate: onStoryUpdate }),
-          React.createElement(FigmaLinksZone, { slug, links: figmaLinks || [], onUpdate: onStoryUpdate }),
           React.createElement('textarea', {
             value: description,
             onChange: e => setDescription(e.target.value),
@@ -3193,7 +3117,6 @@ export function StoryView({ slug, context = 'product' }) {
           currentStep,
           storyContext: story.init?.enriched || story.description || '',
           attachments: story.init?.attachments,
-          figmaLinks: story.init?.figmaLinks,
           onStoryUpdate: setStory,
           readonly,
           tokenUsage: tokenUsage?.steps?.[apiStepKey] || tokenUsage?.steps?.[stepKey],

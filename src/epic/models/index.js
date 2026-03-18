@@ -60,7 +60,6 @@ export {
   validateStory,
   validateQARejection,
   validateTask,
-  isValidFigmaUrl,
   isValidStepName,
   isValidEpicStatus,
   isValidStoryStatus,

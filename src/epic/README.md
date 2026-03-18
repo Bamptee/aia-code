@@ -9,7 +9,6 @@ This module provides:
 - **Story Workflow**: Two-space workflow (experimentation → development) with step completion tracking
 - **QA Integration**: Approve/reject workflow with automatic bug creation
 - **Roadmap Planning**: Period-based planning with weekly/monthly/quarterly granularity
-- **Figma Integration**: Import and cache design data from Figma
 - **AI Generation**: Generate briefs, specs, questions, and POC code
 - **Data Integrity**: Automatic validation and repair of data consistency
 
@@ -23,7 +22,6 @@ src/epic/
 │   └── validators.js # Validation schemas and helpers
 ├── providers/        # External integrations
 │   ├── file-storage-provider.js  # File system operations with locking
-│   ├── figma-provider.js         # Figma API integration
 │   └── ai-provider.js            # AI content generation
 ├── services/         # Business logic
 │   ├── epic-service.js           # Epic CRUD operations
@@ -33,7 +31,6 @@ src/epic/
 │   ├── roadmap-service.js        # Roadmap and period management
 │   ├── poc-service.js            # POC code generation
 │   ├── migration-service.js      # System initialization and migration
-│   ├── figma-attachment-service.js # Story-Figma linking
 │   └── integrity-service.js      # Data integrity checks
 └── utils/            # Utilities
     ├── id-generator.js  # UUID generation
@@ -51,8 +48,6 @@ All data is stored in `.aia/` directory as JSON files, making it git-trackable:
 ├── epics/
 │   ├── {epic-id}.json    # Individual epic files
 │   └── ...
-├── figma-cache/          # Cached Figma design data
-│   └── {hash}.json
 └── poc/                  # Generated POC code
     └── {filename}
 ```
@@ -269,4 +264,3 @@ npm test -- tests/epic/*.test.js
 Environment variables:
 - `ANTHROPIC_API_KEY`: For Claude AI integration
 - `OPENAI_API_KEY`: For OpenAI integration
-- `FIGMA_ACCESS_TOKEN`: For Figma design imports

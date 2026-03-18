@@ -188,10 +188,6 @@ async function migrateStoryToYaml(story, epicSlug, root) {
     initContent += `## Initial Input\n\n${story.init.input}\n\n`;
   }
 
-  if (story.figmaUrl) {
-    initContent += `## Figma\n\n[Design Link](${story.figmaUrl})\n\n`;
-  }
-
   initContent += `## Constraints\n\n`;
 
   await fs.writeFile(path.join(storyDir, 'init.md'), initContent, 'utf-8');

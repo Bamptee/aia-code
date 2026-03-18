@@ -1602,7 +1602,6 @@ INSTRUCTIONS:
         input: (isEnriched || isDefaultTemplate) ? '' : initContent,
         enriched: isEnriched ? initContent : null,
         attachments: [],
-        figmaLinks: [],
       };
 
       // Get epic info if story has an epic
@@ -1966,14 +1965,6 @@ INSTRUCTIONS:
     } catch {
       json(res, { configured: false });
     }
-  });
-
-  /**
-   * GET /api/figma/status - Check Figma configuration
-   */
-  router.get('/api/figma/status', async (req, res) => {
-    const configured = !!process.env.FIGMA_TOKEN;
-    json(res, { configured });
   });
 
   /**

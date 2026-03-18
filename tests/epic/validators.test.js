@@ -10,7 +10,6 @@ import {
   validateEpic,
   validateStory,
   validateQARejection,
-  isValidFigmaUrl,
   isValidStepName,
   isValidEpicStatus,
   isValidStoryStatus,
@@ -184,62 +183,6 @@ describe('validators', () => {
       const longReason = 'a'.repeat(2001);
       const result = validateQARejection(longReason);
       assert.strictEqual(result.valid, false);
-    });
-  });
-
-  describe('isValidFigmaUrl', () => {
-    test('accepts valid Figma file URL', () => {
-      assert.strictEqual(
-        isValidFigmaUrl('https://www.figma.com/file/abc123/Design'),
-        true
-      );
-    });
-
-    test('accepts valid Figma design URL', () => {
-      assert.strictEqual(
-        isValidFigmaUrl('https://www.figma.com/design/abc123/Design'),
-        true
-      );
-    });
-
-    test('accepts Figma URL without www', () => {
-      assert.strictEqual(
-        isValidFigmaUrl('https://figma.com/file/abc123/Design'),
-        true
-      );
-    });
-
-    test('accepts Figma URL with node-id', () => {
-      assert.strictEqual(
-        isValidFigmaUrl('https://www.figma.com/file/abc123/Design?node-id=1-2'),
-        true
-      );
-    });
-
-    test('rejects non-Figma URL', () => {
-      assert.strictEqual(
-        isValidFigmaUrl('https://google.com/file/abc123'),
-        false
-      );
-    });
-
-    test('rejects empty URL', () => {
-      assert.strictEqual(isValidFigmaUrl(''), false);
-    });
-
-    test('rejects null URL', () => {
-      assert.strictEqual(isValidFigmaUrl(null), false);
-    });
-
-    test('rejects undefined URL', () => {
-      assert.strictEqual(isValidFigmaUrl(undefined), false);
-    });
-
-    test('rejects HTTP Figma URL', () => {
-      assert.strictEqual(
-        isValidFigmaUrl('http://www.figma.com/file/abc123'),
-        false
-      );
     });
   });
 

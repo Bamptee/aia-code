@@ -174,10 +174,6 @@ export class StoryToFeatureService {
       content += `## Description\n\n<!-- Add description -->\n\n`;
     }
 
-    if (story.figmaUrl) {
-      content += `## Figma\n\n[Design Link](${story.figmaUrl})\n\n`;
-    }
-
     content += `## Constraints\n\n<!-- Add any constraints -->\n\n`;
 
     return content;

@@ -11,8 +11,6 @@ export { RoadmapService } from './roadmap-service.js';
 export { POCService } from './poc-service.js';
 export { POCEnvironmentService } from './poc-environment-service.js';
 export { MigrationService } from './migration-service.js';
-export { FigmaAttachmentService } from './figma-attachment-service.js';
-export { FigmaDiscoveryService } from './figma-discovery-service.js';
 export { IntegrityService, ISSUE_TYPE, ISSUE_SEVERITY } from './integrity-service.js';
 export { StoryToFeatureService } from './story-to-feature-service.js';
 

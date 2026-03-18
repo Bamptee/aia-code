@@ -1060,75 +1060,6 @@ export class StoryService {
   }
 
   /**
-   * Adds a Figma link to story init
-   * @param {string} storyId - Story ID
-   * @param {string} url - Figma URL
-   * @param {string|null} label - Optional label
-   * @param {string|null} cacheKey - Optional cache key
-   * @returns {Promise<import('../models/story.js').Story>} Updated story
-   * @throws {NotFoundError} If Story not found
-   */
-  async addFigmaLink(storyId, url, label = null, cacheKey = null) {
-    const { epic, story } = await this.findStoryWithEpic(storyId);
-
-    if (!story) {
-      throw new NotFoundError(`Story ${storyId} not found`);
-    }
-
-    // Ensure init object exists
-    if (!story.init) {
-      story.init = { input: null, enriched: null, model: null, enrichedAt: null, attachments: [], figmaLinks: [] };
-    }
-    if (!story.init.figmaLinks) {
-      story.init.figmaLinks = [];
-    }
-
-    // Check if already exists
-    if (story.init.figmaLinks.some((l) => l.url === url)) {
-      throw new ValidationError('This Figma link is already attached');
-    }
-
-    story.init.figmaLinks.push({
-      url,
-      label,
-      cacheKey,
-      addedAt: new Date().toISOString(),
-    });
-
-    story.updatedAt = new Date().toISOString();
-    epic.updatedAt = new Date().toISOString();
-
-    await this.storage.writeEpic(epic);
-    return story;
-  }
-
-  /**
-   * Removes a Figma link from story init
-   * @param {string} storyId - Story ID
-   * @param {string} url - Figma URL to remove
-   * @returns {Promise<import('../models/story.js').Story>} Updated story
-   * @throws {NotFoundError} If Story not found
-   */
-  async removeFigmaLink(storyId, url) {
-    const { epic, story } = await this.findStoryWithEpic(storyId);
-
-    if (!story) {
-      throw new NotFoundError(`Story ${storyId} not found`);
-    }
-
-    if (!story.init?.figmaLinks) {
-      return story;
-    }
-
-    story.init.figmaLinks = story.init.figmaLinks.filter((l) => l.url !== url);
-    story.updatedAt = new Date().toISOString();
-    epic.updatedAt = new Date().toISOString();
-
-    await this.storage.writeEpic(epic);
-    return story;
-  }
-
-  /**
    * Adds an attachment to story init
    * @param {string} storyId - Story ID
    * @param {Object} attachment - Attachment data
@@ -1148,7 +1079,7 @@ export class StoryService {
 
     // Ensure init object exists
     if (!story.init) {
-      story.init = { input: null, enriched: null, model: null, enrichedAt: null, attachments: [], figmaLinks: [] };
+      story.init = { input: null, enriched: null, model: null, enrichedAt: null, attachments: [] };
     }
     if (!story.init.attachments) {
       story.init.attachments = [];
@@ -1193,9 +1124,9 @@ export class StoryService {
   }
 
   /**
-   * Gets init attachments and Figma links
+   * Gets init attachments
    * @param {string} storyId - Story ID
-   * @returns {Promise<{attachments: Array, figmaLinks: Array}>}
+   * @returns {Promise<{attachments: Array}>}
    * @throws {NotFoundError} If Story not found
    */
   async getInitAssets(storyId) {
@@ -1207,7 +1138,6 @@ export class StoryService {
 
     return {
       attachments: story.init?.attachments || [],
-      figmaLinks: story.init?.figmaLinks || [],
     };
   }
 

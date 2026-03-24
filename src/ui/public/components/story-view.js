@@ -235,7 +235,8 @@ function FilesUsedPanel({ filesUsed, fileOperations, expanded = false }) {
     filesUsed.promptTemplate ||
     filesUsed.priorSteps?.length > 0 ||
     filesUsed.contextFiles?.length > 0 ||
-    filesUsed.knowledgeCategories?.length > 0
+    filesUsed.knowledgeCategories?.length > 0 ||
+    filesUsed.testLevel
   );
 
   // Deduplicate file operations: Read + Edit on same file = Modified only
@@ -332,6 +333,18 @@ function FilesUsedPanel({ filesUsed, fileOperations, expanded = false }) {
           ),
           filesUsed.techStack?.length > 0 && React.createElement('span', { className: 'text-orange-400' },
             `Tech: ${filesUsed.techStack.join(', ')}`
+          )
+        ),
+        // Test level
+        filesUsed.testLevel && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '🧪 Test Level: '),
+          React.createElement('span', { className: 'text-teal-400' },
+            filesUsed.testLevel.levels?.includes('none')
+              ? 'No tests'
+              : filesUsed.testLevel.levels?.join(', ') || 'auto'
+          ),
+          filesUsed.testLevel.custom_instructions && React.createElement('span', { className: 'text-slate-500 ml-2' },
+            `(${filesUsed.testLevel.custom_instructions})`
           )
         )
       ),
@@ -2855,6 +2868,218 @@ function QAProfileModal({ isOpen, onClose, onGenerate, generating }) {
   );
 }
 
+// ============== Test Level Selector ==============
+
+const TEST_LEVEL_OPTIONS = [
+  { key: 'unit', label: 'Unit', icon: '🔬' },
+  { key: 'integration', label: 'Integration', icon: '🔗' },
+  { key: 'e2e', label: 'E2E', icon: '🌐' },
+  { key: 'none', label: 'No tests', icon: '🚫' },
+];
+
+function TestLevelSelector({ story, onStoryUpdate, readonly = false }) {
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [selectedLevels, setSelectedLevels] = React.useState([]);
+  const [customInstructions, setCustomInstructions] = React.useState('');
+  const [source, setSource] = React.useState('none');
+  const [expanded, setExpanded] = React.useState(false);
+  // F5: Use ref to always have fresh customInstructions value in toggle handler
+  const customRef = React.useRef('');
+
+  const storyId = story.slug || story.id;
+
+  // Load test level on mount
+  React.useEffect(() => {
+    let cancelled = false;
+    api.get(`/stories/${storyId}/test-level`)
+      .then(data => {
+        if (cancelled) return;
+        if (data.testLevel) {
+          setSelectedLevels(data.testLevel.levels || []);
+          const custom = data.testLevel.custom_instructions || '';
+          setCustomInstructions(custom);
+          customRef.current = custom;
+        }
+        setSource(data.source || 'none');
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [storyId]);
+
+  const saveTestLevel = async (levels, custom) => {
+    setSaving(true);
+    try {
+      const result = await api.patch(`/stories/${storyId}/test-level`, {
+        levels,
+        custom_instructions: custom,
+      });
+      // F3/F7: Update source based on whether override exists
+      setSource(result.testLevel ? 'story' : 'none');
+    } catch (e) {
+      console.error('Failed to save test level:', e);
+    }
+    setSaving(false);
+  };
+
+  const handleToggleLevel = (level) => {
+    if (readonly) return;
+    let newLevels;
+    if (level === 'none') {
+      newLevels = selectedLevels.includes('none') ? [] : ['none'];
+    } else {
+      const withoutNone = selectedLevels.filter(l => l !== 'none');
+      newLevels = withoutNone.includes(level)
+        ? withoutNone.filter(l => l !== level)
+        : [...withoutNone, level];
+    }
+    setSelectedLevels(newLevels);
+    // F5: Read from ref to get the latest custom instructions value
+    saveTestLevel(newLevels, customRef.current);
+  };
+
+  const handleCustomChange = (value) => {
+    setCustomInstructions(value);
+    customRef.current = value;
+  };
+
+  const handleCustomBlur = () => {
+    saveTestLevel(selectedLevels, customInstructions);
+  };
+
+  // F7: Reset to project default
+  const handleReset = async () => {
+    setSaving(true);
+    try {
+      await api.patch(`/stories/${storyId}/test-level`, {
+        levels: [],
+        custom_instructions: '',
+      });
+      // Reload from server to get project default
+      const data = await api.get(`/stories/${storyId}/test-level`);
+      if (data.testLevel) {
+        setSelectedLevels(data.testLevel.levels || []);
+        const custom = data.testLevel.custom_instructions || '';
+        setCustomInstructions(custom);
+        customRef.current = custom;
+      } else {
+        setSelectedLevels([]);
+        setCustomInstructions('');
+        customRef.current = '';
+      }
+      setSource(data.source || 'none');
+    } catch (e) {
+      console.error('Failed to reset test level:', e);
+    }
+    setSaving(false);
+  };
+
+  if (loading) return null;
+
+  const summaryText = selectedLevels.length === 0
+    ? 'Auto (AI decides)'
+    : selectedLevels.includes('none')
+      ? 'No tests'
+      : selectedLevels.join(', ');
+
+  return React.createElement('div', {
+    className: 'rounded-xl border border-slate-700 overflow-hidden',
+  },
+    // Header (always visible)
+    React.createElement('button', {
+      onClick: () => setExpanded(!expanded),
+      className: 'w-full flex items-center justify-between p-4 bg-slate-800/50 hover:bg-slate-800 transition-colors text-left',
+    },
+      React.createElement('div', { className: 'flex items-center gap-3' },
+        React.createElement('span', { className: 'text-xl' }, '🧪'),
+        React.createElement('div', null,
+          React.createElement('span', { className: 'font-medium text-slate-200' }, 'Test Level'),
+          React.createElement('span', { className: 'text-slate-500 text-sm ml-2' },
+            source === 'project' ? '(project default)' : source === 'story' ? '(story override)' : ''
+          )
+        ),
+        React.createElement('span', {
+          className: `px-2 py-0.5 text-xs rounded-full ${
+            selectedLevels.includes('none')
+              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+              : selectedLevels.length > 0
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                : 'bg-slate-700 text-slate-400 border border-slate-600'
+          }`,
+        }, summaryText),
+        saving && React.createElement('span', {
+          className: 'w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin',
+        })
+      ),
+      React.createElement('span', { className: `text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}` }, '▼')
+    ),
+
+    // Expanded content
+    expanded && React.createElement('div', { className: 'p-4 border-t border-slate-700 space-y-3' },
+      // Checkboxes
+      React.createElement('div', { className: 'grid grid-cols-2 gap-2' },
+        ...TEST_LEVEL_OPTIONS.map(opt =>
+          React.createElement('label', {
+            key: opt.key,
+            className: `flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-all ${
+              selectedLevels.includes(opt.key)
+                ? opt.key === 'none'
+                  ? 'bg-amber-500/20 border-amber-500/50'
+                  : 'bg-emerald-500/20 border-emerald-500/50'
+                : 'bg-slate-800/30 border-slate-700 hover:border-slate-600'
+            } ${readonly ? 'opacity-60 cursor-not-allowed' : ''}`,
+          },
+            React.createElement('input', {
+              type: 'checkbox',
+              checked: selectedLevels.includes(opt.key),
+              onChange: () => handleToggleLevel(opt.key),
+              disabled: readonly,
+              className: `rounded ${opt.key === 'none' ? 'text-amber-500 focus:ring-amber-500' : 'text-emerald-500 focus:ring-emerald-500'}`,
+            }),
+            React.createElement('span', { className: 'text-sm' }, opt.icon),
+            React.createElement('span', { className: 'text-sm text-slate-300' }, opt.label)
+          )
+        )
+      ),
+
+      // Custom instructions
+      React.createElement('div', { className: 'space-y-1' },
+        React.createElement('label', { className: 'text-xs text-slate-400' }, 'Additional test instructions'),
+        React.createElement('input', {
+          type: 'text',
+          value: customInstructions,
+          onChange: (e) => handleCustomChange(e.target.value),
+          onBlur: handleCustomBlur,
+          onKeyDown: (e) => { if (e.key === 'Enter') e.target.blur(); },
+          placeholder: 'E.g. Snapshot tests for React components...',
+          disabled: readonly,
+          className: 'w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 placeholder-slate-600 focus:border-violet-500 focus:outline-none disabled:opacity-50',
+        })
+      ),
+
+      // Info text + reset button
+      React.createElement('div', { className: 'flex items-center justify-between' },
+        React.createElement('p', { className: 'text-xs text-slate-500' },
+          selectedLevels.length === 0
+            ? "No selection — AI will decide test level (default behavior)."
+            : selectedLevels.includes('none')
+              ? "AI will not generate or flag missing tests."
+              : `AI will plan and write tests: ${selectedLevels.join(', ')}.`
+        ),
+        // F7: Reset to project default button (only show when story has an override)
+        source === 'story' && !readonly && React.createElement('button', {
+          onClick: handleReset,
+          disabled: saving,
+          className: 'text-xs text-slate-500 hover:text-slate-300 underline transition-colors',
+        }, 'Reset to default')
+      )
+    )
+  );
+}
+
 // ============== QA Actions ==============
 
 function QAActions({ story, onStoryUpdate }) {
@@ -3229,6 +3454,13 @@ export function StoryView({ slug, context = 'product' }) {
       onWorktrunkChange: (enabled) => {
         loadData(); // Reload story data when worktrunk status changes
       },
+    }),
+
+    // Test Level Selector (only in dev context with edit access)
+    context === 'dev' && accessLevel === 'edit' && React.createElement(TestLevelSelector, {
+      story,
+      onStoryUpdate: handleStoryUpdate,
+      readonly: false,
     }),
 
     // Product Actions (only in product context with edit access, discovery phase)

@@ -311,6 +311,57 @@ function extractTaskList(devPlan) {
   return taskLines.join('\n');
 }
 
+/**
+ * Build test instructions section based on test level config
+ * @param {Object|null} testLevel - { levels: string[], custom_instructions: string }
+ * @param {string} step - Current step (dev-plan, implement, review)
+ * @returns {string} Test instructions to inject in prompt
+ */
+function buildTestInstructions(testLevel, step) {
+  if (!testLevel || !testLevel.levels || testLevel.levels.length === 0) return '';
+
+  const levels = testLevel.levels;
+  // F2: Sanitize custom_instructions — strip control patterns that could manipulate the prompt
+  const rawCustom = testLevel.custom_instructions || '';
+  const custom = rawCustom
+    .replace(/={3,}/g, '')           // Strip === section markers
+    .replace(/^#+\s/gm, '')          // Strip markdown headers
+    .replace(/\n{3,}/g, '\n\n')      // Collapse excessive newlines
+    .trim()
+    .slice(0, 500);
+
+  let instructions = '\n=== TEST INSTRUCTIONS ===\n';
+
+  if (levels.includes('none')) {
+    if (step === 'review') {
+      instructions += 'Do NOT flag missing tests. The decision to have no tests is intentional.\n';
+    } else {
+      instructions += 'Do NOT write or plan any tests. This is intentional.\n';
+    }
+    // F1: Append custom instructions even for "none" (e.g. "except for critical auth flows")
+    if (custom) {
+      instructions += `Additional instructions: ${custom}\n`;
+    }
+    return instructions;
+  }
+
+  const levelStr = levels.join(', ');
+
+  if (step === 'dev-plan') {
+    instructions += `Plan tests at these levels ONLY: ${levelStr}.\nDo NOT plan tests at other levels.\n`;
+  } else if (step === 'implement') {
+    instructions += `Write tests at these levels ONLY: ${levelStr}.\nDo NOT write tests at other levels.\n`;
+  } else if (step === 'review') {
+    instructions += `Only verify test coverage for these levels: ${levelStr}.\nDo NOT flag missing tests at other levels — this is intentional.\n`;
+  }
+
+  if (custom) {
+    instructions += `Additional instructions: ${custom}\n`;
+  }
+
+  return instructions;
+}
+
 export async function loadInitSpecs(feature, root) {
   const storyDir = await getStoryDir(feature, root);
   const filePath = path.join(storyDir, 'init.md');
@@ -743,6 +794,20 @@ export async function buildPrompt(feature, step, { description, instructions, hi
     parts.push('\n\n=== ITERATION INSTRUCTIONS ===\n');
     parts.push('Apply the following changes/feedback to the previous output:\n');
     parts.push(instructions);
+  }
+
+  // Inject test level instructions for dev-plan, implement, review
+  const normalizedStep = STEP_FILE_MAP[step] || step;
+  const testSteps = ['dev-plan', 'implement', 'review'];
+  if (testSteps.includes(normalizedStep)) {
+    // Resolve test level: story override > project default
+    const testLevel = storyStatus?.testLevel || config.default_test_level || null;
+    const testInstructions = buildTestInstructions(testLevel, normalizedStep);
+    if (testInstructions) {
+      parts.push(testInstructions);
+      filesUsed.testLevel = testLevel;
+      console.log(`[PromptBuilder] ✓ Test level injected: ${testLevel.levels?.join(', ') || 'none'}`);
+    }
   }
 
   parts.push('\n\n=== TASK ===\n');

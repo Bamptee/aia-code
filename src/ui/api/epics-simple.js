@@ -1861,6 +1861,74 @@ INSTRUCTIONS:
   });
 
   /**
+   * PATCH /api/stories/:slug/test-level - Update story test level
+   */
+  router.patch('/api/stories/:slug/test-level', async (req, res, { params, root, parseBody }) => {
+    try {
+      const body = await parseBody();
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const statusPath = path.join(storyDir, 'status.yaml');
+
+      const raw = await fs.readFile(statusPath, 'utf-8');
+      const status = yaml.parse(raw);
+
+      // Validate levels
+      const validLevels = ['unit', 'integration', 'e2e', 'none'];
+      if (!Array.isArray(body.levels)) {
+        return error(res, 'levels must be an array', 400);
+      }
+      const levels = body.levels.filter(l => validLevels.includes(l));
+
+      // "none" is mutually exclusive with other levels
+      const finalLevels = levels.includes('none') ? ['none'] : levels;
+
+      const customInstructions = typeof body.custom_instructions === 'string'
+        ? body.custom_instructions.slice(0, 500)
+        : '';
+
+      // F3: Empty levels + no custom = remove override (fall back to project default)
+      if (finalLevels.length === 0 && !customInstructions) {
+        delete status.testLevel;
+      } else {
+        status.testLevel = {
+          levels: finalLevels,
+          custom_instructions: customInstructions,
+        };
+      }
+      status.updatedAt = new Date().toISOString();
+      await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+
+      json(res, { id: params.slug, testLevel: status.testLevel || null });
+    } catch (err) {
+      error(res, err.message, 500);
+    }
+  });
+
+  /**
+   * GET /api/stories/:slug/test-level - Get resolved test level (story override or project default)
+   */
+  router.get('/api/stories/:slug/test-level', async (req, res, { params, root }) => {
+    try {
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const statusPath = path.join(storyDir, 'status.yaml');
+
+      const raw = await fs.readFile(statusPath, 'utf-8');
+      const status = yaml.parse(raw);
+
+      if (status.testLevel) {
+        json(res, { testLevel: status.testLevel, source: 'story' });
+      } else {
+        // Fall back to project default
+        const config = await loadConfig(root);
+        const defaultLevel = config.default_test_level || null;
+        json(res, { testLevel: defaultLevel, source: defaultLevel ? 'project' : 'none' });
+      }
+    } catch (err) {
+      error(res, err.message, 500);
+    }
+  });
+
+  /**
    * DELETE /api/stories/:slug - Delete story (soft delete)
    */
   router.delete('/api/stories/:slug', async (req, res, { params, root }) => {

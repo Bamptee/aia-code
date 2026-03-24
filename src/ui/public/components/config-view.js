@@ -337,6 +337,39 @@ function ProjectScope({ onSaved }) {
   );
 }
 
+function AIModelsInfo() {
+  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
+    React.createElement('div', { className: 'flex items-center gap-2' },
+      React.createElement('h3', { className: 'text-sm font-semibold text-emerald-400' }, 'AI Models')
+    ),
+
+    React.createElement('div', { className: 'bg-blue-900/20 border border-blue-500/30 rounded-lg p-3 space-y-2' },
+      React.createElement('p', { className: 'text-sm text-blue-300' },
+        'The models in the step dropdown come from available_models in your .aia/config.yaml. Each user configures their own models based on their CLI access.'
+      ),
+      React.createElement('p', { className: 'text-sm text-blue-300' },
+        'You can also type any model ID using "Custom..." in the dropdown. The provider is auto-detected from the prefix: claude-* \u2192 Claude CLI, gpt-*/o* \u2192 Codex CLI, gemini-* \u2192 Gemini CLI.'
+      ),
+      React.createElement('p', { className: 'text-sm text-blue-300' },
+        'You can mix providers per step \u2014 for example, use Claude for implementation and Gemini for review.'
+      ),
+    ),
+
+    React.createElement('div', { className: 'bg-amber-900/20 border border-amber-500/30 rounded-lg p-3 space-y-2' },
+      React.createElement('p', { className: 'text-sm text-amber-300 font-medium' },
+        'Effort level'
+      ),
+      React.createElement('p', { className: 'text-sm text-amber-200/80' },
+        'The effort level (high/medium/low) depends on each CLI\'s own settings, not on aia-code. Claude Code, Codex, and Gemini CLI each manage effort independently.'
+      ),
+    ),
+
+    React.createElement('p', { className: 'text-xs text-slate-500' },
+      'See the "AI Models Configuration" section in the README for full documentation.'
+    ),
+  );
+}
+
 function MCPFigmaSection() {
   return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
     React.createElement('div', { className: 'flex items-center gap-2' },
@@ -445,6 +478,9 @@ export function ConfigView() {
 
     // Project Scope
     React.createElement(ProjectScope, { onSaved: handlePreferencesSaved }),
+
+    // AI Models Info
+    React.createElement(AIModelsInfo),
 
     // MCP Figma Integration
     React.createElement(MCPFigmaSection),

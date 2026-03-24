@@ -51,9 +51,10 @@ export async function runWithTaskContext(task, story, options = {}) {
     const result = await callModel(model, prompt, { verbose, apply, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
 
-    // Extract output and tokenUsage from result
+    // Extract output, tokenUsage and modelUsed from result
     const output = result.output;
     const tokenUsage = result.tokenUsage;
+    const modelUsed = result.modelUsed;
 
     await logExecution({
       feature: `task-${task.id.slice(0, 8)}`,
@@ -80,6 +81,7 @@ export async function runWithTaskContext(task, story, options = {}) {
       output,
       filesModified,
       tokenUsage,
+      modelUsed,
       success: true,
       error: null,
       completedAt: new Date().toISOString(),
@@ -92,6 +94,7 @@ export async function runWithTaskContext(task, story, options = {}) {
       output: '',
       filesModified: [],
       tokenUsage: null,
+      modelUsed: null,
       success: false,
       error: err.message,
       completedAt: new Date().toISOString(),
@@ -219,9 +222,10 @@ export async function runStep(step, feature, { description, instructions, histor
     const result = await callModel(model, prompt, { verbose, apply: shouldApply, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
 
-    // Extract output and tokenUsage from result
+    // Extract output, tokenUsage and modelUsed from result
     const output = result.output;
     const tokenUsage = result.tokenUsage;
+    const modelUsed = result.modelUsed;
 
     // Update session with token usage
     if (tokenUsage) {
@@ -248,8 +252,8 @@ export async function runStep(step, feature, { description, instructions, histor
     // End session successfully - this releases the claim
     endSession(feature, { success: true });
 
-    // Return output, filesUsed and tokenUsage for UI transparency
-    return { output, filesUsed, tokenUsage };
+    // Return output, filesUsed, tokenUsage and modelUsed for UI transparency
+    return { output, filesUsed, tokenUsage, modelUsed };
   } catch (err) {
     await updateStepStatus(feature, step, STEP_STATUS.ERROR, root);
     if (phaseData) {

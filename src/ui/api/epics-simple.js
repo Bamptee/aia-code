@@ -824,10 +824,11 @@ ${content}`;
         onData,
       });
 
-      // runStep now returns { output, filesUsed, tokenUsage }
+      // runStep now returns { output, filesUsed, tokenUsage, modelUsed }
       const output = typeof result === 'string' ? result : result?.output;
       const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
       const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
+      const modelUsed = typeof result === 'object' ? result?.modelUsed : null;
 
       // Save token usage to status.yaml
       if (tokenUsage) {
@@ -846,12 +847,13 @@ ${content}`;
         }
       }
 
-      // Return with filesUsed for UI transparency
+      // Return with filesUsed and modelUsed for UI transparency
       sseSend(res, 'done', {
         step: params.step,
         output: output?.slice(0, 500),
         filesUsed,
         tokenUsage,
+        modelUsed,
       });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
@@ -892,10 +894,11 @@ ${content}`;
         onData,
       });
 
-      // runStep now returns { output, filesUsed, tokenUsage }
+      // runStep now returns { output, filesUsed, tokenUsage, modelUsed }
       const output = typeof result === 'string' ? result : result?.output;
       const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
       const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
+      const modelUsed = typeof result === 'object' ? result?.modelUsed : null;
 
       // Accumulate token usage in status.yaml
       if (tokenUsage) {
@@ -918,11 +921,12 @@ ${content}`;
         }
       }
 
-      // Return with filesUsed for UI transparency
+      // Return with filesUsed and modelUsed for UI transparency
       sseSend(res, 'done', {
         step: params.step,
         output: output?.slice(0, 500),
         filesUsed,
+        modelUsed,
       });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
@@ -1098,8 +1102,8 @@ INSTRUCTIONS:
 - Keep responses concise but helpful`;
       }
 
-      // Use model from request body, or fall back to config
-      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
+      // Use model from request body, or fall back to config for current step
+      const model = body.model || config.models?.[actualStep]?.[0]?.model || config.models?.init?.[0]?.model || 'claude-default';
       const callResult = await callModel(model, chatPrompt, { verbose: false, apply: false });
       const aiResponse = callResult.output;
 
@@ -1111,13 +1115,14 @@ INSTRUCTIONS:
         contextFiles: [],
       };
 
-      // Save messages with tokenUsage and filesUsed
+      // Save messages with tokenUsage, filesUsed and modelUsed
       const userMsg = { role: 'user', content: body.message, createdAt: new Date().toISOString() };
       const aiMsg = {
         role: 'assistant',
         content: aiResponse.trim(),
         createdAt: new Date().toISOString(),
         tokenUsage: callResult.tokenUsage,
+        modelUsed: callResult.modelUsed,
         filesUsed,
       };
       conversation.messages.push(userMsg, aiMsg);
@@ -1236,8 +1241,8 @@ INSTRUCTIONS:
 - Respond in ${commLang}`;
       }
 
-      // Use model from request body, or fall back to config
-      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
+      // Use model from request body, or fall back to config for current step
+      const model = body.model || config.models?.[params.step]?.[0]?.model || config.models?.init?.[0]?.model || 'claude-default';
 
       let callResult;
       try {
@@ -1256,12 +1261,13 @@ INSTRUCTIONS:
         contextFiles: [],
       };
 
-      // Create message with tokenUsage and filesUsed
+      // Create message with tokenUsage, filesUsed and modelUsed
       const aiMsg = {
         role: 'assistant',
         content: aiResponse.trim(),
         createdAt: new Date().toISOString(),
         tokenUsage: callResult.tokenUsage,
+        modelUsed: callResult.modelUsed,
         filesUsed,
       };
 
@@ -1342,7 +1348,7 @@ ${content}`;
    * For implement/review: applies code changes in agent mode
    * For other steps: updates the .md document
    */
-  router.post('/api/stories/:slug/steps/:step/recap', async (req, res, { params, root }) => {
+  router.post('/api/stories/:slug/steps/:step/recap', async (req, res, { params, root, parseBody }) => {
     const actualStep = params.step;
     console.log('[Recap] Starting recap for', params.slug, actualStep);
     sseHeaders(res);
@@ -1353,6 +1359,7 @@ ${content}`;
     };
 
     try {
+      const body = await parseBody().catch(() => ({}));
       const storyDir = await getStoryDirPath(params.slug, root);
       const convPath = path.join(storyDir, `${params.step}-conversation.json`);
       const stepPath = path.join(storyDir, `${actualStep}.md`);
@@ -1379,9 +1386,9 @@ ${content}`;
         // We call callModel directly instead of runStep to bypass "already done" check
         sseSend(res, 'log', { type: 'info', text: `🚀 Applying code changes based on ${conversation.messages.length} messages...\n` });
 
-        // Load config for model selection
+        // Load config for model selection — consistent fallback chain
         const config = await loadConfig(root);
-        const model = config.models?.implement?.[0]?.model || config.models?.init?.[0]?.model || 'claude-sonnet-4-20250514';
+        const model = body.model || config.models?.[actualStep]?.[0]?.model || config.models?.init?.[0]?.model || 'claude-default';
 
         // Load current step content for context
         let stepContent = '';
@@ -1421,6 +1428,7 @@ INSTRUCTIONS:
           cwd: root,
         });
         const output = callResult.output;
+        const modelUsed = callResult.modelUsed;
 
         // Add summary message to conversation before clearing
         const summaryMsg = {
@@ -1428,12 +1436,13 @@ INSTRUCTIONS:
           content: `✅ **Feedback applied!**\n\nI've applied the changes discussed. Here's what was done:\n\n${output?.slice(0, 1500) || 'Changes applied successfully.'}`,
           createdAt: new Date().toISOString(),
           isRecapSummary: true,
+          modelUsed,
         };
 
         // Keep the summary in conversation for reference, clear the rest
         await fs.writeJson(convPath, { messages: [summaryMsg] }, { spaces: 2 });
 
-        sseSend(res, 'done', { ok: true, summary: summaryMsg });
+        sseSend(res, 'done', { ok: true, summary: summaryMsg, modelUsed });
       } else {
         // For other steps: update the .md document
         sseSend(res, 'log', { type: 'info', text: `📝 Applying ${conversation.messages.length} messages to document...\n` });
@@ -1457,14 +1466,15 @@ INSTRUCTIONS:
           onData,
         });
 
-        // runStep now returns { output, filesUsed }
+        // runStep now returns { output, filesUsed, modelUsed }
         const output = typeof result === 'string' ? result : result?.output;
         const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+        const modelUsed = typeof result === 'object' ? result?.modelUsed : null;
 
         // Clear conversation after recap
         await fs.writeJson(convPath, { messages: [] }, { spaces: 2 });
 
-        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500), filesUsed });
+        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500), filesUsed, modelUsed });
       }
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
@@ -1971,17 +1981,26 @@ INSTRUCTIONS:
 
   /**
    * GET /api/models - Get available models
+   * Returns available_models from config if declared, otherwise deduplicates from config.models
    */
   router.get('/api/models', async (req, res, { root }) => {
     try {
       const config = await loadConfig(root);
-      const models = [];
+
+      // Prefer available_models if declared in config
+      if (config.available_models && Array.isArray(config.available_models) && config.available_models.length > 0) {
+        // Add backward-compat `model` field (= id) for any consumer expecting the old format
+        return json(res, config.available_models.map(m => ({ ...m, model: m.model || m.id })));
+      }
+
+      // Fallback: deduplicate from config.models, always include claude-default first
+      const models = [{ id: 'claude-default', model: 'claude-default', label: 'Auto (CLI default)', provider: 'anthropic' }];
 
       if (config.models) {
         for (const [step, stepModels] of Object.entries(config.models)) {
           for (const m of stepModels) {
-            if (!models.find(x => x.model === m.model)) {
-              models.push({ model: m.model, provider: m.provider || 'unknown' });
+            if (m.model !== 'claude-default' && !models.find(x => x.id === m.model)) {
+              models.push({ id: m.model, model: m.model, label: m.model, provider: m.provider || 'unknown' });
             }
           }
         }

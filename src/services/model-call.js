@@ -10,11 +10,14 @@ export async function callModel(model, prompt, { verbose = false, apply = false,
 
   const result = await resolved.provider.generate(prompt, resolved.model, { verbose, apply, onData, cwd });
 
+  const modelUsed = resolved.model || model;
+
   // Handle new format with tokenUsage (from stream-json mode)
   if (result && typeof result === 'object' && 'output' in result) {
     return {
       output: result.output,
       tokenUsage: result.tokenUsage || null,
+      modelUsed,
     };
   }
 
@@ -22,5 +25,6 @@ export async function callModel(model, prompt, { verbose = false, apply = false,
   return {
     output: result,
     tokenUsage: null,
+    modelUsed,
   };
 }

@@ -16,6 +16,7 @@ AIA structures your feature development into steps (brief, spec, tech-spec, dev-
 - [Prompt assembly](#prompt-assembly)
 - [Project structure](#project-structure)
 - [Dependencies](#dependencies)
+- [AI Models Configuration](#ai-models-configuration)
 - [Worktrunk Integration](#worktrunk-integration)
 
 ## Quick start
@@ -757,6 +758,132 @@ Runtime dependencies:
 | `busboy` | Multipart form parsing |
 
 AI calls use `child_process.spawn` to delegate to installed CLI tools. No API keys needed -- each CLI manages its own authentication.
+
+## AI Models Configuration
+
+AIA supports granular model selection per step. You control which AI model runs at each stage of the workflow across all three supported providers.
+
+### Supported providers
+
+AIA delegates to AI CLI tools. Each provider has its own CLI binary:
+
+| Provider | CLI tool | Model prefix | Auto-detect |
+|----------|----------|-------------|-------------|
+| Anthropic | `claude` (Claude Code) | `claude-*` | `claude-sonnet-4-6`, `claude-opus-4-6`, etc. |
+| OpenAI | `codex` (Codex CLI) | `gpt-*`, `o*` | `gpt-4.1`, `o3`, `o4-mini`, etc. |
+| Google | `gemini` (Gemini CLI) | `gemini-*` | `gemini-2.5-pro`, `gemini-2.5-flash`, etc. |
+
+Any model ID matching these prefixes is automatically routed to the right CLI. You can use any model your CLI supports — AIA does not restrict model IDs.
+
+### Declaring available models
+
+In `.aia/config.yaml`, declare the models you have access to. Each user configures their own list based on their CLI access:
+
+```yaml
+available_models:
+  # Anthropic — CLI: claude
+  - id: claude-default
+    label: "Auto (Claude CLI default)"
+    provider: anthropic
+  - id: claude-opus-4-6
+    label: "Claude Opus 4.6"
+    provider: anthropic
+  - id: claude-sonnet-4-6
+    label: "Claude Sonnet 4.6"
+    provider: anthropic
+  # OpenAI — CLI: codex
+  - id: codex-default
+    label: "Auto (Codex CLI default)"
+    provider: openai
+  # Add your Codex models here, e.g.:
+  # - id: gpt-4.1
+  #   label: "GPT-4.1"
+  #   provider: openai
+  # Google — CLI: gemini
+  - id: gemini-default
+    label: "Auto (Gemini CLI default)"
+    provider: gemini
+  - id: gemini-2.5-pro
+    label: "Gemini 2.5 Pro"
+    provider: gemini
+  - id: gemini-2.5-flash
+    label: "Gemini 2.5 Flash"
+    provider: gemini
+```
+
+These models appear in the UI dropdown for each step, grouped by provider. You can also type any model ID directly using the "Custom..." option — the provider is auto-detected from the model name prefix.
+
+> **Tip:** Run `claude --help`, `codex --help`, or `gemini --help` to see which models your CLI supports. Model IDs evolve frequently — check your provider's docs for the latest.
+
+### Assigning models per step
+
+Use the `models` section to configure which model runs by default for each step. You can mix providers:
+
+```yaml
+models:
+  init:
+    - model: claude-opus-4-6
+      weight: 1
+  brainstorming:
+    - model: gemini-2.5-flash
+      weight: 1
+  spec-func:
+    - model: claude-sonnet-4-6
+      weight: 0.5
+    - model: gemini-2.5-pro
+      weight: 0.5
+  implement:
+    - model: claude-opus-4-6
+      weight: 1
+  review:
+    - model: codex-default
+      weight: 1
+```
+
+The `weight` field enables weighted random selection if you list multiple models per step (useful for A/B testing between providers). With a single model per step and `weight: 1`, selection is deterministic.
+
+### Default aliases
+
+| Alias | CLI | Meaning |
+|-------|-----|---------|
+| `claude-default` | `claude` | Uses whatever model your Claude Code CLI is configured to use (no `--model` flag) |
+| `codex-default` | `codex` | Uses whatever model your Codex CLI is configured to use |
+| `openai-default` | `codex` | Same as `codex-default` (alias for backward compatibility) |
+| `gemini-default` | `gemini` | Uses whatever model your Gemini CLI is configured to use |
+
+These "Auto" aliases are convenient but opaque — you won't know which model actually ran. For reproducibility, prefer explicit model IDs.
+
+### Model fallback chain
+
+When no model is explicitly selected in the UI, AIA resolves the model in this order:
+
+1. **UI selection** — model selected by the user in the dropdown for this specific call
+2. **Step config** — default model configured for the current step (`config.models[step][0]`)
+3. **Init fallback** — model configured for the init step (`config.models.init[0]`)
+4. **Ultimate fallback** — `claude-default` (Claude Code CLI default)
+
+This chain is applied consistently across all endpoints (generate, iterate, chat, start-chat, recap).
+
+### Effort level
+
+The effort level (high/medium/low) depends on your CLI settings, not on AIA. Each CLI manages this independently:
+
+- **Claude Code**: configured via `claude config` or `--effort` flag
+- **Codex CLI**: configured via Codex settings
+- **Gemini CLI**: configured via Gemini settings
+
+AIA does not control this parameter. If your Claude Code is configured with high effort, all Claude calls from AIA will use high effort.
+
+### Recommendations
+
+The best model depends on your provider access and budget. Here are general guidelines by step type:
+
+| Step type | Recommendation | Why |
+|-----------|---------------|-----|
+| `init`, `spec-func`, `spec-tech`, `dev-plan`, `implement` | Most capable model (e.g. Claude Opus, Gemini Pro) | Complex generation requiring deep reasoning |
+| `brainstorming`, `review`, `chat` | Faster/cheaper model (e.g. Claude Sonnet, Gemini Flash) | Analysis and discussion, lower cost |
+
+You can also mix providers per step — for example, use Claude for implementation and Gemini for review to get different perspectives.
 
 ## Worktrunk Integration
 

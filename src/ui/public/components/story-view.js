@@ -413,19 +413,87 @@ function StepPills({ steps, storySteps, currentStep, onStepClick, tokenUsage }) 
 
 function ModelSelect({ model, onChange, disabled }) {
   const [models, setModels] = React.useState([]);
+  const [customMode, setCustomMode] = React.useState(false);
+  const [customValue, setCustomValue] = React.useState(() => {
+    try { return localStorage.getItem('aia-custom-model') || ''; } catch { return ''; }
+  });
+  const [previousModel, setPreviousModel] = React.useState('');
+
   React.useEffect(() => { api.get('/models').then(setModels).catch(() => {}); }, []);
+
+  const handleSelectChange = (value) => {
+    if (value === '__custom__') {
+      setPreviousModel(model);
+      setCustomMode(true);
+      // Don't fire onChange yet — wait for user to confirm
+    } else {
+      setCustomMode(false);
+      onChange(value);
+    }
+  };
+
+  const commitCustomValue = () => {
+    if (customValue.trim()) {
+      try { localStorage.setItem('aia-custom-model', customValue.trim()); } catch {}
+      onChange(customValue.trim());
+    }
+  };
+
+  // Group models by provider
+  const grouped = {};
+  for (const m of models) {
+    const provider = m.provider || 'other';
+    if (!grouped[provider]) grouped[provider] = [];
+    grouped[provider].push(m);
+  }
+  const providerLabels = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI (Codex)', gemini: 'Google (Gemini)', other: 'Other' };
+
+  if (customMode) {
+    return React.createElement('div', { className: 'flex items-center gap-2' },
+      React.createElement('input', {
+        type: 'text',
+        value: customValue,
+        onChange: e => setCustomValue(e.target.value),
+        onBlur: commitCustomValue,
+        onKeyDown: e => { if (e.key === 'Enter') { e.target.blur(); } },
+        placeholder: 'e.g. claude-opus-4-6',
+        disabled,
+        autoFocus: true,
+        className: 'bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:border-violet-500 focus:outline-none flex-1',
+      }),
+      React.createElement('button', {
+        onClick: () => { setCustomMode(false); onChange(previousModel); },
+        disabled,
+        className: 'text-xs text-slate-500 hover:text-slate-300',
+        title: 'Back to dropdown',
+      }, 'Cancel')
+    );
+  }
+
+  const hasGroups = Object.keys(grouped).length > 1;
 
   return React.createElement('select', {
     value: model,
-    onChange: e => onChange(e.target.value),
+    onChange: e => handleSelectChange(e.target.value),
     disabled,
     className: 'bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:border-violet-500 focus:outline-none',
   },
     React.createElement('option', { value: '' }, 'Auto'),
-    ...models.map(m => React.createElement('option', {
-      key: m.model || m,
-      value: m.model || m,
-    }, m.model || m))
+    ...(hasGroups
+      ? Object.entries(grouped).map(([provider, providerModels]) =>
+          React.createElement('optgroup', { key: provider, label: providerLabels[provider] || provider },
+            ...providerModels.map(m => React.createElement('option', {
+              key: m.id || m.model || m,
+              value: m.id || m.model || m,
+            }, m.label || m.id || m.model || m))
+          )
+        )
+      : models.map(m => React.createElement('option', {
+          key: m.id || m.model || m,
+          value: m.id || m.model || m,
+        }, m.label || m.id || m.model || m))
+    ),
+    React.createElement('option', { value: '__custom__' }, 'Custom...')
   );
 }
 
@@ -719,7 +787,7 @@ function ConversationPanel({ slug, stepName, model, onModelChange, onContentUpda
     setRecapping(true);
     setRecapOutput('');
     try {
-      const result = await streamPost(`/stories/${slug}/steps/${conversationKey}/recap`, {}, {
+      const result = await streamPost(`/stories/${slug}/steps/${conversationKey}/recap`, { model: model || undefined }, {
         onLog: (text) => {
           setRecapOutput(prev => (prev + text).slice(-10000));
         },
@@ -1200,6 +1268,8 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
 
   // Files used tracking (populated after generation)
   const [filesUsed, setFilesUsed] = React.useState(null);
+  // Model used tracking (populated after generation)
+  const [modelUsed, setModelUsed] = React.useState(null);
 
   // Convert stepKey to API format (kebab-case)
   const apiStepKey = stepKey.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
@@ -1285,6 +1355,7 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
     setGenerating(true);
     setOutput('');
     setFilesUsed(null); // Reset filesUsed
+    setModelUsed(null); // Reset modelUsed
 
     const result = await streamPost(`/stories/${slug}/steps/${apiStepKey}/generate`, {
       instructions: description.trim() || null,
@@ -1297,9 +1368,12 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
     setOutput('');
     setGenerating(false);
 
-    // Store filesUsed from result if available
+    // Store filesUsed and modelUsed from result if available
     if (result.filesUsed) {
       setFilesUsed(result.filesUsed);
+    }
+    if (result.modelUsed) {
+      setModelUsed(result.modelUsed);
     }
 
     if (result.ok || result.story) {
@@ -1367,6 +1441,11 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
           className: 'px-2 py-1 text-xs rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/30',
           title: tokenUsage ? `Input: ${tokenUsage.input}, Output: ${tokenUsage.output}` : '',
         }, `🎯 ${formattedTokens}`),
+        // Model used badge
+        modelUsed && React.createElement('span', {
+          className: 'px-2 py-1 text-xs rounded-full bg-slate-700/50 text-slate-500 border border-slate-600/30',
+          title: `Ran with model: ${modelUsed}`,
+        }, modelUsed),
         React.createElement('span', { className: `transition-transform ${expanded ? 'rotate-180' : ''}` }, '▼')
       )
     ),

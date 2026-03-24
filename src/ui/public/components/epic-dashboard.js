@@ -515,8 +515,12 @@ export function EpicDashboard() {
   React.useEffect(() => { saveToStorage(STORAGE_KEYS.SPACE_FILTER, spaceFilter); }, [spaceFilter]);
 
   // Load data
-  const loadData = async () => {
-    setLoading(true);
+  const pollingRef = React.useRef(false);
+
+  const loadData = async (isPolling = false) => {
+    if (pollingRef.current) return; // Guard against concurrent polls
+    pollingRef.current = true;
+    if (!isPolling) setLoading(true);
     setError(null);
     try {
       const [epicsData, storiesData, epicStatsData, storyStatsData] = await Promise.all([
@@ -530,12 +534,19 @@ export function EpicDashboard() {
       setEpicStats(epicStatsData);
       setStoryStats(storyStatsData);
     } catch (err) {
-      setError(err.message);
+      if (!isPolling) setError(err.message);
     }
-    setLoading(false);
+    if (!isPolling) setLoading(false);
+    pollingRef.current = false;
   };
 
-  React.useEffect(() => { loadData(); }, [showArchived]);
+  React.useEffect(() => {
+    loadData();
+    const interval = setInterval(() => {
+      if (!document.hidden) loadData(true);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [showArchived]);
 
   // Filter stories
   const filteredStories = React.useMemo(() => {

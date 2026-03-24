@@ -12,11 +12,12 @@ export async function callModel(model, prompt, { verbose = false, apply = false,
 
   const modelUsed = resolved.model || model;
 
-  // Handle new format with tokenUsage (from stream-json mode)
+  // Handle new format with tokenUsage and fileOperations (from stream-json mode)
   if (result && typeof result === 'object' && 'output' in result) {
     return {
       output: result.output,
       tokenUsage: result.tokenUsage || null,
+      fileOperations: result.fileOperations || [],
       modelUsed,
     };
   }
@@ -25,6 +26,7 @@ export async function callModel(model, prompt, { verbose = false, apply = false,
   return {
     output: result,
     tokenUsage: null,
+    fileOperations: [],
     modelUsed,
   };
 }

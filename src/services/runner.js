@@ -51,9 +51,10 @@ export async function runWithTaskContext(task, story, options = {}) {
     const result = await callModel(model, prompt, { verbose, apply, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
 
-    // Extract output, tokenUsage and modelUsed from result
+    // Extract output, tokenUsage, fileOperations and modelUsed from result
     const output = result.output;
     const tokenUsage = result.tokenUsage;
+    const fileOperations = result.fileOperations || [];
     const modelUsed = result.modelUsed;
 
     await logExecution({
@@ -80,6 +81,7 @@ export async function runWithTaskContext(task, story, options = {}) {
     return {
       output,
       filesModified,
+      fileOperations,
       tokenUsage,
       modelUsed,
       success: true,
@@ -222,9 +224,10 @@ export async function runStep(step, feature, { description, instructions, histor
     const result = await callModel(model, prompt, { verbose, apply: shouldApply, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
 
-    // Extract output, tokenUsage and modelUsed from result
+    // Extract output, tokenUsage, fileOperations and modelUsed from result
     const output = result.output;
     const tokenUsage = result.tokenUsage;
+    const fileOperations = result.fileOperations || [];
     const modelUsed = result.modelUsed;
 
     // Update session with token usage
@@ -252,8 +255,8 @@ export async function runStep(step, feature, { description, instructions, histor
     // End session successfully - this releases the claim
     endSession(feature, { success: true });
 
-    // Return output, filesUsed, tokenUsage and modelUsed for UI transparency
-    return { output, filesUsed, tokenUsage, modelUsed };
+    // Return output, filesUsed, tokenUsage, fileOperations and modelUsed for UI transparency
+    return { output, filesUsed, fileOperations, tokenUsage, modelUsed };
   } catch (err) {
     await updateStepStatus(feature, step, STEP_STATUS.ERROR, root);
     if (phaseData) {

@@ -824,34 +824,47 @@ ${content}`;
         onData,
       });
 
-      // runStep now returns { output, filesUsed, tokenUsage, modelUsed }
+      // runStep now returns { output, filesUsed, fileOperations, tokenUsage, modelUsed }
       const output = typeof result === 'string' ? result : result?.output;
       const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+      const fileOperations = typeof result === 'object' ? result?.fileOperations : [];
       const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
       const modelUsed = typeof result === 'object' ? result?.modelUsed : null;
 
-      // Save token usage to status.yaml
-      if (tokenUsage) {
+      // Save token usage, filesUsed and fileOperations to status.yaml
+      if (tokenUsage || filesUsed || fileOperations?.length > 0) {
         try {
           const storyDir = await getStoryDirPath(params.slug, root);
           const statusPath = path.join(storyDir, 'status.yaml');
           const rawStatus = await fs.readFile(statusPath, 'utf-8');
           const status = yaml.parse(rawStatus);
-          status.tokenUsage = status.tokenUsage || {};
-          status.tokenUsage[params.step] = tokenUsage;
+          if (tokenUsage) {
+            status.tokenUsage = status.tokenUsage || {};
+            status.tokenUsage[params.step] = tokenUsage;
+          }
+          // Persist context info per step
+          status.stepContext = status.stepContext || {};
+          status.stepContext[params.step] = {
+            filesUsed: filesUsed || null,
+            fileOperations: fileOperations || [],
+            modelUsed: modelUsed || null,
+          };
           status.updatedAt = new Date().toISOString();
           await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
-          sseSend(res, 'log', { type: 'info', text: `Tokens: ${tokenUsage.total} (in: ${tokenUsage.input}, out: ${tokenUsage.output})` });
+          if (tokenUsage) {
+            sseSend(res, 'log', { type: 'info', text: `Tokens: ${tokenUsage.total} (in: ${tokenUsage.input}, out: ${tokenUsage.output})` });
+          }
         } catch (tokenErr) {
-          console.error(`[Generate] Failed to save token usage: ${tokenErr.message}`);
+          console.error(`[Generate] Failed to save token/context data: ${tokenErr.message}`);
         }
       }
 
-      // Return with filesUsed and modelUsed for UI transparency
+      // Return with filesUsed, fileOperations and modelUsed for UI transparency
       sseSend(res, 'done', {
         step: params.step,
         output: output?.slice(0, 500),
         filesUsed,
+        fileOperations: fileOperations || [],
         tokenUsage,
         modelUsed,
       });
@@ -894,38 +907,53 @@ ${content}`;
         onData,
       });
 
-      // runStep now returns { output, filesUsed, tokenUsage, modelUsed }
+      // runStep now returns { output, filesUsed, fileOperations, tokenUsage, modelUsed }
       const output = typeof result === 'string' ? result : result?.output;
       const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+      const fileOperations = typeof result === 'object' ? result?.fileOperations : [];
       const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
       const modelUsed = typeof result === 'object' ? result?.modelUsed : null;
 
-      // Accumulate token usage in status.yaml
-      if (tokenUsage) {
+      // Accumulate token usage and persist context in status.yaml
+      if (tokenUsage || filesUsed || fileOperations?.length > 0) {
         try {
           const statusPath = path.join(storyDir, 'status.yaml');
           const rawStatus = await fs.readFile(statusPath, 'utf-8');
           const status = yaml.parse(rawStatus);
-          status.tokenUsage = status.tokenUsage || {};
-          const existing = status.tokenUsage[params.step] || { input: 0, output: 0, total: 0 };
-          status.tokenUsage[params.step] = {
-            input: existing.input + (tokenUsage.input || 0),
-            output: existing.output + (tokenUsage.output || 0),
-            total: existing.total + (tokenUsage.total || 0),
+          if (tokenUsage) {
+            status.tokenUsage = status.tokenUsage || {};
+            const existing = status.tokenUsage[params.step] || { input: 0, output: 0, total: 0 };
+            status.tokenUsage[params.step] = {
+              input: existing.input + (tokenUsage.input || 0),
+              output: existing.output + (tokenUsage.output || 0),
+              total: existing.total + (tokenUsage.total || 0),
+            };
+          }
+          // Persist context info per step (merge fileOperations)
+          status.stepContext = status.stepContext || {};
+          const existingCtx = status.stepContext[params.step] || {};
+          status.stepContext[params.step] = {
+            filesUsed: filesUsed || existingCtx.filesUsed || null,
+            fileOperations: [...(existingCtx.fileOperations || []), ...(fileOperations || [])].slice(-200),
+            modelUsed: modelUsed || existingCtx.modelUsed || null,
           };
           status.updatedAt = new Date().toISOString();
           await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
-          sseSend(res, 'log', { type: 'info', text: `Tokens: +${tokenUsage.total} (total: ${status.tokenUsage[params.step].total})` });
+          if (tokenUsage) {
+            sseSend(res, 'log', { type: 'info', text: `Tokens: +${tokenUsage.total} (total: ${status.tokenUsage[params.step].total})` });
+          }
         } catch (tokenErr) {
-          console.error(`[Iterate] Failed to save token usage: ${tokenErr.message}`);
+          console.error(`[Iterate] Failed to save token/context data: ${tokenErr.message}`);
         }
       }
 
-      // Return with filesUsed and modelUsed for UI transparency
+      // Return with filesUsed, fileOperations and modelUsed for UI transparency
       sseSend(res, 'done', {
         step: params.step,
         output: output?.slice(0, 500),
         filesUsed,
+        fileOperations: fileOperations || [],
+        tokenUsage,
         modelUsed,
       });
     } catch (err) {
@@ -1428,6 +1456,7 @@ INSTRUCTIONS:
           cwd: root,
         });
         const output = callResult.output;
+        const fileOperations = callResult.fileOperations || [];
         const modelUsed = callResult.modelUsed;
 
         // Add summary message to conversation before clearing
@@ -1436,13 +1465,43 @@ INSTRUCTIONS:
           content: `✅ **Feedback applied!**\n\nI've applied the changes discussed. Here's what was done:\n\n${output?.slice(0, 1500) || 'Changes applied successfully.'}`,
           createdAt: new Date().toISOString(),
           isRecapSummary: true,
+          fileOperations,
           modelUsed,
         };
+
+        // Persist fileOperations and tokenUsage to status.yaml
+        if (fileOperations.length > 0 || callResult.tokenUsage) {
+          try {
+            const statusPath = path.join(storyDir, 'status.yaml');
+            const rawStatus = await fs.readFile(statusPath, 'utf-8');
+            const status = yaml.parse(rawStatus);
+            if (callResult.tokenUsage) {
+              status.tokenUsage = status.tokenUsage || {};
+              const existing = status.tokenUsage[actualStep] || { input: 0, output: 0, total: 0 };
+              status.tokenUsage[actualStep] = {
+                input: existing.input + (callResult.tokenUsage.input || 0),
+                output: existing.output + (callResult.tokenUsage.output || 0),
+                total: existing.total + (callResult.tokenUsage.total || 0),
+              };
+            }
+            status.stepContext = status.stepContext || {};
+            const existingCtx = status.stepContext[actualStep] || {};
+            status.stepContext[actualStep] = {
+              filesUsed: existingCtx.filesUsed || null,
+              fileOperations: [...(existingCtx.fileOperations || []), ...fileOperations].slice(-200),
+              modelUsed: modelUsed || existingCtx.modelUsed || null,
+            };
+            status.updatedAt = new Date().toISOString();
+            await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+          } catch (err) {
+            console.error(`[Recap] Failed to persist context: ${err.message}`);
+          }
+        }
 
         // Keep the summary in conversation for reference, clear the rest
         await fs.writeJson(convPath, { messages: [summaryMsg] }, { spaces: 2 });
 
-        sseSend(res, 'done', { ok: true, summary: summaryMsg, modelUsed });
+        sseSend(res, 'done', { ok: true, summary: summaryMsg, fileOperations, modelUsed });
       } else {
         // For other steps: update the .md document
         sseSend(res, 'log', { type: 'info', text: `📝 Applying ${conversation.messages.length} messages to document...\n` });
@@ -1466,15 +1525,36 @@ INSTRUCTIONS:
           onData,
         });
 
-        // runStep now returns { output, filesUsed, modelUsed }
+        // runStep now returns { output, filesUsed, fileOperations, modelUsed }
         const output = typeof result === 'string' ? result : result?.output;
         const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+        const fileOperations = typeof result === 'object' ? (result?.fileOperations || []) : [];
         const modelUsed = typeof result === 'object' ? result?.modelUsed : null;
+
+        // Persist context to status.yaml
+        if (filesUsed || fileOperations.length > 0) {
+          try {
+            const statusPath = path.join(storyDir, 'status.yaml');
+            const rawStatus = await fs.readFile(statusPath, 'utf-8');
+            const status = yaml.parse(rawStatus);
+            status.stepContext = status.stepContext || {};
+            const existingCtx = status.stepContext[actualStep] || {};
+            status.stepContext[actualStep] = {
+              filesUsed: filesUsed || existingCtx.filesUsed || null,
+              fileOperations: [...(existingCtx.fileOperations || []), ...fileOperations].slice(-200),
+              modelUsed: modelUsed || existingCtx.modelUsed || null,
+            };
+            status.updatedAt = new Date().toISOString();
+            await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+          } catch (err) {
+            console.error(`[Recap] Failed to persist context: ${err.message}`);
+          }
+        }
 
         // Clear conversation after recap
         await fs.writeJson(convPath, { messages: [] }, { spaces: 2 });
 
-        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500), filesUsed, modelUsed });
+        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500), filesUsed, fileOperations, modelUsed });
       }
     } catch (err) {
       sseSend(res, 'error', { message: err.message });

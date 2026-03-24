@@ -435,7 +435,7 @@ async function detectTechStack(root) {
 /**
  * Build codebase context section for grounded prompts
  * @param {string} root - Project root directory
- * @returns {Promise<string>} Context section
+ * @returns {Promise<{text: string, dirs: string[], techStack: string[], database: string[]}>} Context section with metadata
  */
 async function buildCodebaseContext(root) {
   const { techStack, database } = await detectTechStack(root);
@@ -449,7 +449,7 @@ async function buildCodebaseContext(root) {
     }
   }
 
-  return `
+  const text = `
 === CODEBASE CONTEXT (Auto-detected) ===
 Tech Stack: ${techStack.join(', ')}
 Database: ${database.join(', ')}
@@ -457,6 +457,8 @@ Project Structure: ${patterns.length > 0 ? patterns.join(', ') : 'flat structure
 
 IMPORTANT: Base your specification on these detected technologies. Do NOT invent technologies or patterns not present in this project.
 `;
+
+  return { text, dirs: patterns, techStack, database };
 }
 
 export async function getGitDiff(root) {
@@ -584,7 +586,7 @@ export async function buildPrompt(feature, step, { description, instructions, hi
     promptPhase: taskMetadata?.phase || 'unknown',
     promptType: taskMetadata?.type || 'generate',
     contextFiles: config.context_files || [],
-    knowledgeCategories: knowledgeCategories || [],
+    knowledgeCategories: knowledge ? (knowledgeCategories || []) : [],
     priorSteps: loadedPriorSteps,
     codebaseFiles: [],
     initFile: initSpecs ? 'init.md' : null,
@@ -663,7 +665,9 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   // Inject codebase context if prompt requires scan (scan_required: true in front matter)
   if (taskMetadata?.scan_required) {
     const codebaseContext = await buildCodebaseContext(root);
-    parts.push(codebaseContext);
+    parts.push(codebaseContext.text);
+    filesUsed.codebaseFiles = codebaseContext.dirs;
+    filesUsed.techStack = codebaseContext.techStack;
   }
 
   if (knowledge) {

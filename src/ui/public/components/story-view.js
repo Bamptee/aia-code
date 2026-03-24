@@ -226,17 +226,45 @@ function SkipWarning({ skippedSteps, warning }) {
   );
 }
 
-function FilesUsedPanel({ filesUsed, expanded = false }) {
+function FilesUsedPanel({ filesUsed, fileOperations, expanded = false }) {
   const [isExpanded, setIsExpanded] = React.useState(expanded);
 
-  if (!filesUsed) return null;
+  if (!filesUsed && (!fileOperations || fileOperations.length === 0)) return null;
 
-  const hasContent = filesUsed.promptTemplate ||
+  const hasContextContent = filesUsed && (
+    filesUsed.promptTemplate ||
     filesUsed.priorSteps?.length > 0 ||
     filesUsed.contextFiles?.length > 0 ||
-    filesUsed.knowledgeCategories?.length > 0;
+    filesUsed.knowledgeCategories?.length > 0
+  );
 
-  if (!hasContent) return null;
+  // Deduplicate file operations: Read + Edit on same file = Modified only
+  const deduplicatedOps = React.useMemo(() => {
+    if (!fileOperations || fileOperations.length === 0) return { modified: [], created: [], read: [] };
+    const fileMap = new Map();
+    const priority = { read: 0, created: 1, modified: 2 };
+    for (const op of fileOperations) {
+      const existing = fileMap.get(op.path);
+      // Highest priority wins: modified > created > read
+      if (!existing || (priority[op.action] || 0) > (priority[existing] || 0)) {
+        fileMap.set(op.path, op.action);
+      }
+    }
+    const modified = [], created = [], read = [];
+    for (const [filePath, action] of fileMap) {
+      if (action === 'modified') modified.push(filePath);
+      else if (action === 'created') created.push(filePath);
+      else read.push(filePath);
+    }
+    return { modified, created, read };
+  }, [fileOperations]);
+
+  const hasFileOps = deduplicatedOps.modified.length > 0 || deduplicatedOps.created.length > 0 || deduplicatedOps.read.length > 0;
+
+  if (!hasContextContent && !hasFileOps) return null;
+
+  const totalFiles = (filesUsed?.priorSteps?.length || 0) + (filesUsed?.contextFiles?.length || 0);
+  const totalOps = deduplicatedOps.modified.length + deduplicatedOps.created.length + deduplicatedOps.read.length;
 
   return React.createElement('div', {
     className: 'bg-slate-800/50 border border-slate-700 rounded-lg overflow-hidden text-xs',
@@ -249,53 +277,93 @@ function FilesUsedPanel({ filesUsed, expanded = false }) {
         React.createElement('span', null, '📂'),
         React.createElement('span', null, 'Context Used'),
         React.createElement('span', { className: 'text-slate-600' },
-          `(${(filesUsed.priorSteps?.length || 0) + (filesUsed.contextFiles?.length || 0)} files)`
+          totalOps > 0 ? `(${totalFiles} context, ${totalOps} touched)` : `(${totalFiles} files)`
         )
       ),
       React.createElement('span', { className: `transition-transform ${isExpanded ? 'rotate-180' : ''}` }, '▼')
     ),
     isExpanded && React.createElement('div', { className: 'px-3 pb-3 space-y-2 border-t border-slate-700 pt-2' },
-      // Prompt template
-      filesUsed.promptTemplate && React.createElement('div', null,
-        React.createElement('span', { className: 'text-slate-500' }, 'Prompt: '),
-        React.createElement('span', { className: 'text-violet-400' }, filesUsed.promptTemplate),
-        filesUsed.promptPhase && React.createElement('span', { className: 'text-slate-600 ml-2' },
-          `(${filesUsed.promptPhase}/${filesUsed.promptType})`
+      // Section 1: Injected Context
+      hasContextContent && React.createElement('div', { className: 'space-y-1' },
+        React.createElement('div', { className: 'text-slate-500 font-medium mb-1' }, 'Contexte injecté'),
+        // Prompt template
+        filesUsed.promptTemplate && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '📄 Prompt: '),
+          React.createElement('span', { className: 'text-violet-400' }, filesUsed.promptTemplate),
+          filesUsed.promptPhase && React.createElement('span', { className: 'text-slate-600 ml-2' },
+            `(${filesUsed.promptPhase}/${filesUsed.promptType})`
+          )
+        ),
+        // Prior steps
+        filesUsed.priorSteps?.length > 0 && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '📁 Prior Steps: '),
+          React.createElement('div', { className: 'ml-4' },
+            ...filesUsed.priorSteps.map(f =>
+              React.createElement('div', { key: f.file || f, className: 'text-emerald-400' },
+                `${f.file || f}${f.size ? ` (${f.size})` : ''}`
+              )
+            )
+          )
+        ),
+        // Context files
+        filesUsed.contextFiles?.length > 0 && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '📂 Context: '),
+          React.createElement('span', { className: 'text-blue-400' },
+            filesUsed.contextFiles.join(', ')
+          )
+        ),
+        // Knowledge
+        filesUsed.knowledgeCategories?.length > 0 && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '🔍 Knowledge: '),
+          React.createElement('span', { className: 'text-amber-400' },
+            filesUsed.knowledgeCategories.join(', ')
+          )
+        ),
+        // Init file (skip if already shown in prior steps)
+        filesUsed.initFile && !filesUsed.priorSteps?.some(f => (f.file || f) === filesUsed.initFile) && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '📄 Init: '),
+          React.createElement('span', { className: 'text-cyan-400' }, filesUsed.initFile)
+        ),
+        // Codebase scan
+        (filesUsed.codebaseFiles?.length > 0 || filesUsed.techStack?.length > 0) && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '📊 Codebase Scan: '),
+          filesUsed.codebaseFiles?.length > 0 && React.createElement('span', { className: 'text-pink-400 mr-2' },
+            `Dirs: ${filesUsed.codebaseFiles.join(', ')}`
+          ),
+          filesUsed.techStack?.length > 0 && React.createElement('span', { className: 'text-orange-400' },
+            `Tech: ${filesUsed.techStack.join(', ')}`
+          )
         )
       ),
-      // Prior steps
-      filesUsed.priorSteps?.length > 0 && React.createElement('div', null,
-        React.createElement('span', { className: 'text-slate-500' }, 'Prior steps: '),
-        React.createElement('span', { className: 'text-emerald-400' },
-          filesUsed.priorSteps.map(f => f.file || f).join(', ')
-        )
-      ),
-      // Context files
-      filesUsed.contextFiles?.length > 0 && React.createElement('div', null,
-        React.createElement('span', { className: 'text-slate-500' }, 'Context: '),
-        React.createElement('span', { className: 'text-blue-400' },
-          filesUsed.contextFiles.join(', ')
-        )
-      ),
-      // Knowledge
-      filesUsed.knowledgeCategories?.length > 0 && React.createElement('div', null,
-        React.createElement('span', { className: 'text-slate-500' }, 'Knowledge: '),
-        React.createElement('span', { className: 'text-amber-400' },
-          filesUsed.knowledgeCategories.join(', ')
-        )
-      ),
-      // Init file
-      filesUsed.initFile && React.createElement('div', null,
-        React.createElement('span', { className: 'text-slate-500' }, 'Init: '),
-        React.createElement('span', { className: 'text-cyan-400' }, filesUsed.initFile)
-      ),
-      // Codebase files
-      filesUsed.codebaseFiles?.length > 0 && React.createElement('div', null,
-        React.createElement('span', { className: 'text-slate-500' }, 'Codebase: '),
-        React.createElement('span', { className: 'text-pink-400' },
-          filesUsed.codebaseFiles.length > 5
-            ? `${filesUsed.codebaseFiles.slice(0, 5).join(', ')} +${filesUsed.codebaseFiles.length - 5} more`
-            : filesUsed.codebaseFiles.join(', ')
+      // Section 2: Files Touched (agent operations)
+      hasFileOps && React.createElement('div', { className: `space-y-1 ${hasContextContent ? 'mt-3 pt-2 border-t border-slate-700/50' : ''}` },
+        React.createElement('div', { className: 'text-slate-500 font-medium mb-1' }, 'Fichiers touchés'),
+        // Modified files
+        deduplicatedOps.modified.length > 0 && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '📝 Modifiés: '),
+          React.createElement('div', { className: 'ml-4' },
+            ...deduplicatedOps.modified.map(f =>
+              React.createElement('div', { key: f, className: 'text-yellow-400' }, f)
+            )
+          )
+        ),
+        // Created files
+        deduplicatedOps.created.length > 0 && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '✨ Créés: '),
+          React.createElement('div', { className: 'ml-4' },
+            ...deduplicatedOps.created.map(f =>
+              React.createElement('div', { key: f, className: 'text-green-400' }, f)
+            )
+          )
+        ),
+        // Read files
+        deduplicatedOps.read.length > 0 && React.createElement('div', null,
+          React.createElement('span', { className: 'text-slate-500' }, '📄 Lus: '),
+          React.createElement('div', { className: 'ml-4' },
+            ...deduplicatedOps.read.map(f =>
+              React.createElement('div', { key: f, className: 'text-slate-400' }, f)
+            )
+          )
         )
       )
     )
@@ -894,6 +962,7 @@ function ConversationPanel({ slug, stepName, model, onModelChange, onContentUpda
       // Show context files from last assistant message
       lastAssistantMsgWithFiles?.filesUsed && React.createElement(FilesUsedPanel, {
         filesUsed: lastAssistantMsgWithFiles.filesUsed,
+        fileOperations: lastAssistantMsgWithFiles.fileOperations || [],
         expanded: false,
       }),
       React.createElement('div', { ref: messagesEndRef })
@@ -1235,7 +1304,7 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
 
 // ============== Step Section ==============
 
-function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, onStoryUpdate, readonly = false, tokenUsage = null }) {
+function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, onStoryUpdate, readonly = false, tokenUsage = null, savedStepContext = null }) {
   const config = STEP_CONFIG[stepKey];
   const formattedTokens = formatTokenCount(tokenUsage?.total);
 
@@ -1266,10 +1335,12 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
   const [translating, setTranslating] = React.useState(false);
   const [translated, setTranslated] = React.useState(null);
 
-  // Files used tracking (populated after generation)
-  const [filesUsed, setFilesUsed] = React.useState(null);
+  // Files used tracking (populated after generation, or restored from savedStepContext)
+  const [filesUsed, setFilesUsed] = React.useState(savedStepContext?.filesUsed || null);
+  // File operations tracking (agent mode: Read/Edit/Write)
+  const [fileOperations, setFileOperations] = React.useState(savedStepContext?.fileOperations || []);
   // Model used tracking (populated after generation)
-  const [modelUsed, setModelUsed] = React.useState(null);
+  const [modelUsed, setModelUsed] = React.useState(savedStepContext?.modelUsed || null);
 
   // Convert stepKey to API format (kebab-case)
   const apiStepKey = stepKey.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
@@ -1355,6 +1426,7 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
     setGenerating(true);
     setOutput('');
     setFilesUsed(null); // Reset filesUsed
+    setFileOperations([]); // Reset fileOperations
     setModelUsed(null); // Reset modelUsed
 
     const result = await streamPost(`/stories/${slug}/steps/${apiStepKey}/generate`, {
@@ -1368,9 +1440,12 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
     setOutput('');
     setGenerating(false);
 
-    // Store filesUsed and modelUsed from result if available
+    // Store filesUsed, fileOperations and modelUsed from result if available
     if (result.filesUsed) {
       setFilesUsed(result.filesUsed);
+    }
+    if (result.fileOperations?.length > 0) {
+      setFileOperations(result.fileOperations);
     }
     if (result.modelUsed) {
       setModelUsed(result.modelUsed);
@@ -1651,7 +1726,7 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
       ),
 
       // Files used panel (shows context loaded during generation)
-      filesUsed && React.createElement(FilesUsedPanel, { filesUsed, expanded: false }),
+      (filesUsed || fileOperations.length > 0) && React.createElement(FilesUsedPanel, { filesUsed, fileOperations, expanded: false }),
 
       generating && React.createElement(StreamingPanel, { output })
     )
@@ -2999,6 +3074,13 @@ export function StoryView({ slug, context = 'product' }) {
     setLoading(false);
   };
 
+  // Wrapper that updates both story and tokens
+  const handleStoryUpdate = async (storyData) => {
+    setStory(storyData);
+    // Also refresh token usage from backend
+    api.get(`/stories/${slug}/tokens`).then(setTokenUsage).catch(() => {});
+  };
+
   React.useEffect(() => { loadData(); }, [slug]);
 
   if (loading) return React.createElement(LoadingSpinner, { text: 'Loading story...' });
@@ -3061,7 +3143,7 @@ export function StoryView({ slug, context = 'product' }) {
           React.createElement('div', { className: 'flex items-center gap-3 mb-2' },
             React.createElement(PhaseSelector, {
               story,
-              onStoryUpdate: setStory,
+              onStoryUpdate: handleStoryUpdate,
             }),
             // Epic Selector - allows changing the epic assignment (always enabled, epic change is administrative)
             React.createElement(EpicSelector, {
@@ -3076,7 +3158,7 @@ export function StoryView({ slug, context = 'product' }) {
             // Apps Scope Selector - filters context for prompts
             React.createElement(AppsScopeSelector, {
               story,
-              onStoryUpdate: setStory,
+              onStoryUpdate: handleStoryUpdate,
               readonly,
             }),
             React.createElement('span', { className: `px-3 py-1 text-xs rounded-full ${contextConfig.gradient} ${contextConfig.text} ${contextConfig.border} border` },
@@ -3128,7 +3210,7 @@ export function StoryView({ slug, context = 'product' }) {
         React.createElement(InitPanel, {
           slug,
           story,
-          onStoryUpdate: setStory,
+          onStoryUpdate: handleStoryUpdate,
           onComplete: () => setInitExpanded(false),
           readonly,
         })
@@ -3138,7 +3220,7 @@ export function StoryView({ slug, context = 'product' }) {
     // QA Rejection Alert (show in dev context when story was rejected)
     context === 'dev' && story.qaStatus === 'rejected' && React.createElement(QARejectionAlert, {
       story,
-      onStoryUpdate: setStory,
+      onStoryUpdate: handleStoryUpdate,
     }),
 
     // Worktrunk Panel (only in dev context with edit access)
@@ -3152,13 +3234,13 @@ export function StoryView({ slug, context = 'product' }) {
     // Product Actions (only in product context with edit access, discovery phase)
     context === 'product' && accessLevel === 'edit' && React.createElement(ProductActions, {
       story,
-      onStoryUpdate: setStory,
+      onStoryUpdate: handleStoryUpdate,
     }),
 
     // QA Actions (only in QA context with edit access)
     context === 'qa' && accessLevel === 'edit' && React.createElement(QAActions, {
       story,
-      onStoryUpdate: setStory,
+      onStoryUpdate: handleStoryUpdate,
     }),
 
     // Steps (hidden in QA view - QA only sees the QA Actions panel)
@@ -3187,9 +3269,10 @@ export function StoryView({ slug, context = 'product' }) {
           currentStep,
           storyContext: story.init?.enriched || story.description || '',
           attachments: story.init?.attachments,
-          onStoryUpdate: setStory,
+          onStoryUpdate: handleStoryUpdate,
           readonly,
           tokenUsage: tokenUsage?.steps?.[apiStepKey] || tokenUsage?.steps?.[stepKey],
+          savedStepContext: story.stepContext?.[apiStepKey] || story.stepContext?.[stepKey],
         });
       })
     )

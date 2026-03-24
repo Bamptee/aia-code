@@ -1342,9 +1342,12 @@ ${content}`;
    * For other steps: updates the .md document
    */
   router.post('/api/stories/:slug/steps/:step/recap', async (req, res, { params, root }) => {
-    console.log('[Recap] Starting recap for', params.slug, params.step);
+    // Strip -review suffix to get actual step name (same pattern as chat endpoint)
+    const isReviewMode = params.step.endsWith('-review');
+    const actualStep = params.step.replace(/-review$/, '');
+    console.log('[Recap] Starting recap for', params.slug, params.step, '-> actualStep:', actualStep, 'reviewMode:', isReviewMode);
     sseHeaders(res);
-    sseSend(res, 'status', { step: params.step, status: 'applying_feedback' });
+    sseSend(res, 'status', { step: actualStep, status: 'applying_feedback' });
 
     const onData = ({ type, text }) => {
       try { sseSend(res, 'log', { type, text }); } catch {}
@@ -1353,7 +1356,7 @@ ${content}`;
     try {
       const storyDir = await getStoryDirPath(params.slug, root);
       const convPath = path.join(storyDir, `${params.step}-conversation.json`);
-      const stepPath = path.join(storyDir, `${params.step}.md`);
+      const stepPath = path.join(storyDir, `${actualStep}.md`);
       console.log('[Recap] Conversation path:', convPath);
 
       // Load conversation
@@ -1370,7 +1373,7 @@ ${content}`;
       }
 
       // Check if this is a code-action step (implement/review)
-      const isCodeStep = ['implement', 'review'].includes(params.step);
+      const isCodeStep = ['implement', 'review'].includes(actualStep);
 
       if (isCodeStep) {
         // For implement/review: run in agent mode to apply code changes
@@ -1446,7 +1449,7 @@ INSTRUCTIONS:
         const recapInstructions = `Apply the following feedback from conversation:\n\n${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')}`;
 
         // Use runStep with iterateOn to update the document
-        const result = await runStep(params.step, params.slug, {
+        const result = await runStep(actualStep, params.slug, {
           description: recapInstructions,
           iterateOn: stepContent,
           verbose: true,
@@ -1544,7 +1547,7 @@ INSTRUCTIONS:
             stats.byPhase[status.phase || 'discovery'] = (stats.byPhase[status.phase || 'discovery'] || 0) + 1;
             const epicKey = status.epic || 'unassigned';
             stats.byEpic[epicKey] = (stats.byEpic[epicKey] || 0) + 1;
-            stats.byStatus[status.status || 'draft'] = (stats.byStatus[status.status || 'draft'] || 0) + 1;
+            stats.byStatus[status.phase || 'discovery'] = (stats.byStatus[status.phase || 'discovery'] || 0) + 1;
           } catch {
             // Skip invalid stories
           }

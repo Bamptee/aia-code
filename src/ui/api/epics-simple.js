@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
 import { json, error } from '../router.js';
-import { AIA_DIR } from '../../constants.js';
+import { AIA_DIR, STEP_ORDER } from '../../constants.js';
 import {
   createEpic,
   loadEpic,
@@ -31,7 +31,7 @@ import { loadConfig } from '../../models.js';
 import { getApps } from '../../services/apps.js';
 import { callModel } from '../../services/model-call.js';
 import { runStep } from '../../services/runner.js';
-import { loadPromptTemplate, loadInitSpecs } from '../../prompt-builder.js';
+import { loadPromptTemplate, loadInitSpecs, buildPrompt } from '../../prompt-builder.js';
 
 /**
  * Register all Epic-related API routes (simplified YAML system)
@@ -789,6 +789,20 @@ ${content}`;
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     if (res.flush) res.flush();
   };
+
+  /**
+   * GET /api/stories/:slug/steps/:step/preview-prompt - Preview assembled prompt (dry-run)
+   */
+  router.get('/api/stories/:slug/steps/:step/preview-prompt', async (req, res, { params, root }) => {
+    if (!STEP_ORDER.includes(params.step)) return error(res, 'Invalid step', 400);
+    try {
+      const result = await buildPrompt(params.slug, params.step, { root });
+      json(res, { prompt: result.prompt, filesUsed: result.filesUsed, charCount: result.prompt.length });
+    } catch (e) {
+      const status = e.message?.includes('not found') ? 404 : 500;
+      error(res, e.message, status);
+    }
+  });
 
   /**
    * POST /api/stories/:slug/steps/:step/generate - Generate step content with AI (SSE streaming)

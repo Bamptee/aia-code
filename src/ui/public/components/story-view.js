@@ -3,6 +3,72 @@ import { api, streamPost } from '/main.js';
 import { EpicSelector } from '/components/epic-selector.js';
 import { StoryWorktrunkPanel } from '/components/worktrunk-panel.js';
 
+// ============== Prompt Preview Modal ==============
+
+function PromptPreviewModal({ isOpen, onClose, slug, step }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const lastKey = React.useRef('');
+
+  React.useEffect(() => {
+    if (!isOpen || !slug || !step) return;
+    const key = `${slug}:${step}`;
+    if (key === lastKey.current && data) return;
+    lastKey.current = key;
+    setLoading(true); setError(null); setData(null);
+    api.get(`/stories/${slug}/steps/${step}/preview-prompt`)
+      .then(setData)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [isOpen, slug, step]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return React.createElement('div', {
+    className: 'fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4',
+    onClick: onClose,
+  },
+    React.createElement('div', {
+      className: 'bg-slate-900 border border-slate-700 rounded-lg w-full max-w-4xl max-h-[85vh] flex flex-col',
+      role: 'dialog',
+      'aria-label': `Prompt preview for ${step}`,
+      onClick: e => e.stopPropagation(),
+    },
+      // Header
+      React.createElement('div', { className: 'flex items-center justify-between px-4 py-3 border-b border-slate-700' },
+        React.createElement('div', { className: 'flex items-center gap-3' },
+          React.createElement('h3', { className: 'text-sm font-semibold text-slate-200' }, `Assembled Prompt — ${step}`),
+          data && React.createElement('span', { className: 'text-xs text-slate-500' }, `${data.charCount.toLocaleString()} chars`),
+        ),
+        React.createElement('button', { onClick: onClose, 'aria-label': 'Close', className: 'text-slate-400 hover:text-slate-200 text-lg' }, '\u2715'),
+      ),
+      // Files used
+      data?.filesUsed && React.createElement('div', { className: 'px-4 py-2 border-b border-slate-700 flex flex-wrap gap-2 text-xs text-slate-500' },
+        React.createElement('span', null, `Template: ${data.filesUsed.promptTemplate}`),
+        data.filesUsed.contextFiles?.length > 0 && React.createElement('span', null, `| Context: ${data.filesUsed.contextFiles.length} files`),
+        data.filesUsed.knowledgeCategories?.length > 0 && React.createElement('span', null, `| Knowledge: ${data.filesUsed.knowledgeCategories.join(', ')}`),
+        data.filesUsed.initFile && React.createElement('span', null, '| Init: loaded'),
+      ),
+      // Content
+      React.createElement('div', { className: 'flex-1 overflow-auto p-4' },
+        loading && React.createElement('p', { className: 'text-slate-500 text-sm' }, 'Building prompt...'),
+        error && React.createElement('p', { className: 'text-red-400 text-sm' }, error),
+        data && React.createElement('pre', {
+          className: 'text-xs text-slate-300 font-mono whitespace-pre-wrap break-words',
+        }, data.prompt),
+      ),
+    )
+  );
+}
+
 // ============== Constants v3 ==============
 
 // V3: 7 steps with Product/Dev phases
@@ -1348,6 +1414,9 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
   const [translating, setTranslating] = React.useState(false);
   const [translated, setTranslated] = React.useState(null);
 
+  // Prompt preview modal
+  const [showPreview, setShowPreview] = React.useState(false);
+
   // Files used tracking (populated after generation, or restored from savedStepContext)
   const [filesUsed, setFilesUsed] = React.useState(savedStepContext?.filesUsed || null);
   // File operations tracking (agent mode: Read/Edit/Write)
@@ -1703,21 +1772,29 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
         ),
         React.createElement('div', { className: 'flex items-center justify-between' },
           React.createElement(ModelSelect, { model, onChange: setModel, disabled: generating }),
-          React.createElement('button', {
-            onClick: () => {
-              if (hasContent) {
-                if (confirm('⚠️ This will regenerate the content from scratch and overwrite your current content. Continue?')) {
+          React.createElement('div', { className: 'flex items-center gap-2' },
+            React.createElement('button', {
+              onClick: () => setShowPreview(true),
+              title: 'Preview assembled prompt',
+              'aria-label': 'Preview assembled prompt',
+              className: 'px-2 py-2 rounded-lg text-sm transition-colors bg-slate-700/50 text-slate-400 border border-slate-600 hover:text-slate-200 hover:bg-slate-700',
+            }, '\uD83D\uDC41'),
+            React.createElement('button', {
+              onClick: () => {
+                if (hasContent) {
+                  if (confirm('⚠️ This will regenerate the content from scratch and overwrite your current content. Continue?')) {
+                    handleGenerate();
+                  }
+                } else {
                   handleGenerate();
                 }
-              } else {
-                handleGenerate();
-              }
-            },
-            disabled: generating,
-            className: `px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
-              hasContent ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30' : `${colors.bg} ${colors.text} ${colors.border} border hover:brightness-110`
-            }`,
-          }, generating ? '⏳ Generating...' : (hasContent ? '⚠️ Regenerate' : `✨ Generate ${config.name}`))
+              },
+              disabled: generating,
+              className: `px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                hasContent ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30' : `${colors.bg} ${colors.text} ${colors.border} border hover:brightness-110`
+              }`,
+            }, generating ? '⏳ Generating...' : (hasContent ? '⚠️ Regenerate' : `✨ Generate ${config.name}`)),
+          )
         )
       ),
 
@@ -1741,7 +1818,10 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
       // Files used panel (shows context loaded during generation)
       (filesUsed || fileOperations.length > 0) && React.createElement(FilesUsedPanel, { filesUsed, fileOperations, expanded: false }),
 
-      generating && React.createElement(StreamingPanel, { output })
+      generating && React.createElement(StreamingPanel, { output }),
+
+      // Prompt preview modal
+      React.createElement(PromptPreviewModal, { isOpen: showPreview, onClose: () => setShowPreview(false), slug, step: apiStepKey }),
     )
   );
 }

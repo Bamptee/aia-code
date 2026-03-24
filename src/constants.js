@@ -42,7 +42,7 @@ export const STEPS = Object.freeze({
   'spec-tech': { phase: 'dev', required: false, type: 'generate' },
   'dev-plan': { phase: 'dev', required: false, type: 'generate' },
   'implement': { phase: 'dev', required: false, type: 'generate' },
-  'review': { phase: 'dev', required: false, type: 'generate' },
+  'review': { phase: 'dev', required: false, type: 'chat-only' },
 });
 
 /**
@@ -127,15 +127,15 @@ export const SKIPPABLE_STEPS = Object.freeze([
  * Universal actions available on all steps
  * @type {string[]}
  */
-export const UNIVERSAL_ACTIONS = Object.freeze(['generate', 'chat', 'review']);
+export const UNIVERSAL_ACTIONS = Object.freeze(['generate', 'chat']);
 
 /**
- * Actions per step (brainstorming is chat-only)
+ * Actions per step type
  * @type {Object<string, string[]>}
  */
 export const STEP_ACTIONS = Object.freeze({
-  'brainstorming': ['chat', 'review'],
-  'default': ['generate', 'chat', 'review'],
+  'chat-only': ['chat'],
+  'generate': ['generate', 'chat'],
 });
 
 /**

@@ -58,7 +58,7 @@ const STEP_CONFIG = {
   specTech: { name: 'Spec Tech', icon: '🛠️', color: 'violet', phase: 'dev', description: 'Technical specification', type: 'generate' },
   devPlan: { name: 'Dev Plan', icon: '📝', color: 'cyan', phase: 'dev', description: 'Implementation tasks', type: 'generate' },
   implement: { name: 'Implement', icon: '💻', color: 'green', phase: 'dev', description: 'Code implementation', type: 'generate' },
-  review: { name: 'Review', icon: '✅', color: 'purple', phase: 'dev', description: 'Code review', type: 'generate' },
+  review: { name: 'Review', icon: '✅', color: 'purple', phase: 'dev', description: 'Code review', type: 'chat-only' },
   // Legacy aliases for backward compatibility
   brief: { name: 'Brief', icon: '📋', color: 'emerald', phase: 'product', description: 'High-level summary', type: 'generate', legacy: true },
   baSpec: { name: 'BA Spec', icon: '📊', color: 'blue', phase: 'product', description: 'Business analysis', type: 'generate', legacy: true },
@@ -69,8 +69,8 @@ const STEP_CONFIG = {
 
 // Actions per step type
 const STEP_ACTIONS = {
-  'chat-only': ['chat', 'review'],
-  'generate': ['generate', 'chat', 'review'],
+  'chat-only': ['chat'],
+  'generate': ['generate', 'chat'],
 };
 
 // Phase filters for dashboard
@@ -643,7 +643,7 @@ function StreamingPanel({ output, sessionStatus }) {
 
 // ============== Conversation Panel ==============
 
-function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'iterate', onContentUpdated }) {
+function ConversationPanel({ slug, stepName, model, onModelChange, onContentUpdated }) {
   const [messages, setMessages] = React.useState([]);
   const [input, setInput] = React.useState('');
   const [loading, setLoading] = React.useState(true);
@@ -659,17 +659,17 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
   // Check special step types
   const isCodeStep = CODE_STEPS.includes(stepName) || ['implement', 'review'].includes(apiStepName);
   const isBrainstorming = stepName === 'brainstorming' || apiStepName === 'brainstorming';
+  const isReview = stepName === 'review' || apiStepName === 'review';
 
   // Mode-specific config
-  const isReviewMode = mode === 'review';
-  const modeConfig = isReviewMode
-    ? { icon: '🔍', title: 'Adversarial Review', color: 'amber', placeholder: 'Challenge this content, ask critical questions...' }
-    : isBrainstorming
-      ? { icon: '💭', title: 'Brainstorming', color: 'cyan', placeholder: 'Share your ideas, ask questions, explore possibilities...' }
-      : { icon: '💬', title: 'Iterate with AI', color: 'violet', placeholder: 'Ask a question or request changes...' };
+  const modeConfig = isBrainstorming
+    ? { icon: '💭', title: 'Brainstorming', color: 'cyan', placeholder: 'Share your ideas, ask questions, explore possibilities...' }
+    : isReview
+      ? { icon: '🔍', title: 'Code Review', color: 'amber', placeholder: 'Discuss issues, request changes, ask questions...' }
+      : { icon: '💬', title: 'Chat', color: 'violet', placeholder: 'Ask a question or request changes...' };
 
-  // API key suffix for separate conversations
-  const conversationKey = isReviewMode ? `${apiStepName}-review` : apiStepName;
+  // Unified conversation key — one conversation per step
+  const conversationKey = apiStepName;
 
   const loadConversation = async () => {
     try {
@@ -679,10 +679,10 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
     setLoading(false);
   };
 
-  React.useEffect(() => { loadConversation(); }, [slug, stepName, mode]);
+  React.useEffect(() => { loadConversation(); }, [slug, stepName]);
   React.useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // Handle AI-initiated brainstorming
+  // Handle AI-initiated chat (brainstorming or review)
   const handleStartChat = async () => {
     if (starting) return;
     setStarting(true);
@@ -704,7 +704,6 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
       const result = await api.post(`/stories/${slug}/steps/${conversationKey}/chat`, {
         message: input.trim(),
         model: model || undefined,
-        reviewMode: isReviewMode, // Tell backend this is review mode
       });
       setMessages(prev => [...prev,
         { role: 'user', content: input.trim(), createdAt: new Date().toISOString() },
@@ -720,9 +719,7 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
     setRecapping(true);
     setRecapOutput('');
     try {
-      const result = await streamPost(`/stories/${slug}/steps/${conversationKey}/recap`, {
-        reviewMode: isReviewMode,
-      }, {
+      const result = await streamPost(`/stories/${slug}/steps/${conversationKey}/recap`, {}, {
         onLog: (text) => {
           setRecapOutput(prev => (prev + text).slice(-10000));
         },
@@ -746,10 +743,10 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
 
   if (loading) return React.createElement('div', { className: 'p-4 text-center text-slate-500 text-sm' }, 'Loading conversation...');
 
-  // Color classes based on mode
-  const borderColor = isReviewMode ? 'border-amber-500/30' : isBrainstorming ? 'border-cyan-500/30' : 'border-slate-700';
-  const headerBg = isReviewMode ? 'bg-amber-500/10' : isBrainstorming ? 'bg-cyan-500/10' : 'bg-slate-800';
-  const titleColor = isReviewMode ? 'text-amber-300' : isBrainstorming ? 'text-cyan-300' : 'text-slate-200';
+  // Color classes based on step type
+  const borderColor = isBrainstorming ? 'border-cyan-500/30' : isReview ? 'border-amber-500/30' : 'border-slate-700';
+  const headerBg = isBrainstorming ? 'bg-cyan-500/10' : isReview ? 'bg-amber-500/10' : 'bg-slate-800';
+  const titleColor = isBrainstorming ? 'text-cyan-300' : isReview ? 'text-amber-300' : 'text-slate-200';
 
   // Get last assistant message with filesUsed for context display
   const lastAssistantMsgWithFiles = [...messages].reverse().find(m => m.role === 'assistant' && m.filesUsed);
@@ -760,7 +757,6 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
         React.createElement('span', { className: `text-sm font-medium ${titleColor}` }, `${modeConfig.icon} ${modeConfig.title}`),
         messages.length > 0 && React.createElement('span', { className: 'text-xs text-slate-500 bg-slate-700 px-2 py-0.5 rounded-full' }, `${messages.length}`),
         isCodeStep && React.createElement('span', { className: 'text-xs text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full' }, '🚀 Code mode'),
-        isReviewMode && React.createElement('span', { className: 'text-xs text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full' }, '⚡ Critical'),
         isBrainstorming && React.createElement('span', { className: 'text-xs text-cyan-400 bg-cyan-500/20 px-2 py-0.5 rounded-full' }, '💭 Ideation')
       ),
       React.createElement('div', { className: 'flex items-center gap-2' },
@@ -770,15 +766,13 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
         onClick: handleRecap,
         disabled: recapping,
         className: `flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 ${
-          isReviewMode
-            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'
-            : isBrainstorming
-              ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30'
-              : isCodeStep
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
-                : 'bg-violet-500/20 text-violet-400 border border-violet-500/30 hover:bg-violet-500/30'
+          isBrainstorming
+            ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30'
+            : isCodeStep
+              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+              : 'bg-violet-500/20 text-violet-400 border border-violet-500/30 hover:bg-violet-500/30'
         }`,
-      }, recapping ? '⏳ Generating...' : (isReviewMode ? '✓ Apply fixes' : isBrainstorming ? '📝 Save Summary' : isCodeStep ? '🚀 Apply to code' : '✨ Apply feedback'))
+      }, recapping ? '⏳ Generating...' : (isBrainstorming ? '📝 Save Summary' : isCodeStep ? '🚀 Apply to code' : '✨ Apply feedback'))
       )
     ),
     // Show streaming output when recapping
@@ -792,14 +786,14 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
       }, recapOutput.slice(-2000))
     ),
     !recapping && React.createElement('div', { className: 'max-h-64 overflow-y-auto p-4 space-y-3' },
-      messages.length === 0 && isBrainstorming && React.createElement('div', { className: 'flex flex-col items-center gap-3 py-4' },
+      messages.length === 0 && (isBrainstorming || isReview) && React.createElement('div', { className: 'flex flex-col items-center gap-3 py-4' },
         React.createElement('button', {
           onClick: handleStartChat,
           disabled: starting,
-          className: 'px-4 py-2 bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center gap-2',
-        }, starting ? '⏳ Chargement...' : '🚀 Démarrer le brainstorming')
+          className: `px-4 py-2 ${isBrainstorming ? 'bg-cyan-500 hover:bg-cyan-600' : 'bg-amber-500 hover:bg-amber-600'} disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center gap-2`,
+        }, starting ? '⏳ Chargement...' : (isBrainstorming ? '🚀 Démarrer le brainstorming' : '🔍 Lancer la review'))
       ),
-      messages.length === 0 && !isBrainstorming && React.createElement('p', { className: 'text-center text-slate-500 text-sm py-4' },
+      messages.length === 0 && !isBrainstorming && !isReview && React.createElement('p', { className: 'text-center text-slate-500 text-sm py-4' },
         'Ask questions or request changes. Click "Apply feedback" to update the content.'
       ),
       ...messages.map((msg, i) => React.createElement('div', {
@@ -844,8 +838,8 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
         onKeyDown: (e) => e.key === 'Enter' && !e.shiftKey && handleSend(),
         placeholder: modeConfig.placeholder,
         className: `flex-1 bg-slate-900 border rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none ${
-          isReviewMode ? 'border-amber-500/30 focus:border-amber-500'
-            : isBrainstorming ? 'border-cyan-500/30 focus:border-cyan-500'
+          isBrainstorming ? 'border-cyan-500/30 focus:border-cyan-500'
+            : isReview ? 'border-amber-500/30 focus:border-amber-500'
             : 'border-slate-700 focus:border-violet-500'
         }`,
         disabled: sending,
@@ -854,8 +848,8 @@ function ConversationPanel({ slug, stepName, model, onModelChange, mode = 'itera
         onClick: handleSend,
         disabled: sending || !input.trim(),
         className: `px-4 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors ${
-          isReviewMode ? 'bg-amber-500 hover:bg-amber-600'
-            : isBrainstorming ? 'bg-cyan-500 hover:bg-cyan-600'
+          isBrainstorming ? 'bg-cyan-500 hover:bg-cyan-600'
+            : isReview ? 'bg-amber-500 hover:bg-amber-600'
             : 'bg-violet-500 hover:bg-violet-600'
         }`,
       }, sending ? '⏳' : '➤')
@@ -1177,8 +1171,10 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
   const config = STEP_CONFIG[stepKey];
   const formattedTokens = formatTokenCount(tokenUsage?.total);
 
-  // Brainstorming is a special "chat-first" step - no Generate, direct conversation
+  // Chat-first steps - no Generate, direct conversation
   const isBrainstorming = stepKey === 'brainstorming';
+  const isReview = stepKey === 'review';
+  const isChatFirst = isBrainstorming || isReview;
   const hasContent = step.content && step.content.trim().length > 0;
 
   // Only expand the current step (or first incomplete step if currentStep not in visible steps)
@@ -1188,9 +1184,9 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
   const [model, setModel] = React.useState('');
   const [generating, setGenerating] = React.useState(false);
   const [output, setOutput] = React.useState('');
-  // For brainstorming without content, show chat by default
-  const [showConversation, setShowConversation] = React.useState(isBrainstorming && !hasContent);
-  const [chatMode, setChatMode] = React.useState('iterate'); // 'iterate' | 'review'
+  // For chat-first steps without content, show chat by default
+  const [showConversation, setShowConversation] = React.useState(isChatFirst && !hasContent);
+  // chatMode removed — unified into single 'iterate' mode
   const [viewMode, setViewMode] = React.useState('preview'); // 'preview' | 'edit' | 'translate'
   const [editContent, setEditContent] = React.useState(step.content || '');
   const [saving, setSaving] = React.useState(false);
@@ -1395,38 +1391,15 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
           ),
           React.createElement('div', { className: 'flex items-center gap-2' },
             dirty && React.createElement('span', { className: 'text-xs text-amber-400' }, '● unsaved'),
-            // Iterate button (violet)
-            !readonly && React.createElement('button', {
-              onClick: () => {
-                if (showConversation && chatMode === 'iterate') {
-                  setShowConversation(false);
-                } else {
-                  setChatMode('iterate');
-                  setShowConversation(true);
-                }
-              },
+            // Unified Chat button
+            React.createElement('button', {
+              onClick: () => setShowConversation(!showConversation),
               className: `text-xs px-2 py-1 rounded transition-colors ${
-                showConversation && chatMode === 'iterate'
+                showConversation
                   ? 'bg-violet-500/30 text-violet-300 border border-violet-500/50'
                   : 'bg-violet-500/10 text-violet-400 border border-violet-500/30 hover:bg-violet-500/20'
               }`,
-            }, showConversation && chatMode === 'iterate' ? '✕ Close' : '💬 Iterate'),
-            // Review button (amber) - always visible on steps with content
-            !readonly && React.createElement('button', {
-              onClick: () => {
-                if (showConversation && chatMode === 'review') {
-                  setShowConversation(false);
-                } else {
-                  setChatMode('review');
-                  setShowConversation(true);
-                }
-              },
-              className: `text-xs px-2 py-1 rounded transition-colors ${
-                showConversation && chatMode === 'review'
-                  ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50'
-                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
-              }`,
-            }, showConversation && chatMode === 'review' ? '✕ Close' : '🔍 Review')
+            }, showConversation ? '✕ Close' : '💬 Chat')
           )
         ),
         // Preview mode
@@ -1492,17 +1465,16 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
       ),
 
       // Show ConversationPanel: for brainstorming always (chat-first), for others only with content
-      showConversation && (hasContent || isBrainstorming) && !readonly && React.createElement(ConversationPanel, {
+      showConversation && (hasContent || isBrainstorming || isReview) && React.createElement(ConversationPanel, {
         slug,
         stepName: stepKey,
         model,
         onModelChange: setModel,
-        mode: chatMode, // 'iterate' or 'review'
         onContentUpdated: handleConversationUpdate,
       }),
 
       // Brainstorming: chat-first mode - show invite to chat, no Generate button
-      !readonly && isBrainstorming && !hasContent && React.createElement('div', {
+      isBrainstorming && !hasContent && React.createElement('div', {
         className: 'bg-gradient-to-r from-cyan-500/10 to-violet-500/10 rounded-lg p-6 border border-cyan-500/30',
       },
         React.createElement('div', { className: 'text-center' },
@@ -1525,8 +1497,27 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
         )
       ),
 
-      // Regular steps: Generate section (not for brainstorming)
-      !readonly && !isBrainstorming && React.createElement('div', { className: 'space-y-4 bg-slate-800/50 rounded-lg p-4 border border-slate-700' },
+      // Review: chat-first mode - show invite to start review, no Generate button
+      isReview && !hasContent && React.createElement('div', {
+        className: 'bg-gradient-to-r from-amber-500/10 to-red-500/10 rounded-lg p-6 border border-amber-500/30',
+      },
+        React.createElement('div', { className: 'text-center' },
+          React.createElement('div', { className: 'text-3xl mb-3' }, '🔍'),
+          React.createElement('h3', { className: 'text-lg font-semibold text-slate-200 mb-2' }, 'Code Review'),
+          React.createElement('p', { className: 'text-sm text-slate-400 mb-4' },
+            'Start a review session. The AI will analyze your implementation, identify issues, and give a verdict.'
+          )
+        ),
+        React.createElement('div', { className: 'flex items-center justify-center gap-4 mb-4' },
+          React.createElement(ModelSelect, { model, onChange: setModel }),
+        ),
+        React.createElement('p', { className: 'text-xs text-slate-500 text-center' },
+          'The AI reviews automatically. Click "Apply to code" to apply suggested fixes.'
+        )
+      ),
+
+      // Regular steps: Generate section (not for chat-first steps)
+      !readonly && !isChatFirst && React.createElement('div', { className: 'space-y-4 bg-slate-800/50 rounded-lg p-4 border border-slate-700' },
         !hasContent && React.createElement(React.Fragment, null,
           React.createElement('div', { className: 'flex items-center gap-2 text-sm text-slate-400 mb-2' },
             React.createElement('span', null, '✨ Generate'),

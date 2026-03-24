@@ -982,15 +982,13 @@ ${content}`;
         return error(res, 'message is required', 400);
       }
 
-      // Detect review mode from step suffix or body flag
-      const isReviewMode = params.step.endsWith('-review') || body.reviewMode === true;
-      const actualStep = params.step.replace(/-review$/, '');
+      const actualStep = params.step;
 
-      console.log(`[Chat] Mode: ${isReviewMode ? 'REVIEW' : 'ITERATE'}, Step: ${params.step} -> ${actualStep}`);
+      console.log(`[Chat] Step: ${actualStep}`);
 
       const storyDir = await getStoryDirPath(params.slug, root);
-      const convPath = path.join(storyDir, `${params.step}-conversation.json`);
-      const stepPath = path.join(storyDir, `${actualStep}.md`); // Use actualStep without -review suffix
+      const convPath = path.join(storyDir, `${actualStep}-conversation.json`);
+      const stepPath = path.join(storyDir, `${actualStep}.md`);
 
       // Load existing conversation
       let conversation = { messages: [] };
@@ -1007,112 +1005,54 @@ ${content}`;
         console.log(`[Chat] ⚠ Step file not found: ${stepPath}`);
       }
 
-      // Load prior steps context for review mode
-      let priorStepsContext = '';
-      if (isReviewMode && stepContent) {
-        const STEP_ORDER = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
-        const currentStepIndex = STEP_ORDER.indexOf(actualStep);
-
-        if (currentStepIndex > 0) {
-          const priorSteps = STEP_ORDER.slice(0, currentStepIndex);
-          const priorSections = [];
-
-          for (const priorStep of priorSteps) {
-            const priorFile = path.join(storyDir, `${priorStep}.md`);
-            if (await fs.pathExists(priorFile)) {
-              const priorContent = await fs.readFile(priorFile, 'utf-8');
-              if (priorContent && priorContent.length > 0) {
-                // Truncate if too long
-                const truncated = priorContent.length > 2000
-                  ? priorContent.slice(0, 2000) + '\n\n[... truncated ...]'
-                  : priorContent;
-                priorSections.push(`### ${priorStep}\n${truncated}`);
-                console.log(`[Chat] ✓ Loaded prior step: ${priorStep}.md (${priorContent.length} chars)`);
-              }
-            }
-          }
-
-          if (priorSections.length > 0) {
-            priorStepsContext = '\n\nPRIOR STEPS CONTEXT:\n' + priorSections.join('\n\n');
-          }
-        }
-      }
-
-      // Load git diff for code steps in review mode
-      let gitDiffContext = '';
-      const isCodeStep = ['implement', 'review'].includes(actualStep);
-      if (isReviewMode && isCodeStep) {
-        try {
-          const { getGitDiff } = await import('../../prompt-builder.js');
-          const diff = await getGitDiff(root);
-          if (diff) {
-            gitDiffContext = `\n\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\``;
-            console.log(`[Chat] ✓ Loaded git diff: ${diff.length} chars`);
-          }
-        } catch (err) {
-          console.log(`[Chat] Error loading git diff: ${err.message}`);
-        }
-      }
-
       // Load config for language
       const config = await loadConfig(root);
       const commLang = config.communication_language || 'English';
 
+      // Load additional context for review step (prior steps + git diff)
+      let reviewContext = '';
+      const isCodeStep = ['implement', 'review'].includes(actualStep);
+      if (actualStep === 'review') {
+        // Load prior steps for context
+        const STEP_ORDER = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement'];
+        const priorSections = [];
+        for (const priorStep of STEP_ORDER) {
+          const priorFile = path.join(storyDir, `${priorStep}.md`);
+          if (await fs.pathExists(priorFile)) {
+            const priorContent = await fs.readFile(priorFile, 'utf-8');
+            if (priorContent && priorContent.length > 0) {
+              const truncated = priorContent.length > 2000
+                ? priorContent.slice(0, 2000) + '\n\n[... truncated ...]'
+                : priorContent;
+              priorSections.push(`### ${priorStep}\n${truncated}`);
+            }
+          }
+        }
+        if (priorSections.length > 0) {
+          reviewContext += '\nPRIOR STEPS CONTEXT:\n' + priorSections.join('\n\n') + '\n';
+        }
+
+        // Load git diff for code review context
+        try {
+          const { getGitDiff } = await import('../../prompt-builder.js');
+          const diff = await getGitDiff(root);
+          if (diff) {
+            reviewContext += `\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\`\n`;
+          }
+        } catch (err) {
+          console.log(`[Chat] Error loading git diff for review: ${err.message}`);
+        }
+      }
+
       // Build AI prompt with context about the workflow
       let chatPrompt;
 
-      if (isReviewMode) {
-        // Review mode: adversarial/critical review
-        if (!stepContent) {
-          chatPrompt = `Le contenu du step "${actualStep}" n'a pas pu être chargé.
-
-Causes possibles:
-- Le step n'a pas encore été exécuté (cliquez sur "Generate" d'abord)
-- Le fichier ${actualStep}.md n'existe pas
-
-USER MESSAGE: ${body.message}
-
-RESPONSE LANGUAGE: ${commLang}
-
-Explique ce problème à l'utilisateur de manière claire.`;
-        } else {
-          chatPrompt = `You are a CRITICAL REVIEWER performing an adversarial review. Your job is to find problems, weaknesses, and gaps.
-
-STEP BEING REVIEWED: ${actualStep}
-${priorStepsContext}
-
-CONTENT TO REVIEW:
----
-${stepContent}
----
-${gitDiffContext}
-
-CONVERSATION HISTORY:
-${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
-
-USER MESSAGE: ${body.message}
-
-RESPONSE LANGUAGE: ${commLang}
-
-YOUR ROLE: Be a tough, skeptical reviewer. You should:
-- Challenge assumptions and decisions
-- Identify missing edge cases
-- Point out ambiguities and inconsistencies
-- Question technical choices
-- Find potential bugs or issues
-- Suggest concrete improvements
-
-Be direct and specific. Format issues as:
-**[SEVERITY: high/medium/low]** Issue description
-- Impact: What could go wrong
-- Suggestion: How to fix it`;
-        }
-      } else if (isCodeStep) {
+      if (isCodeStep) {
         chatPrompt = `You are a helpful assistant discussing code implementation for the "${actualStep}" phase.
 
 CURRENT STEP DOCUMENT:
 ${stepContent}
-
+${reviewContext}
 CONVERSATION HISTORY:
 ${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
 
@@ -1196,9 +1136,10 @@ INSTRUCTIONS:
     try {
       const body = await parseBody();
 
-      // Validate: only available for brainstorming step
-      if (params.step !== 'brainstorming') {
-        return error(res, 'start-chat only available for brainstorming', 400);
+      // Validate: only available for chat-first steps
+      const chatFirstSteps = ['brainstorming', 'review'];
+      if (!chatFirstSteps.includes(params.step)) {
+        return error(res, `start-chat only available for: ${chatFirstSteps.join(', ')}`, 400);
       }
 
       // Validate model if provided
@@ -1211,29 +1152,89 @@ INSTRUCTIONS:
         const result = await loadPromptTemplate(params.step, root);
         promptTemplate = result.content;
       } catch (err) {
-        return error(res, `Failed to load brainstorming prompt: ${err.message}`, 500);
+        return error(res, `Failed to load ${params.step} prompt: ${err.message}`, 500);
       }
-
-      // Load init.md (non-blocking if not found)
-      const initContent = await loadInitSpecs(params.slug, root);
 
       // Load config for language
       const config = await loadConfig(root);
       const commLang = config.communication_language || 'English';
 
-      // Build contextual prompt
-      let chatPrompt = `${promptTemplate}\n\n`;
+      let chatPrompt;
 
-      if (initContent) {
-        chatPrompt += `INIT DOCUMENT (story context):\n---\n${initContent}\n---\n\n`;
-      }
+      if (params.step === 'brainstorming') {
+        // Brainstorming: load init.md and ask questions
+        const initContent = await loadInitSpecs(params.slug, root);
 
-      chatPrompt += `INSTRUCTIONS:
+        chatPrompt = `${promptTemplate}\n\n`;
+        if (initContent) {
+          chatPrompt += `INIT DOCUMENT (story context):\n---\n${initContent}\n---\n\n`;
+        }
+        chatPrompt += `INSTRUCTIONS:
 - You are initiating a brainstorming session for this feature
 - Analyze the init document and identify key areas that need clarification
 - Ask 3-5 focused questions to guide the discussion
 - Be specific and actionable
 - Respond in ${commLang}`;
+
+      } else if (params.step === 'review') {
+        // Review: load implement output + prior steps + git diff for comprehensive analysis
+        const storyDir = await getStoryDirPath(params.slug, root);
+
+        // Load implement.md content
+        let implementContent = '';
+        const implementPath = path.join(storyDir, 'implement.md');
+        if (await fs.pathExists(implementPath)) {
+          implementContent = await fs.readFile(implementPath, 'utf-8');
+        }
+
+        // Load prior steps for context
+        const STEP_ORDER = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement'];
+        const priorSections = [];
+        for (const priorStep of STEP_ORDER) {
+          const priorFile = path.join(storyDir, `${priorStep}.md`);
+          if (await fs.pathExists(priorFile)) {
+            const priorContent = await fs.readFile(priorFile, 'utf-8');
+            if (priorContent && priorContent.length > 0) {
+              const truncated = priorContent.length > 2000
+                ? priorContent.slice(0, 2000) + '\n\n[... truncated ...]'
+                : priorContent;
+              priorSections.push(`### ${priorStep}\n${truncated}`);
+            }
+          }
+        }
+
+        // Load git diff
+        let gitDiffContext = '';
+        try {
+          const { getGitDiff } = await import('../../prompt-builder.js');
+          const diff = await getGitDiff(root);
+          if (diff) {
+            gitDiffContext = `\n\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\``;
+          }
+        } catch (err) {
+          console.log(`[start-chat review] Error loading git diff: ${err.message}`);
+        }
+
+        chatPrompt = `${promptTemplate}\n\n`;
+
+        if (priorSections.length > 0) {
+          chatPrompt += `PRIOR STEPS CONTEXT:\n${priorSections.join('\n\n')}\n\n`;
+        }
+
+        if (implementContent) {
+          chatPrompt += `IMPLEMENTATION DOCUMENT:\n---\n${implementContent}\n---\n\n`;
+        }
+
+        chatPrompt += `${gitDiffContext}\n\n`;
+
+        chatPrompt += `INSTRUCTIONS:
+- You are initiating a code review session for this feature
+- Perform a comprehensive analysis of the implementation
+- For each issue found, specify: file/line reference, severity (critical/warning/suggestion), description, and suggested fix
+- End with a clear verdict: ship / ship with fixes / needs rework
+- Be thorough but fair — acknowledge what's done well too
+- Respond in ${commLang}`;
+      }
 
       // Use model from request body, or fall back to config
       const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
@@ -1249,9 +1250,9 @@ INSTRUCTIONS:
 
       // Build filesUsed for transparency
       const filesUsed = {
-        promptTemplate: 'brainstorming.md',
-        initFile: initContent ? 'init.md' : null,
-        stepContent: null,
+        promptTemplate: `${params.step}.md`,
+        initFile: params.step === 'brainstorming' ? 'init.md' : null,
+        stepContent: params.step === 'review' ? 'implement.md' : null,
         contextFiles: [],
       };
 
@@ -1342,10 +1343,8 @@ ${content}`;
    * For other steps: updates the .md document
    */
   router.post('/api/stories/:slug/steps/:step/recap', async (req, res, { params, root }) => {
-    // Strip -review suffix to get actual step name (same pattern as chat endpoint)
-    const isReviewMode = params.step.endsWith('-review');
-    const actualStep = params.step.replace(/-review$/, '');
-    console.log('[Recap] Starting recap for', params.slug, params.step, '-> actualStep:', actualStep, 'reviewMode:', isReviewMode);
+    const actualStep = params.step;
+    console.log('[Recap] Starting recap for', params.slug, actualStep);
     sseHeaders(res);
     sseSend(res, 'status', { step: actualStep, status: 'applying_feedback' });
 

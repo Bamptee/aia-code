@@ -828,6 +828,94 @@ export async function buildPrompt(feature, step, { description, instructions, hi
 }
 
 /**
+ * Load prior steps as truncated summaries for chat context.
+ * Lighter than loadFeatureFiles — each step is capped at maxCharsPerStep.
+ */
+async function loadPriorStepSummaries(feature, currentStep, root, maxCharsPerStep = 500) {
+  const stepOrder = STEP_ORDER || ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
+  const normalizedStep = STEP_FILE_MAP[currentStep] || currentStep;
+  const currentIndex = stepOrder.indexOf(normalizedStep);
+  if (currentIndex <= 0) return [];
+
+  const storyDir = await getStoryDir(feature, root);
+  const summaries = [];
+
+  for (let i = 0; i < currentIndex; i++) {
+    const stepName = stepOrder[i];
+    if (stepName === 'init') continue; // Already loaded separately
+    const filePath = path.join(storyDir, `${stepName}.md`);
+    const content = await readIfExists(filePath);
+    if (content) {
+      const truncated = content.length > maxCharsPerStep
+        ? content.slice(0, maxCharsPerStep) + `\n... [truncated, ${content.length} chars total]`
+        : content;
+      summaries.push({ file: `${stepName}.md`, chars: content.length, content: truncated });
+    }
+  }
+
+  return summaries;
+}
+
+/**
+ * Build a lightweight context string for chat endpoints.
+ * Lighter than buildPrompt() — loads context files, knowledge, init, and prior step summaries.
+ * Does NOT load codebase scan or auto-analysis.
+ */
+export async function buildChatContext(feature, step, root, { skipPriorSteps = false, skipInit = false, config = null } = {}) {
+  if (!config) config = await loadConfig(root);
+  const sections = [];
+  const filesUsed = { contextFiles: [], knowledgeCategories: [], priorSteps: [], initFile: null };
+
+  // 1. Context files (.aia/context/)
+  const contextContent = await loadContextFiles(config, root);
+  if (contextContent) {
+    sections.push(`=== PROJECT CONTEXT ===\n${contextContent}`);
+    filesUsed.contextFiles = config.context_files || [];
+  }
+
+  // 2. Knowledge categories
+  try {
+    const categories = await resolveKnowledgeCategories(feature, config, root);
+    if (categories.length > 0) {
+      const knowledge = await loadKnowledge(categories, root);
+      if (knowledge) {
+        sections.push(`=== KNOWLEDGE ===\n${knowledge}`);
+        filesUsed.knowledgeCategories = categories;
+      }
+    }
+  } catch (err) {
+    console.warn(`[buildChatContext] Failed to load knowledge: ${err.message}`);
+  }
+
+  // 3. Init specs (skip if caller loads init separately, e.g., brainstorming or review)
+  if (!skipInit) {
+    const initContent = await loadInitSpecs(feature, root);
+    if (initContent) {
+      sections.push(`=== INITIAL SPECS ===\n${initContent}`);
+      filesUsed.initFile = 'init.md';
+    }
+  }
+
+  // 4. Prior step summaries (truncated to ~500 chars each)
+  // Skip if caller already loads prior steps (e.g., review endpoints load full prior steps)
+  if (!skipPriorSteps) {
+    const priorSteps = await loadPriorStepSummaries(feature, step, root);
+    if (priorSteps.length > 0) {
+      const priorSection = priorSteps
+        .map(s => `--- ${s.file} (${s.chars} chars) ---\n${s.content}`)
+        .join('\n\n');
+      sections.push(`=== PRIOR STEPS ===\n${priorSection}`);
+      filesUsed.priorSteps = priorSteps.map(s => ({ file: s.file, chars: s.chars }));
+    }
+  }
+
+  return {
+    context: sections.join('\n\n'),
+    filesUsed,
+  };
+}
+
+/**
  * Builds a prompt for task-scoped implementation
  * @param {Object} task - Task object
  * @param {Object} story - Parent story object

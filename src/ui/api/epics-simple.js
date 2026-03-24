@@ -31,7 +31,7 @@ import { loadConfig } from '../../models.js';
 import { getApps } from '../../services/apps.js';
 import { callModel } from '../../services/model-call.js';
 import { runStep } from '../../services/runner.js';
-import { loadPromptTemplate, loadInitSpecs, buildPrompt } from '../../prompt-builder.js';
+import { loadPromptTemplate, loadInitSpecs, buildPrompt, buildChatContext } from '../../prompt-builder.js';
 
 /**
  * Register all Epic-related API routes (simplified YAML system)
@@ -1055,6 +1055,15 @@ ${content}`;
       const config = await loadConfig(root);
       const commLang = config.communication_language || 'English';
 
+      // Load project context (context files, knowledge, init, prior step summaries)
+      // For review: skip prior steps (loaded in full below) and init (included in manual prior steps loop)
+      const isReview = actualStep === 'review';
+      const { context: chatContext, filesUsed: contextFilesUsed } = await buildChatContext(
+        params.slug, actualStep, root,
+        { skipPriorSteps: isReview, skipInit: isReview, config }
+      );
+      console.log(`[Chat] ✓ Chat context loaded: ${chatContext.length} chars`);
+
       // Load additional context for review step (prior steps + git diff)
       let reviewContext = '';
       const isCodeStep = ['implement', 'review'].includes(actualStep);
@@ -1096,6 +1105,8 @@ ${content}`;
       if (isCodeStep) {
         chatPrompt = `You are a helpful assistant discussing code implementation for the "${actualStep}" phase.
 
+${chatContext}
+
 CURRENT STEP DOCUMENT:
 ${stepContent}
 ${reviewContext}
@@ -1120,6 +1131,8 @@ INSTRUCTIONS:
 - Keep responses concise and actionable`;
       } else {
         chatPrompt = `You are a helpful assistant discussing the "${actualStep}" document.
+
+${chatContext}
 
 CURRENT DOCUMENT CONTENT:
 ${stepContent}
@@ -1149,12 +1162,14 @@ INSTRUCTIONS:
       const callResult = await callModel(model, chatPrompt, { verbose: false, apply: false });
       const aiResponse = callResult.output;
 
-      // Build filesUsed for transparency
+      // Build filesUsed for transparency (merge with context files used)
       const filesUsed = {
         promptTemplate: null,
-        initFile: null,
+        initFile: contextFilesUsed.initFile,
         stepContent: stepContent ? `${actualStep}.md` : null,
-        contextFiles: [],
+        contextFiles: contextFilesUsed.contextFiles,
+        knowledgeCategories: contextFilesUsed.knowledgeCategories,
+        priorSteps: contextFilesUsed.priorSteps,
       };
 
       // Save messages with tokenUsage, filesUsed and modelUsed
@@ -1206,19 +1221,31 @@ INSTRUCTIONS:
       const config = await loadConfig(root);
       const commLang = config.communication_language || 'English';
 
+      // Load project context (context files, knowledge, init, prior step summaries)
+      // skipInit: brainstorming loads init explicitly, review includes init in its manual prior steps loop
+      // skipPriorSteps: review loads prior steps in full (2000 chars) below
+      const isReview = params.step === 'review';
+      const { context: chatContext, filesUsed: contextFilesUsed } = await buildChatContext(
+        params.slug, params.step, root,
+        { skipPriorSteps: isReview, skipInit: true, config }
+      );
+      console.log(`[start-chat] ✓ Chat context loaded: ${chatContext.length} chars`);
+
       let chatPrompt;
 
       if (params.step === 'brainstorming') {
         // Brainstorming: load init.md and ask questions
+        // init is excluded from chatContext (skipInit: true) — loaded explicitly here
         const initContent = await loadInitSpecs(params.slug, root);
 
-        chatPrompt = `${promptTemplate}\n\n`;
+        chatPrompt = `${promptTemplate}\n\n${chatContext}\n\n`;
         if (initContent) {
           chatPrompt += `INIT DOCUMENT (story context):\n---\n${initContent}\n---\n\n`;
         }
         chatPrompt += `INSTRUCTIONS:
 - You are initiating a brainstorming session for this feature
 - Analyze the init document and identify key areas that need clarification
+- Use the project context and knowledge above to ask more targeted questions
 - Ask 3-5 focused questions to guide the discussion
 - Be specific and actionable
 - Respond in ${commLang}`;
@@ -1264,6 +1291,11 @@ INSTRUCTIONS:
 
         chatPrompt = `${promptTemplate}\n\n`;
 
+        // Inject project context (context files + knowledge only — prior steps already loaded in full above)
+        if (chatContext) {
+          chatPrompt += `${chatContext}\n\n`;
+        }
+
         if (priorSections.length > 0) {
           chatPrompt += `PRIOR STEPS CONTEXT:\n${priorSections.join('\n\n')}\n\n`;
         }
@@ -1295,12 +1327,14 @@ INSTRUCTIONS:
 
       const aiResponse = callResult.output;
 
-      // Build filesUsed for transparency
+      // Build filesUsed for transparency (merge with context files used)
       const filesUsed = {
         promptTemplate: `${params.step}.md`,
-        initFile: params.step === 'brainstorming' ? 'init.md' : null,
+        initFile: contextFilesUsed.initFile || (params.step === 'brainstorming' ? 'init.md' : null),
         stepContent: params.step === 'review' ? 'implement.md' : null,
-        contextFiles: [],
+        contextFiles: contextFilesUsed.contextFiles,
+        knowledgeCategories: contextFilesUsed.knowledgeCategories,
+        priorSteps: contextFilesUsed.priorSteps,
       };
 
       // Create message with tokenUsage, filesUsed and modelUsed
@@ -1438,8 +1472,18 @@ ${content}`;
           stepContent = await fs.readFile(stepPath, 'utf-8');
         }
 
+        // Load project context for code agent
+        // For review recap: skip prior steps (already discussed in conversation)
+        const { context: chatContext } = await buildChatContext(params.slug, actualStep, root, {
+          skipPriorSteps: actualStep === 'review',
+          config,
+        });
+        console.log(`[Recap] ✓ Chat context loaded: ${chatContext.length} chars`);
+
         // Build instructions from conversation
         const codeInstructions = `You are working on the "${params.slug}" feature/story.
+
+${chatContext}
 
 CURRENT IMPLEMENTATION NOTES:
 ${stepContent || '(No implementation notes yet)'}

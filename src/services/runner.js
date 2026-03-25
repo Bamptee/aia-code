@@ -51,9 +51,11 @@ export async function runWithTaskContext(task, story, options = {}) {
     const result = await callModel(model, prompt, { verbose, apply, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
 
-    // Extract output and tokenUsage from result
+    // Extract output, tokenUsage, fileOperations and modelUsed from result
     const output = result.output;
     const tokenUsage = result.tokenUsage;
+    const fileOperations = result.fileOperations || [];
+    const modelUsed = result.modelUsed;
 
     await logExecution({
       feature: `task-${task.id.slice(0, 8)}`,
@@ -79,7 +81,9 @@ export async function runWithTaskContext(task, story, options = {}) {
     return {
       output,
       filesModified,
+      fileOperations,
       tokenUsage,
+      modelUsed,
       success: true,
       error: null,
       completedAt: new Date().toISOString(),
@@ -92,6 +96,7 @@ export async function runWithTaskContext(task, story, options = {}) {
       output: '',
       filesModified: [],
       tokenUsage: null,
+      modelUsed: null,
       success: false,
       error: err.message,
       completedAt: new Date().toISOString(),
@@ -129,7 +134,7 @@ function extractModifiedFiles(output, taskFiles) {
   return Array.from(foundFiles);
 }
 
-export async function runStep(step, feature, { description, instructions, history, attachments, model: modelOverride, verbose = false, apply = false, phase = null, task = null, root = process.cwd(), onData, attempt = 1, isRetry = false } = {}) {
+export async function runStep(step, feature, { description, instructions, history, attachments, model: modelOverride, verbose = false, apply = false, readOnly = false, phase = null, task = null, root = process.cwd(), onData, attempt = 1, isRetry = false } = {}) {
   if (!FEATURE_STEPS.includes(step)) {
     throw new Error(`Unknown step "${step}". Valid steps: ${FEATURE_STEPS.join(', ')}`);
   }
@@ -216,12 +221,14 @@ export async function runStep(step, feature, { description, instructions, histor
     }
 
     const start = performance.now();
-    const result = await callModel(model, prompt, { verbose, apply: shouldApply, onData: wrappedOnData, cwd });
+    const result = await callModel(model, prompt, { verbose, apply: shouldApply, readOnly, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
 
-    // Extract output and tokenUsage from result
+    // Extract output, tokenUsage, fileOperations and modelUsed from result
     const output = result.output;
     const tokenUsage = result.tokenUsage;
+    const fileOperations = result.fileOperations || [];
+    const modelUsed = result.modelUsed;
 
     // Update session with token usage
     if (tokenUsage) {
@@ -248,8 +255,8 @@ export async function runStep(step, feature, { description, instructions, histor
     // End session successfully - this releases the claim
     endSession(feature, { success: true });
 
-    // Return output, filesUsed and tokenUsage for UI transparency
-    return { output, filesUsed, tokenUsage };
+    // Return output, filesUsed, tokenUsage, fileOperations and modelUsed for UI transparency
+    return { output, filesUsed, fileOperations, tokenUsage, modelUsed };
   } catch (err) {
     await updateStepStatus(feature, step, STEP_STATUS.ERROR, root);
     if (phaseData) {

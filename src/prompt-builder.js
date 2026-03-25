@@ -311,6 +311,57 @@ function extractTaskList(devPlan) {
   return taskLines.join('\n');
 }
 
+/**
+ * Build test instructions section based on test level config
+ * @param {Object|null} testLevel - { levels: string[], custom_instructions: string }
+ * @param {string} step - Current step (dev-plan, implement, review)
+ * @returns {string} Test instructions to inject in prompt
+ */
+function buildTestInstructions(testLevel, step) {
+  if (!testLevel || !testLevel.levels || testLevel.levels.length === 0) return '';
+
+  const levels = testLevel.levels;
+  // F2: Sanitize custom_instructions — strip control patterns that could manipulate the prompt
+  const rawCustom = testLevel.custom_instructions || '';
+  const custom = rawCustom
+    .replace(/={3,}/g, '')           // Strip === section markers
+    .replace(/^#+\s/gm, '')          // Strip markdown headers
+    .replace(/\n{3,}/g, '\n\n')      // Collapse excessive newlines
+    .trim()
+    .slice(0, 500);
+
+  let instructions = '\n=== TEST INSTRUCTIONS ===\n';
+
+  if (levels.includes('none')) {
+    if (step === 'review') {
+      instructions += 'Do NOT flag missing tests. The decision to have no tests is intentional.\n';
+    } else {
+      instructions += 'Do NOT write or plan any tests. This is intentional.\n';
+    }
+    // F1: Append custom instructions even for "none" (e.g. "except for critical auth flows")
+    if (custom) {
+      instructions += `Additional instructions: ${custom}\n`;
+    }
+    return instructions;
+  }
+
+  const levelStr = levels.join(', ');
+
+  if (step === 'dev-plan') {
+    instructions += `Plan tests at these levels ONLY: ${levelStr}.\nDo NOT plan tests at other levels.\n`;
+  } else if (step === 'implement') {
+    instructions += `Write tests at these levels ONLY: ${levelStr}.\nDo NOT write tests at other levels.\n`;
+  } else if (step === 'review') {
+    instructions += `Only verify test coverage for these levels: ${levelStr}.\nDo NOT flag missing tests at other levels — this is intentional.\n`;
+  }
+
+  if (custom) {
+    instructions += `Additional instructions: ${custom}\n`;
+  }
+
+  return instructions;
+}
+
 export async function loadInitSpecs(feature, root) {
   const storyDir = await getStoryDir(feature, root);
   const filePath = path.join(storyDir, 'init.md');
@@ -435,7 +486,7 @@ async function detectTechStack(root) {
 /**
  * Build codebase context section for grounded prompts
  * @param {string} root - Project root directory
- * @returns {Promise<string>} Context section
+ * @returns {Promise<{text: string, dirs: string[], techStack: string[], database: string[]}>} Context section with metadata
  */
 async function buildCodebaseContext(root) {
   const { techStack, database } = await detectTechStack(root);
@@ -449,7 +500,7 @@ async function buildCodebaseContext(root) {
     }
   }
 
-  return `
+  const text = `
 === CODEBASE CONTEXT (Auto-detected) ===
 Tech Stack: ${techStack.join(', ')}
 Database: ${database.join(', ')}
@@ -457,6 +508,8 @@ Project Structure: ${patterns.length > 0 ? patterns.join(', ') : 'flat structure
 
 IMPORTANT: Base your specification on these detected technologies. Do NOT invent technologies or patterns not present in this project.
 `;
+
+  return { text, dirs: patterns, techStack, database };
 }
 
 export async function getGitDiff(root) {
@@ -584,7 +637,7 @@ export async function buildPrompt(feature, step, { description, instructions, hi
     promptPhase: taskMetadata?.phase || 'unknown',
     promptType: taskMetadata?.type || 'generate',
     contextFiles: config.context_files || [],
-    knowledgeCategories: knowledgeCategories || [],
+    knowledgeCategories: knowledge ? (knowledgeCategories || []) : [],
     priorSteps: loadedPriorSteps,
     codebaseFiles: [],
     initFile: initSpecs ? 'init.md' : null,
@@ -663,7 +716,9 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   // Inject codebase context if prompt requires scan (scan_required: true in front matter)
   if (taskMetadata?.scan_required) {
     const codebaseContext = await buildCodebaseContext(root);
-    parts.push(codebaseContext);
+    parts.push(codebaseContext.text);
+    filesUsed.codebaseFiles = codebaseContext.dirs;
+    filesUsed.techStack = codebaseContext.techStack;
   }
 
   if (knowledge) {
@@ -741,6 +796,20 @@ export async function buildPrompt(feature, step, { description, instructions, hi
     parts.push(instructions);
   }
 
+  // Inject test level instructions for dev-plan, implement, review
+  const normalizedStep = STEP_FILE_MAP[step] || step;
+  const testSteps = ['dev-plan', 'implement', 'review'];
+  if (testSteps.includes(normalizedStep)) {
+    // Resolve test level: story override > project default
+    const testLevel = storyStatus?.testLevel || config.default_test_level || null;
+    const testInstructions = buildTestInstructions(testLevel, normalizedStep);
+    if (testInstructions) {
+      parts.push(testInstructions);
+      filesUsed.testLevel = testLevel;
+      console.log(`[PromptBuilder] ✓ Test level injected: ${testLevel.levels?.join(', ') || 'none'}`);
+    }
+  }
+
   parts.push('\n\n=== TASK ===\n');
   parts.push(task);
 
@@ -754,6 +823,94 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   // Return both prompt and metadata about files used
   return {
     prompt,
+    filesUsed,
+  };
+}
+
+/**
+ * Load prior steps as truncated summaries for chat context.
+ * Lighter than loadFeatureFiles — each step is capped at maxCharsPerStep.
+ */
+async function loadPriorStepSummaries(feature, currentStep, root, maxCharsPerStep = 500) {
+  const stepOrder = STEP_ORDER || ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
+  const normalizedStep = STEP_FILE_MAP[currentStep] || currentStep;
+  const currentIndex = stepOrder.indexOf(normalizedStep);
+  if (currentIndex <= 0) return [];
+
+  const storyDir = await getStoryDir(feature, root);
+  const summaries = [];
+
+  for (let i = 0; i < currentIndex; i++) {
+    const stepName = stepOrder[i];
+    if (stepName === 'init') continue; // Already loaded separately
+    const filePath = path.join(storyDir, `${stepName}.md`);
+    const content = await readIfExists(filePath);
+    if (content) {
+      const truncated = content.length > maxCharsPerStep
+        ? content.slice(0, maxCharsPerStep) + `\n... [truncated, ${content.length} chars total]`
+        : content;
+      summaries.push({ file: `${stepName}.md`, chars: content.length, content: truncated });
+    }
+  }
+
+  return summaries;
+}
+
+/**
+ * Build a lightweight context string for chat endpoints.
+ * Lighter than buildPrompt() — loads context files, knowledge, init, and prior step summaries.
+ * Does NOT load codebase scan or auto-analysis.
+ */
+export async function buildChatContext(feature, step, root, { skipPriorSteps = false, skipInit = false, config = null } = {}) {
+  if (!config) config = await loadConfig(root);
+  const sections = [];
+  const filesUsed = { contextFiles: [], knowledgeCategories: [], priorSteps: [], initFile: null };
+
+  // 1. Context files (.aia/context/)
+  const contextContent = await loadContextFiles(config, root);
+  if (contextContent) {
+    sections.push(`=== PROJECT CONTEXT ===\n${contextContent}`);
+    filesUsed.contextFiles = config.context_files || [];
+  }
+
+  // 2. Knowledge categories
+  try {
+    const categories = await resolveKnowledgeCategories(feature, config, root);
+    if (categories.length > 0) {
+      const knowledge = await loadKnowledge(categories, root);
+      if (knowledge) {
+        sections.push(`=== KNOWLEDGE ===\n${knowledge}`);
+        filesUsed.knowledgeCategories = categories;
+      }
+    }
+  } catch (err) {
+    console.warn(`[buildChatContext] Failed to load knowledge: ${err.message}`);
+  }
+
+  // 3. Init specs (skip if caller loads init separately, e.g., brainstorming or review)
+  if (!skipInit) {
+    const initContent = await loadInitSpecs(feature, root);
+    if (initContent) {
+      sections.push(`=== INITIAL SPECS ===\n${initContent}`);
+      filesUsed.initFile = 'init.md';
+    }
+  }
+
+  // 4. Prior step summaries (truncated to ~500 chars each)
+  // Skip if caller already loads prior steps (e.g., review endpoints load full prior steps)
+  if (!skipPriorSteps) {
+    const priorSteps = await loadPriorStepSummaries(feature, step, root);
+    if (priorSteps.length > 0) {
+      const priorSection = priorSteps
+        .map(s => `--- ${s.file} (${s.chars} chars) ---\n${s.content}`)
+        .join('\n\n');
+      sections.push(`=== PRIOR STEPS ===\n${priorSection}`);
+      filesUsed.priorSteps = priorSteps.map(s => ({ file: s.file, chars: s.chars }));
+    }
+  }
+
+  return {
+    context: sections.join('\n\n'),
     filesUsed,
   };
 }

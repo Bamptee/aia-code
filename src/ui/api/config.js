@@ -1,10 +1,23 @@
 import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
-import { AIA_DIR } from '../../constants.js';
+import { AIA_DIR, STEP_ORDER } from '../../constants.js';
 import { loadGlobalConfig, saveGlobalConfig, getGlobalConfigPath, getApps, setApps, toggleApp } from '../../services/config.js';
 import { scanApps } from '../../services/apps.js';
+import { DEFAULT_PROMPTS } from '../../services/prompts.js';
 import { json, error } from '../router.js';
+
+function parseFrontMatter(content) {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  if (match) {
+    try {
+      return { frontMatter: yaml.parse(match[1]), body: content.slice(match[0].length), parseError: null };
+    } catch (e) {
+      return { frontMatter: null, body: content, parseError: e.message };
+    }
+  }
+  return { frontMatter: null, body: content, parseError: null };
+}
 
 export function registerConfigRoutes(router) {
   // GET /api/apps - List configured apps
@@ -157,5 +170,59 @@ export function registerConfigRoutes(router) {
     await fs.ensureDir(path.dirname(filePath));
     await fs.writeFile(filePath, body.content, 'utf-8');
     json(res, { ok: true });
+  });
+
+  // ============== Prompt Templates ==============
+
+  // List prompt templates with parsed front matter
+  router.get('/api/prompts', async (req, res, { root }) => {
+    const dir = path.join(root, AIA_DIR, 'prompts');
+    if (!(await fs.pathExists(dir))) return json(res, []);
+    const prompts = [];
+    for (const step of STEP_ORDER) {
+      const filePath = path.join(dir, `${step}.md`);
+      if (await fs.pathExists(filePath)) {
+        const content = await fs.readFile(filePath, 'utf-8');
+        const { frontMatter } = parseFrontMatter(content);
+        const hasDefault = DEFAULT_PROMPTS[step] != null;
+        const isDefault = hasDefault && content.trim() === DEFAULT_PROMPTS[step].trim();
+        prompts.push({ step, phase: frontMatter?.phase ?? null, type: frontMatter?.type ?? null, scan_required: frontMatter?.scan_required ?? false, modified: hasDefault ? !isDefault : false });
+      }
+    }
+    json(res, prompts);
+  });
+
+  // Read prompt template
+  router.get('/api/prompts/:step', async (req, res, { params, root }) => {
+    if (!STEP_ORDER.includes(params.step)) return error(res, 'Invalid step', 400);
+    const filePath = path.join(root, AIA_DIR, 'prompts', `${params.step}.md`);
+    if (!(await fs.pathExists(filePath))) return error(res, 'Not found', 404);
+    const content = await fs.readFile(filePath, 'utf-8');
+    const { frontMatter, parseError } = parseFrontMatter(content);
+    const hasDefault = DEFAULT_PROMPTS[params.step] != null;
+    const isDefault = hasDefault && content.trim() === DEFAULT_PROMPTS[params.step].trim();
+    json(res, { step: params.step, content, frontMatter, modified: hasDefault ? !isDefault : false, parseError });
+  });
+
+  // Save prompt template
+  router.put('/api/prompts/:step', async (req, res, { params, root, parseBody }) => {
+    if (!STEP_ORDER.includes(params.step)) return error(res, 'Invalid step', 400);
+    const body = await parseBody();
+    if (typeof body.content !== 'string') return error(res, 'content must be a string', 400);
+    const filePath = path.join(root, AIA_DIR, 'prompts', `${params.step}.md`);
+    // F14: Warn if front matter is missing or malformed
+    const { parseError } = parseFrontMatter(body.content);
+    await fs.writeFile(filePath, body.content, 'utf-8');
+    json(res, { ok: true, frontMatterWarning: parseError || null });
+  });
+
+  // Reset prompt template to default
+  router.post('/api/prompts/:step/reset', async (req, res, { params, root }) => {
+    if (!STEP_ORDER.includes(params.step)) return error(res, 'Invalid step', 400);
+    const defaultContent = DEFAULT_PROMPTS[params.step];
+    if (!defaultContent) return error(res, 'No default template for this step', 404);
+    const filePath = path.join(root, AIA_DIR, 'prompts', `${params.step}.md`);
+    await fs.writeFile(filePath, defaultContent, 'utf-8');
+    json(res, { ok: true, content: defaultContent });
   });
 }

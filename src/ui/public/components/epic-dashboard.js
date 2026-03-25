@@ -167,10 +167,14 @@ function StoryRow({ story, onClick, onStatusChange }) {
   const typeConfig = STORY_TYPE[story.type] || STORY_TYPE.feature;
   const statusConfig = STORY_STATUS[story.status] || STORY_STATUS.draft;
 
-  // Step progress
+  // Step progress (scoped to current phase)
   const steps = story.steps || {};
-  const stepKeys = ['init', 'brainstorming', 'specFunc'];
-  const completedSteps = stepKeys.filter(k => steps[k]?.completed || steps[k]?.skipped).length;
+  const skipped = story.skippedSteps || [];
+  const phase = story.phase || 'discovery';
+  const stepKeys = phase === 'discovery'
+    ? ['init', 'brainstorming', 'spec-func']
+    : ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
+  const completedSteps = stepKeys.filter(k => steps[k] === 'done' || skipped.includes(k)).length;
 
   return React.createElement('div', {
     className: 'flex items-center gap-4 p-3 hover:bg-slate-800/50 rounded-lg cursor-pointer transition-colors',
@@ -191,7 +195,7 @@ function StoryRow({ story, onClick, onStatusChange }) {
       ),
       React.createElement('div', { className: 'flex items-center gap-3 text-xs text-slate-500' },
         React.createElement('span', null, story.epicName),
-        React.createElement('span', null, `${completedSteps}/3 steps`),
+        React.createElement('span', null, `${completedSteps}/${stepKeys.length} steps`),
       )
     ),
 
@@ -511,8 +515,12 @@ export function EpicDashboard() {
   React.useEffect(() => { saveToStorage(STORAGE_KEYS.SPACE_FILTER, spaceFilter); }, [spaceFilter]);
 
   // Load data
-  const loadData = async () => {
-    setLoading(true);
+  const pollingRef = React.useRef(false);
+
+  const loadData = async (isPolling = false) => {
+    if (pollingRef.current) return; // Guard against concurrent polls
+    pollingRef.current = true;
+    if (!isPolling) setLoading(true);
     setError(null);
     try {
       const [epicsData, storiesData, epicStatsData, storyStatsData] = await Promise.all([
@@ -526,12 +534,19 @@ export function EpicDashboard() {
       setEpicStats(epicStatsData);
       setStoryStats(storyStatsData);
     } catch (err) {
-      setError(err.message);
+      if (!isPolling) setError(err.message);
     }
-    setLoading(false);
+    if (!isPolling) setLoading(false);
+    pollingRef.current = false;
   };
 
-  React.useEffect(() => { loadData(); }, [showArchived]);
+  React.useEffect(() => {
+    loadData();
+    const interval = setInterval(() => {
+      if (!document.hidden) loadData(true);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [showArchived]);
 
   // Filter stories
   const filteredStories = React.useMemo(() => {

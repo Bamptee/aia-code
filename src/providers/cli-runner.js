@@ -75,6 +75,20 @@ function parseStreamJsonEvent(line, onData, state = {}) {
           }
         }
       }
+      // Capture file operations from tool_use blocks
+      if (!state.fileOperations) state.fileOperations = [];
+      for (const block of event.message.content) {
+        if (block.type === 'tool_use' && block.input) {
+          const filePath = typeof block.input.file_path === 'string' ? block.input.file_path.slice(0, 500) : null;
+          if (filePath && ['Read', 'Edit', 'Write'].includes(block.name)) {
+            state.fileOperations.push({
+              tool: block.name,
+              path: filePath,
+              action: block.name === 'Read' ? 'read' : block.name === 'Edit' ? 'modified' : 'created',
+            });
+          }
+        }
+      }
       // Reset for next message
       state.hasStreamedContent = false;
       return { result: null, state };
@@ -121,9 +135,9 @@ function parseStreamJsonEvent(line, onData, state = {}) {
   }
 }
 
-export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, idleTimeoutMs, onData, cwd, streamJson = false } = {}) {
+export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, readOnly = false, idleTimeoutMs, onData, cwd, streamJson = false } = {}) {
   if (!idleTimeoutMs) {
-    idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
+    idleTimeoutMs = (apply || readOnly) ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
   }
   return new Promise((resolve, reject) => {
     // Log command for manual replay when debugging
@@ -241,6 +255,7 @@ export function runCli(command, args, { stdin: stdinData, verbose = false, apply
           finish(null, {
             output: finalResult,
             tokenUsage: parserState.tokenUsage || null,
+            fileOperations: parserState.fileOperations || [],
           });
         } else {
           finish(null, chunks.join(''));

@@ -793,9 +793,13 @@ export function Dashboard({ context = 'dev' }) {
   // Track whether to use lazy loading for card states
   const [useLazyLoad, setUseLazyLoad] = React.useState(true);
 
-  async function load() {
+  const pollingRef = React.useRef(false);
+
+  async function load(isPolling = false) {
+    if (pollingRef.current) return; // Guard against concurrent polls
+    pollingRef.current = true;
     setLoadError(null);
-    setLoading(true);
+    if (!isPolling) setLoading(true);
     try {
       // Fetch minimal features data for fast initial render
       // Card states will be loaded asynchronously per-card
@@ -820,12 +824,19 @@ export function Dashboard({ context = 'dev' }) {
         setDeletedCount(deletedData.length);
       }
     } catch (e) {
-      setLoadError(e.message || 'Failed to load data');
+      if (!isPolling) setLoadError(e.message || 'Failed to load data');
     }
-    setLoading(false);
+    if (!isPolling) setLoading(false);
+    pollingRef.current = false;
   }
 
-  React.useEffect(() => { load(); }, [deletionFilter]);
+  React.useEffect(() => {
+    load();
+    const interval = setInterval(() => {
+      if (!document.hidden) load(true);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [deletionFilter]);
 
   // Count completed features for display
   const completedCount = features.filter(isFeatureCompleted).length;

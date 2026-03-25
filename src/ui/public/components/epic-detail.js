@@ -82,11 +82,15 @@ function StoryCard({ story, onStatusChange, onClick, onDelete, onMove }) {
   const typeConfig = STORY_TYPE[story.type] || STORY_TYPE.feature;
   const statusConfig = STORY_STATUS[story.status] || STORY_STATUS.draft;
 
-  // Calculate step completion
+  // Calculate step completion (scoped to current phase)
   const steps = story.steps || {};
-  const stepKeys = ['init', 'brainstorming', 'specFunc'];
-  const completedSteps = stepKeys.filter(k => steps[k]?.completed).length;
-  const skippedSteps = stepKeys.filter(k => steps[k]?.skipped).length;
+  const skipped = story.skippedSteps || [];
+  const phase = story.phase || 'discovery';
+  const stepKeys = phase === 'discovery'
+    ? ['init', 'brainstorming', 'spec-func']
+    : ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
+  const completedSteps = stepKeys.filter(k => steps[k] === 'done' || skipped.includes(k)).length;
+  const skippedSteps = stepKeys.filter(k => skipped.includes(k)).length;
 
   return React.createElement('div', {
     className: 'group bg-slate-800/50 border border-aia-border rounded-lg p-4 hover:border-aia-accent/30 transition-all cursor-pointer',
@@ -119,7 +123,7 @@ function StoryCard({ story, onStatusChange, onClick, onDelete, onMove }) {
 
     // Step progress
     React.createElement('div', { className: 'flex items-center gap-2 text-xs text-slate-500 mb-3' },
-      React.createElement('span', null, `${completedSteps}/3 steps`),
+      React.createElement('span', null, `${completedSteps}/${stepKeys.length} steps`),
       skippedSteps > 0 && React.createElement('span', { className: 'text-slate-600' }, `(${skippedSteps} skipped)`)
     ),
 

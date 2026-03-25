@@ -337,6 +337,39 @@ function ProjectScope({ onSaved }) {
   );
 }
 
+function AIModelsInfo() {
+  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
+    React.createElement('div', { className: 'flex items-center gap-2' },
+      React.createElement('h3', { className: 'text-sm font-semibold text-emerald-400' }, 'AI Models')
+    ),
+
+    React.createElement('div', { className: 'bg-blue-900/20 border border-blue-500/30 rounded-lg p-3 space-y-2' },
+      React.createElement('p', { className: 'text-sm text-blue-300' },
+        'The models in the step dropdown come from available_models in your .aia/config.yaml. Each user configures their own models based on their CLI access.'
+      ),
+      React.createElement('p', { className: 'text-sm text-blue-300' },
+        'You can also type any model ID using "Custom..." in the dropdown. The provider is auto-detected from the prefix: claude-* \u2192 Claude CLI, gpt-*/o* \u2192 Codex CLI, gemini-* \u2192 Gemini CLI.'
+      ),
+      React.createElement('p', { className: 'text-sm text-blue-300' },
+        'You can mix providers per step \u2014 for example, use Claude for implementation and Gemini for review.'
+      ),
+    ),
+
+    React.createElement('div', { className: 'bg-amber-900/20 border border-amber-500/30 rounded-lg p-3 space-y-2' },
+      React.createElement('p', { className: 'text-sm text-amber-300 font-medium' },
+        'Effort level'
+      ),
+      React.createElement('p', { className: 'text-sm text-amber-200/80' },
+        'The effort level (high/medium/low) depends on each CLI\'s own settings, not on aia-code. Claude Code, Codex, and Gemini CLI each manage effort independently.'
+      ),
+    ),
+
+    React.createElement('p', { className: 'text-xs text-slate-500' },
+      'See the "AI Models Configuration" section in the README for full documentation.'
+    ),
+  );
+}
+
 function MCPFigmaSection() {
   return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
     React.createElement('div', { className: 'flex items-center gap-2' },
@@ -395,6 +428,126 @@ function MCPFigmaSection() {
   );
 }
 
+function PromptTemplates() {
+  const [prompts, setPrompts] = React.useState([]);
+  const [selected, setSelected] = React.useState(null);
+  const [content, setContent] = React.useState('');
+  const [frontMatter, setFrontMatter] = React.useState(null);
+  const [modified, setModified] = React.useState(false);
+  const [dirty, setDirty] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+
+  const loadList = () => api.get('/prompts').then(setPrompts).catch(() => {});
+
+  React.useEffect(() => { loadList().finally(() => setLoading(false)); }, []);
+
+  const selectPrompt = async (step) => {
+    if (dirty && !confirm('You have unsaved changes. Discard them?')) return;
+    setSelected(step);
+    setMsg(null);
+    setDirty(false);
+    try {
+      const data = await api.get(`/prompts/${step}`);
+      setContent(data.content);
+      setFrontMatter(data.frontMatter);
+      setModified(data.modified);
+    } catch { setContent(''); setFrontMatter(null); }
+  };
+
+  const save = async () => {
+    setSaving(true); setMsg(null);
+    try {
+      const result = await api.put(`/prompts/${selected}`, { content });
+      setDirty(false);
+      setModified(true);
+      const text = result.frontMatterWarning ? `Saved (warning: ${result.frontMatterWarning})` : 'Saved.';
+      setMsg({ type: 'ok', text });
+      await loadList();
+    } catch (e) { setMsg({ type: 'err', text: e.message }); }
+    setSaving(false);
+  };
+
+  const reset = async () => {
+    if (!confirm(`Reset "${selected}" to default template?`)) return;
+    setMsg(null);
+    try {
+      const data = await api.post(`/prompts/${selected}/reset`);
+      setContent(data.content);
+      setDirty(false);
+      setModified(false);
+      setMsg({ type: 'ok', text: 'Reset to default.' });
+      await loadList();
+    } catch (e) { setMsg({ type: 'err', text: e.message }); }
+  };
+
+  if (loading) return React.createElement('p', { className: 'text-slate-500 text-sm' }, 'Loading...');
+
+  return React.createElement('div', { className: 'bg-aia-card border border-aia-border rounded p-4 space-y-4' },
+    React.createElement('h3', { className: 'text-sm font-semibold text-rose-400' }, 'Prompt Templates'),
+
+    // Prompt list
+    React.createElement('div', { className: 'flex flex-wrap gap-2' },
+      ...prompts.map(p =>
+        React.createElement('button', {
+          key: p.step,
+          onClick: () => selectPrompt(p.step),
+          className: `px-3 py-1.5 rounded text-xs border ${selected === p.step
+            ? 'bg-aia-accent/20 text-aia-accent border-aia-accent/30'
+            : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-500'}`,
+        },
+          React.createElement('span', null, p.step),
+          React.createElement('span', { className: 'ml-1.5 text-slate-500' }, p.phase),
+          p.modified && React.createElement('span', { className: 'ml-1.5 text-amber-400' }, '*'),
+        )
+      )
+    ),
+
+    // Editor
+    selected && React.createElement('div', { className: 'space-y-2' },
+      // Front matter info (read-only)
+      frontMatter && React.createElement('div', { className: 'flex gap-3 text-xs text-slate-500' },
+        React.createElement('span', null, `phase: ${frontMatter.phase || '?'}`),
+        React.createElement('span', null, `type: ${frontMatter.type || '?'}`),
+        frontMatter.scan_required && React.createElement('span', { className: 'text-amber-400' }, 'scan_required'),
+      ),
+
+      // Action bar
+      React.createElement('div', { className: 'flex items-center justify-between' },
+        React.createElement('span', { className: 'text-sm text-slate-300 font-mono' }, `prompts/${selected}.md`),
+        React.createElement('div', { className: 'flex gap-2 items-center' },
+          dirty && React.createElement('span', { className: 'text-xs text-amber-400' }, 'unsaved'),
+          modified && !dirty && React.createElement('span', { className: 'text-xs text-slate-500' }, 'modified'),
+          msg && React.createElement('span', { className: `text-xs ${msg.type === 'ok' ? 'text-emerald-400' : 'text-red-400'}` }, msg.text),
+          React.createElement('button', {
+            onClick: reset,
+            disabled: !modified && !dirty,
+            className: 'bg-slate-700 text-slate-300 border border-slate-600 rounded px-3 py-1 text-xs hover:bg-slate-600 disabled:opacity-40',
+          }, 'Reset'),
+          React.createElement('button', {
+            onClick: save,
+            disabled: saving || !dirty,
+            className: 'bg-aia-accent/20 text-aia-accent border border-aia-accent/30 rounded px-3 py-1 text-xs hover:bg-aia-accent/30 disabled:opacity-40',
+          }, saving ? '...' : 'Save'),
+        ),
+      ),
+
+      // Textarea
+      React.createElement('textarea', {
+        value: content,
+        onChange: e => { setContent(e.target.value); setDirty(true); },
+        spellCheck: false,
+        className: 'w-full h-96 bg-slate-900 border border-aia-border rounded p-3 text-sm text-slate-300 font-mono resize-y focus:border-aia-accent focus:outline-none',
+      }),
+    ),
+
+    !selected && React.createElement('p', { className: 'text-xs text-slate-500' },
+      'Select a prompt template to edit. These templates control the AI instructions for each step.'
+    ),
+  );
+}
+
 export function ConfigView() {
   const [contextFiles, setContextFiles] = React.useState([]);
   const [knowledgeCategories, setKnowledgeCategories] = React.useState([]);
@@ -446,8 +599,14 @@ export function ConfigView() {
     // Project Scope
     React.createElement(ProjectScope, { onSaved: handlePreferencesSaved }),
 
+    // AI Models Info
+    React.createElement(AIModelsInfo),
+
     // MCP Figma Integration
     React.createElement(MCPFigmaSection),
+
+    // Prompt Templates
+    React.createElement(PromptTemplates),
 
     // config.yaml (advanced)
     React.createElement(YamlEditor, {

@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
 import { json, error } from '../router.js';
-import { AIA_DIR } from '../../constants.js';
+import { AIA_DIR, STEP_ORDER, CODE_STEPS } from '../../constants.js';
 import {
   createEpic,
   loadEpic,
@@ -31,7 +31,7 @@ import { loadConfig } from '../../models.js';
 import { getApps } from '../../services/apps.js';
 import { callModel } from '../../services/model-call.js';
 import { runStep } from '../../services/runner.js';
-import { loadPromptTemplate, loadInitSpecs } from '../../prompt-builder.js';
+import { loadPromptTemplate, loadInitSpecs, buildPrompt, buildChatContext } from '../../prompt-builder.js';
 
 /**
  * Register all Epic-related API routes (simplified YAML system)
@@ -791,6 +791,20 @@ ${content}`;
   };
 
   /**
+   * GET /api/stories/:slug/steps/:step/preview-prompt - Preview assembled prompt (dry-run)
+   */
+  router.get('/api/stories/:slug/steps/:step/preview-prompt', async (req, res, { params, root }) => {
+    if (!STEP_ORDER.includes(params.step)) return error(res, 'Invalid step', 400);
+    try {
+      const result = await buildPrompt(params.slug, params.step, { root });
+      json(res, { prompt: result.prompt, filesUsed: result.filesUsed, charCount: result.prompt.length });
+    } catch (e) {
+      const status = e.message?.includes('not found') ? 404 : 500;
+      error(res, e.message, status);
+    }
+  });
+
+  /**
    * POST /api/stories/:slug/steps/:step/generate - Generate step content with AI (SSE streaming)
    */
   router.post('/api/stories/:slug/steps/:step/generate', async (req, res, { params, root, parseBody }) => {
@@ -815,43 +829,60 @@ ${content}`;
         sseSend(res, 'log', { type: 'info', text: `Reset step ${params.step} for regeneration` });
       }
 
+      const isCodeStep = CODE_STEPS.has(params.step);
       const result = await runStep(params.step, params.slug, {
         description: body.instructions || body.description || '',
         model: body.model || undefined,
         verbose: true,
-        apply: true,
+        apply: isCodeStep,
+        readOnly: !isCodeStep,
         root,
         onData,
       });
 
-      // runStep now returns { output, filesUsed, tokenUsage }
+      // runStep now returns { output, filesUsed, fileOperations, tokenUsage, modelUsed }
       const output = typeof result === 'string' ? result : result?.output;
       const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+      const fileOperations = typeof result === 'object' ? result?.fileOperations : [];
       const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
+      const modelUsed = typeof result === 'object' ? result?.modelUsed : null;
 
-      // Save token usage to status.yaml
-      if (tokenUsage) {
+      // Save token usage, filesUsed and fileOperations to status.yaml
+      if (tokenUsage || filesUsed || fileOperations?.length > 0) {
         try {
           const storyDir = await getStoryDirPath(params.slug, root);
           const statusPath = path.join(storyDir, 'status.yaml');
           const rawStatus = await fs.readFile(statusPath, 'utf-8');
           const status = yaml.parse(rawStatus);
-          status.tokenUsage = status.tokenUsage || {};
-          status.tokenUsage[params.step] = tokenUsage;
+          if (tokenUsage) {
+            status.tokenUsage = status.tokenUsage || {};
+            status.tokenUsage[params.step] = tokenUsage;
+          }
+          // Persist context info per step
+          status.stepContext = status.stepContext || {};
+          status.stepContext[params.step] = {
+            filesUsed: filesUsed || null,
+            fileOperations: fileOperations || [],
+            modelUsed: modelUsed || null,
+          };
           status.updatedAt = new Date().toISOString();
           await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
-          sseSend(res, 'log', { type: 'info', text: `Tokens: ${tokenUsage.total} (in: ${tokenUsage.input}, out: ${tokenUsage.output})` });
+          if (tokenUsage) {
+            sseSend(res, 'log', { type: 'info', text: `Tokens: ${tokenUsage.total} (in: ${tokenUsage.input}, out: ${tokenUsage.output})` });
+          }
         } catch (tokenErr) {
-          console.error(`[Generate] Failed to save token usage: ${tokenErr.message}`);
+          console.error(`[Generate] Failed to save token/context data: ${tokenErr.message}`);
         }
       }
 
-      // Return with filesUsed for UI transparency
+      // Return with filesUsed, fileOperations and modelUsed for UI transparency
       sseSend(res, 'done', {
         step: params.step,
         output: output?.slice(0, 500),
         filesUsed,
+        fileOperations: fileOperations || [],
         tokenUsage,
+        modelUsed,
       });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
@@ -882,47 +913,66 @@ ${content}`;
 
       // Run step with iteration instructions
       const instructions = body.instructions?.trim() || 'Please review and improve this content. Fix any issues, clarify unclear sections, and enhance overall quality.';
+      const isCodeStep = CODE_STEPS.has(params.step);
       const result = await runStep(params.step, params.slug, {
         description: instructions,
         iterateOn: currentContent,
         model: body.model || undefined,
         verbose: true,
-        apply: true,
+        apply: isCodeStep,
+        readOnly: !isCodeStep,
         root,
         onData,
       });
 
-      // runStep now returns { output, filesUsed, tokenUsage }
+      // runStep now returns { output, filesUsed, fileOperations, tokenUsage, modelUsed }
       const output = typeof result === 'string' ? result : result?.output;
       const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+      const fileOperations = typeof result === 'object' ? result?.fileOperations : [];
       const tokenUsage = typeof result === 'object' ? result?.tokenUsage : null;
+      const modelUsed = typeof result === 'object' ? result?.modelUsed : null;
 
-      // Accumulate token usage in status.yaml
-      if (tokenUsage) {
+      // Accumulate token usage and persist context in status.yaml
+      if (tokenUsage || filesUsed || fileOperations?.length > 0) {
         try {
           const statusPath = path.join(storyDir, 'status.yaml');
           const rawStatus = await fs.readFile(statusPath, 'utf-8');
           const status = yaml.parse(rawStatus);
-          status.tokenUsage = status.tokenUsage || {};
-          const existing = status.tokenUsage[params.step] || { input: 0, output: 0, total: 0 };
-          status.tokenUsage[params.step] = {
-            input: existing.input + (tokenUsage.input || 0),
-            output: existing.output + (tokenUsage.output || 0),
-            total: existing.total + (tokenUsage.total || 0),
+          if (tokenUsage) {
+            status.tokenUsage = status.tokenUsage || {};
+            const existing = status.tokenUsage[params.step] || { input: 0, output: 0, total: 0 };
+            status.tokenUsage[params.step] = {
+              input: existing.input + (tokenUsage.input || 0),
+              output: existing.output + (tokenUsage.output || 0),
+              total: existing.total + (tokenUsage.total || 0),
+            };
+          }
+          // Persist context info per step (merge fileOperations)
+          status.stepContext = status.stepContext || {};
+          const existingCtx = status.stepContext[params.step] || {};
+          status.stepContext[params.step] = {
+            filesUsed: filesUsed || existingCtx.filesUsed || null,
+            fileOperations: [...(existingCtx.fileOperations || []), ...(fileOperations || [])].slice(-200),
+            modelUsed: modelUsed || existingCtx.modelUsed || null,
           };
           status.updatedAt = new Date().toISOString();
           await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
-          sseSend(res, 'log', { type: 'info', text: `Tokens: +${tokenUsage.total} (total: ${status.tokenUsage[params.step].total})` });
+          if (tokenUsage) {
+            sseSend(res, 'log', { type: 'info', text: `Tokens: +${tokenUsage.total} (total: ${status.tokenUsage[params.step].total})` });
+          }
         } catch (tokenErr) {
-          console.error(`[Iterate] Failed to save token usage: ${tokenErr.message}`);
+          console.error(`[Iterate] Failed to save token/context data: ${tokenErr.message}`);
         }
       }
 
-      // Return with filesUsed for UI transparency
+      // Return with filesUsed, fileOperations and modelUsed for UI transparency
       sseSend(res, 'done', {
         step: params.step,
         output: output?.slice(0, 500),
         filesUsed,
+        fileOperations: fileOperations || [],
+        tokenUsage,
+        modelUsed,
       });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
@@ -982,15 +1032,13 @@ ${content}`;
         return error(res, 'message is required', 400);
       }
 
-      // Detect review mode from step suffix or body flag
-      const isReviewMode = params.step.endsWith('-review') || body.reviewMode === true;
-      const actualStep = params.step.replace(/-review$/, '');
+      const actualStep = params.step;
 
-      console.log(`[Chat] Mode: ${isReviewMode ? 'REVIEW' : 'ITERATE'}, Step: ${params.step} -> ${actualStep}`);
+      console.log(`[Chat] Step: ${actualStep}`);
 
       const storyDir = await getStoryDirPath(params.slug, root);
-      const convPath = path.join(storyDir, `${params.step}-conversation.json`);
-      const stepPath = path.join(storyDir, `${actualStep}.md`); // Use actualStep without -review suffix
+      const convPath = path.join(storyDir, `${actualStep}-conversation.json`);
+      const stepPath = path.join(storyDir, `${actualStep}.md`);
 
       // Load existing conversation
       let conversation = { messages: [] };
@@ -1007,112 +1055,65 @@ ${content}`;
         console.log(`[Chat] ⚠ Step file not found: ${stepPath}`);
       }
 
-      // Load prior steps context for review mode
-      let priorStepsContext = '';
-      if (isReviewMode && stepContent) {
-        const STEP_ORDER = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement', 'review'];
-        const currentStepIndex = STEP_ORDER.indexOf(actualStep);
-
-        if (currentStepIndex > 0) {
-          const priorSteps = STEP_ORDER.slice(0, currentStepIndex);
-          const priorSections = [];
-
-          for (const priorStep of priorSteps) {
-            const priorFile = path.join(storyDir, `${priorStep}.md`);
-            if (await fs.pathExists(priorFile)) {
-              const priorContent = await fs.readFile(priorFile, 'utf-8');
-              if (priorContent && priorContent.length > 0) {
-                // Truncate if too long
-                const truncated = priorContent.length > 2000
-                  ? priorContent.slice(0, 2000) + '\n\n[... truncated ...]'
-                  : priorContent;
-                priorSections.push(`### ${priorStep}\n${truncated}`);
-                console.log(`[Chat] ✓ Loaded prior step: ${priorStep}.md (${priorContent.length} chars)`);
-              }
-            }
-          }
-
-          if (priorSections.length > 0) {
-            priorStepsContext = '\n\nPRIOR STEPS CONTEXT:\n' + priorSections.join('\n\n');
-          }
-        }
-      }
-
-      // Load git diff for code steps in review mode
-      let gitDiffContext = '';
-      const isCodeStep = ['implement', 'review'].includes(actualStep);
-      if (isReviewMode && isCodeStep) {
-        try {
-          const { getGitDiff } = await import('../../prompt-builder.js');
-          const diff = await getGitDiff(root);
-          if (diff) {
-            gitDiffContext = `\n\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\``;
-            console.log(`[Chat] ✓ Loaded git diff: ${diff.length} chars`);
-          }
-        } catch (err) {
-          console.log(`[Chat] Error loading git diff: ${err.message}`);
-        }
-      }
-
       // Load config for language
       const config = await loadConfig(root);
       const commLang = config.communication_language || 'English';
 
+      // Load project context (context files, knowledge, init, prior step summaries)
+      // For review: skip prior steps (loaded in full below) and init (included in manual prior steps loop)
+      const isReview = actualStep === 'review';
+      const { context: chatContext, filesUsed: contextFilesUsed } = await buildChatContext(
+        params.slug, actualStep, root,
+        { skipPriorSteps: isReview, skipInit: isReview, config }
+      );
+      console.log(`[Chat] ✓ Chat context loaded: ${chatContext.length} chars`);
+
+      // Load additional context for review step (prior steps + git diff)
+      let reviewContext = '';
+      const isCodeStep = CODE_STEPS.has(actualStep);
+      if (actualStep === 'review') {
+        // Load prior steps for context
+        const STEP_ORDER = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement'];
+        const priorSections = [];
+        for (const priorStep of STEP_ORDER) {
+          const priorFile = path.join(storyDir, `${priorStep}.md`);
+          if (await fs.pathExists(priorFile)) {
+            const priorContent = await fs.readFile(priorFile, 'utf-8');
+            if (priorContent && priorContent.length > 0) {
+              const truncated = priorContent.length > 2000
+                ? priorContent.slice(0, 2000) + '\n\n[... truncated ...]'
+                : priorContent;
+              priorSections.push(`### ${priorStep}\n${truncated}`);
+            }
+          }
+        }
+        if (priorSections.length > 0) {
+          reviewContext += '\nPRIOR STEPS CONTEXT:\n' + priorSections.join('\n\n') + '\n';
+        }
+
+        // Load git diff for code review context
+        try {
+          const { getGitDiff } = await import('../../prompt-builder.js');
+          const diff = await getGitDiff(root);
+          if (diff) {
+            reviewContext += `\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\`\n`;
+          }
+        } catch (err) {
+          console.log(`[Chat] Error loading git diff for review: ${err.message}`);
+        }
+      }
+
       // Build AI prompt with context about the workflow
       let chatPrompt;
 
-      if (isReviewMode) {
-        // Review mode: adversarial/critical review
-        if (!stepContent) {
-          chatPrompt = `Le contenu du step "${actualStep}" n'a pas pu être chargé.
-
-Causes possibles:
-- Le step n'a pas encore été exécuté (cliquez sur "Generate" d'abord)
-- Le fichier ${actualStep}.md n'existe pas
-
-USER MESSAGE: ${body.message}
-
-RESPONSE LANGUAGE: ${commLang}
-
-Explique ce problème à l'utilisateur de manière claire.`;
-        } else {
-          chatPrompt = `You are a CRITICAL REVIEWER performing an adversarial review. Your job is to find problems, weaknesses, and gaps.
-
-STEP BEING REVIEWED: ${actualStep}
-${priorStepsContext}
-
-CONTENT TO REVIEW:
----
-${stepContent}
----
-${gitDiffContext}
-
-CONVERSATION HISTORY:
-${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
-
-USER MESSAGE: ${body.message}
-
-RESPONSE LANGUAGE: ${commLang}
-
-YOUR ROLE: Be a tough, skeptical reviewer. You should:
-- Challenge assumptions and decisions
-- Identify missing edge cases
-- Point out ambiguities and inconsistencies
-- Question technical choices
-- Find potential bugs or issues
-- Suggest concrete improvements
-
-Be direct and specific. Format issues as:
-**[SEVERITY: high/medium/low]** Issue description
-- Impact: What could go wrong
-- Suggestion: How to fix it`;
-        }
-      } else if (isCodeStep) {
+      if (isCodeStep) {
         chatPrompt = `You are a helpful assistant discussing code implementation for the "${actualStep}" phase.
+
+${chatContext}
 
 CURRENT STEP DOCUMENT:
 ${stepContent}
-
+${reviewContext}
 CONVERSATION HISTORY:
 ${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
 
@@ -1134,6 +1135,8 @@ INSTRUCTIONS:
 - Keep responses concise and actionable`;
       } else {
         chatPrompt = `You are a helpful assistant discussing the "${actualStep}" document.
+
+${chatContext}
 
 CURRENT DOCUMENT CONTENT:
 ${stepContent}
@@ -1158,26 +1161,29 @@ INSTRUCTIONS:
 - Keep responses concise but helpful`;
       }
 
-      // Use model from request body, or fall back to config
-      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
+      // Use model from request body, or fall back to config for current step
+      const model = body.model || config.models?.[actualStep]?.[0]?.model || config.models?.init?.[0]?.model || 'claude-default';
       const callResult = await callModel(model, chatPrompt, { verbose: false, apply: false });
       const aiResponse = callResult.output;
 
-      // Build filesUsed for transparency
+      // Build filesUsed for transparency (merge with context files used)
       const filesUsed = {
         promptTemplate: null,
-        initFile: null,
+        initFile: contextFilesUsed.initFile,
         stepContent: stepContent ? `${actualStep}.md` : null,
-        contextFiles: [],
+        contextFiles: contextFilesUsed.contextFiles,
+        knowledgeCategories: contextFilesUsed.knowledgeCategories,
+        priorSteps: contextFilesUsed.priorSteps,
       };
 
-      // Save messages with tokenUsage and filesUsed
+      // Save messages with tokenUsage, filesUsed and modelUsed
       const userMsg = { role: 'user', content: body.message, createdAt: new Date().toISOString() };
       const aiMsg = {
         role: 'assistant',
         content: aiResponse.trim(),
         createdAt: new Date().toISOString(),
         tokenUsage: callResult.tokenUsage,
+        modelUsed: callResult.modelUsed,
         filesUsed,
       };
       conversation.messages.push(userMsg, aiMsg);
@@ -1196,9 +1202,10 @@ INSTRUCTIONS:
     try {
       const body = await parseBody();
 
-      // Validate: only available for brainstorming step
-      if (params.step !== 'brainstorming') {
-        return error(res, 'start-chat only available for brainstorming', 400);
+      // Validate: only available for chat-first steps
+      const chatFirstSteps = ['brainstorming', 'review'];
+      if (!chatFirstSteps.includes(params.step)) {
+        return error(res, `start-chat only available for: ${chatFirstSteps.join(', ')}`, 400);
       }
 
       // Validate model if provided
@@ -1211,32 +1218,109 @@ INSTRUCTIONS:
         const result = await loadPromptTemplate(params.step, root);
         promptTemplate = result.content;
       } catch (err) {
-        return error(res, `Failed to load brainstorming prompt: ${err.message}`, 500);
+        return error(res, `Failed to load ${params.step} prompt: ${err.message}`, 500);
       }
-
-      // Load init.md (non-blocking if not found)
-      const initContent = await loadInitSpecs(params.slug, root);
 
       // Load config for language
       const config = await loadConfig(root);
       const commLang = config.communication_language || 'English';
 
-      // Build contextual prompt
-      let chatPrompt = `${promptTemplate}\n\n`;
+      // Load project context (context files, knowledge, init, prior step summaries)
+      // skipInit: brainstorming loads init explicitly, review includes init in its manual prior steps loop
+      // skipPriorSteps: review loads prior steps in full (2000 chars) below
+      const isReview = params.step === 'review';
+      const { context: chatContext, filesUsed: contextFilesUsed } = await buildChatContext(
+        params.slug, params.step, root,
+        { skipPriorSteps: isReview, skipInit: true, config }
+      );
+      console.log(`[start-chat] ✓ Chat context loaded: ${chatContext.length} chars`);
 
-      if (initContent) {
-        chatPrompt += `INIT DOCUMENT (story context):\n---\n${initContent}\n---\n\n`;
-      }
+      let chatPrompt;
 
-      chatPrompt += `INSTRUCTIONS:
+      if (params.step === 'brainstorming') {
+        // Brainstorming: load init.md and ask questions
+        // init is excluded from chatContext (skipInit: true) — loaded explicitly here
+        const initContent = await loadInitSpecs(params.slug, root);
+
+        chatPrompt = `${promptTemplate}\n\n${chatContext}\n\n`;
+        if (initContent) {
+          chatPrompt += `INIT DOCUMENT (story context):\n---\n${initContent}\n---\n\n`;
+        }
+        chatPrompt += `INSTRUCTIONS:
 - You are initiating a brainstorming session for this feature
 - Analyze the init document and identify key areas that need clarification
+- Use the project context and knowledge above to ask more targeted questions
 - Ask 3-5 focused questions to guide the discussion
 - Be specific and actionable
 - Respond in ${commLang}`;
 
-      // Use model from request body, or fall back to config
-      const model = body.model || config.models?.init?.[0]?.model || 'claude-default';
+      } else if (params.step === 'review') {
+        // Review: load implement output + prior steps + git diff for comprehensive analysis
+        const storyDir = await getStoryDirPath(params.slug, root);
+
+        // Load implement.md content
+        let implementContent = '';
+        const implementPath = path.join(storyDir, 'implement.md');
+        if (await fs.pathExists(implementPath)) {
+          implementContent = await fs.readFile(implementPath, 'utf-8');
+        }
+
+        // Load prior steps for context
+        const STEP_ORDER = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement'];
+        const priorSections = [];
+        for (const priorStep of STEP_ORDER) {
+          const priorFile = path.join(storyDir, `${priorStep}.md`);
+          if (await fs.pathExists(priorFile)) {
+            const priorContent = await fs.readFile(priorFile, 'utf-8');
+            if (priorContent && priorContent.length > 0) {
+              const truncated = priorContent.length > 2000
+                ? priorContent.slice(0, 2000) + '\n\n[... truncated ...]'
+                : priorContent;
+              priorSections.push(`### ${priorStep}\n${truncated}`);
+            }
+          }
+        }
+
+        // Load git diff
+        let gitDiffContext = '';
+        try {
+          const { getGitDiff } = await import('../../prompt-builder.js');
+          const diff = await getGitDiff(root);
+          if (diff) {
+            gitDiffContext = `\n\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\``;
+          }
+        } catch (err) {
+          console.log(`[start-chat review] Error loading git diff: ${err.message}`);
+        }
+
+        chatPrompt = `${promptTemplate}\n\n`;
+
+        // Inject project context (context files + knowledge only — prior steps already loaded in full above)
+        if (chatContext) {
+          chatPrompt += `${chatContext}\n\n`;
+        }
+
+        if (priorSections.length > 0) {
+          chatPrompt += `PRIOR STEPS CONTEXT:\n${priorSections.join('\n\n')}\n\n`;
+        }
+
+        if (implementContent) {
+          chatPrompt += `IMPLEMENTATION DOCUMENT:\n---\n${implementContent}\n---\n\n`;
+        }
+
+        chatPrompt += `${gitDiffContext}\n\n`;
+
+        chatPrompt += `INSTRUCTIONS:
+- You are initiating a code review session for this feature
+- Perform a comprehensive analysis of the implementation
+- For each issue found, specify: file/line reference, severity (critical/warning/suggestion), description, and suggested fix
+- End with a clear verdict: ship / ship with fixes / needs rework
+- Be thorough but fair — acknowledge what's done well too
+- Respond in ${commLang}`;
+      }
+
+      // Use model from request body, or fall back to config for current step
+      const model = body.model || config.models?.[params.step]?.[0]?.model || config.models?.init?.[0]?.model || 'claude-default';
 
       let callResult;
       try {
@@ -1247,20 +1331,23 @@ INSTRUCTIONS:
 
       const aiResponse = callResult.output;
 
-      // Build filesUsed for transparency
+      // Build filesUsed for transparency (merge with context files used)
       const filesUsed = {
-        promptTemplate: 'brainstorming.md',
-        initFile: initContent ? 'init.md' : null,
-        stepContent: null,
-        contextFiles: [],
+        promptTemplate: `${params.step}.md`,
+        initFile: contextFilesUsed.initFile || (params.step === 'brainstorming' ? 'init.md' : null),
+        stepContent: params.step === 'review' ? 'implement.md' : null,
+        contextFiles: contextFilesUsed.contextFiles,
+        knowledgeCategories: contextFilesUsed.knowledgeCategories,
+        priorSteps: contextFilesUsed.priorSteps,
       };
 
-      // Create message with tokenUsage and filesUsed
+      // Create message with tokenUsage, filesUsed and modelUsed
       const aiMsg = {
         role: 'assistant',
         content: aiResponse.trim(),
         createdAt: new Date().toISOString(),
         tokenUsage: callResult.tokenUsage,
+        modelUsed: callResult.modelUsed,
         filesUsed,
       };
 
@@ -1341,19 +1428,21 @@ ${content}`;
    * For implement/review: applies code changes in agent mode
    * For other steps: updates the .md document
    */
-  router.post('/api/stories/:slug/steps/:step/recap', async (req, res, { params, root }) => {
-    console.log('[Recap] Starting recap for', params.slug, params.step);
+  router.post('/api/stories/:slug/steps/:step/recap', async (req, res, { params, root, parseBody }) => {
+    const actualStep = params.step;
+    console.log('[Recap] Starting recap for', params.slug, actualStep);
     sseHeaders(res);
-    sseSend(res, 'status', { step: params.step, status: 'applying_feedback' });
+    sseSend(res, 'status', { step: actualStep, status: 'applying_feedback' });
 
     const onData = ({ type, text }) => {
       try { sseSend(res, 'log', { type, text }); } catch {}
     };
 
     try {
+      const body = await parseBody().catch(() => ({}));
       const storyDir = await getStoryDirPath(params.slug, root);
       const convPath = path.join(storyDir, `${params.step}-conversation.json`);
-      const stepPath = path.join(storyDir, `${params.step}.md`);
+      const stepPath = path.join(storyDir, `${actualStep}.md`);
       console.log('[Recap] Conversation path:', convPath);
 
       // Load conversation
@@ -1370,16 +1459,16 @@ ${content}`;
       }
 
       // Check if this is a code-action step (implement/review)
-      const isCodeStep = ['implement', 'review'].includes(params.step);
+      const isCodeStep = CODE_STEPS.has(actualStep);
 
       if (isCodeStep) {
         // For implement/review: run in agent mode to apply code changes
         // We call callModel directly instead of runStep to bypass "already done" check
         sseSend(res, 'log', { type: 'info', text: `🚀 Applying code changes based on ${conversation.messages.length} messages...\n` });
 
-        // Load config for model selection
+        // Load config for model selection — consistent fallback chain
         const config = await loadConfig(root);
-        const model = config.models?.implement?.[0]?.model || config.models?.init?.[0]?.model || 'claude-sonnet-4-20250514';
+        const model = body.model || config.models?.[actualStep]?.[0]?.model || config.models?.init?.[0]?.model || 'claude-default';
 
         // Load current step content for context
         let stepContent = '';
@@ -1387,8 +1476,18 @@ ${content}`;
           stepContent = await fs.readFile(stepPath, 'utf-8');
         }
 
+        // Load project context for code agent
+        // For review recap: skip prior steps (already discussed in conversation)
+        const { context: chatContext } = await buildChatContext(params.slug, actualStep, root, {
+          skipPriorSteps: actualStep === 'review',
+          config,
+        });
+        console.log(`[Recap] ✓ Chat context loaded: ${chatContext.length} chars`);
+
         // Build instructions from conversation
         const codeInstructions = `You are working on the "${params.slug}" feature/story.
+
+${chatContext}
 
 CURRENT IMPLEMENTATION NOTES:
 ${stepContent || '(No implementation notes yet)'}
@@ -1419,6 +1518,8 @@ INSTRUCTIONS:
           cwd: root,
         });
         const output = callResult.output;
+        const fileOperations = callResult.fileOperations || [];
+        const modelUsed = callResult.modelUsed;
 
         // Add summary message to conversation before clearing
         const summaryMsg = {
@@ -1426,12 +1527,43 @@ INSTRUCTIONS:
           content: `✅ **Feedback applied!**\n\nI've applied the changes discussed. Here's what was done:\n\n${output?.slice(0, 1500) || 'Changes applied successfully.'}`,
           createdAt: new Date().toISOString(),
           isRecapSummary: true,
+          fileOperations,
+          modelUsed,
         };
+
+        // Persist fileOperations and tokenUsage to status.yaml
+        if (fileOperations.length > 0 || callResult.tokenUsage) {
+          try {
+            const statusPath = path.join(storyDir, 'status.yaml');
+            const rawStatus = await fs.readFile(statusPath, 'utf-8');
+            const status = yaml.parse(rawStatus);
+            if (callResult.tokenUsage) {
+              status.tokenUsage = status.tokenUsage || {};
+              const existing = status.tokenUsage[actualStep] || { input: 0, output: 0, total: 0 };
+              status.tokenUsage[actualStep] = {
+                input: existing.input + (callResult.tokenUsage.input || 0),
+                output: existing.output + (callResult.tokenUsage.output || 0),
+                total: existing.total + (callResult.tokenUsage.total || 0),
+              };
+            }
+            status.stepContext = status.stepContext || {};
+            const existingCtx = status.stepContext[actualStep] || {};
+            status.stepContext[actualStep] = {
+              filesUsed: existingCtx.filesUsed || null,
+              fileOperations: [...(existingCtx.fileOperations || []), ...fileOperations].slice(-200),
+              modelUsed: modelUsed || existingCtx.modelUsed || null,
+            };
+            status.updatedAt = new Date().toISOString();
+            await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+          } catch (err) {
+            console.error(`[Recap] Failed to persist context: ${err.message}`);
+          }
+        }
 
         // Keep the summary in conversation for reference, clear the rest
         await fs.writeJson(convPath, { messages: [summaryMsg] }, { spaces: 2 });
 
-        sseSend(res, 'done', { ok: true, summary: summaryMsg });
+        sseSend(res, 'done', { ok: true, summary: summaryMsg, fileOperations, modelUsed });
       } else {
         // For other steps: update the .md document
         sseSend(res, 'log', { type: 'info', text: `📝 Applying ${conversation.messages.length} messages to document...\n` });
@@ -1445,24 +1577,47 @@ INSTRUCTIONS:
         // Build recap instructions from conversation
         const recapInstructions = `Apply the following feedback from conversation:\n\n${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')}`;
 
-        // Use runStep with iterateOn to update the document
-        const result = await runStep(params.step, params.slug, {
+        // Use runStep with iterateOn to update the document (non-code step: read-only)
+        const result = await runStep(actualStep, params.slug, {
           description: recapInstructions,
           iterateOn: stepContent,
           verbose: true,
-          apply: true,
+          apply: false,
+          readOnly: true,
           root,
           onData,
         });
 
-        // runStep now returns { output, filesUsed }
+        // runStep now returns { output, filesUsed, fileOperations, modelUsed }
         const output = typeof result === 'string' ? result : result?.output;
         const filesUsed = typeof result === 'object' ? result?.filesUsed : null;
+        const fileOperations = typeof result === 'object' ? (result?.fileOperations || []) : [];
+        const modelUsed = typeof result === 'object' ? result?.modelUsed : null;
+
+        // Persist context to status.yaml
+        if (filesUsed || fileOperations.length > 0) {
+          try {
+            const statusPath = path.join(storyDir, 'status.yaml');
+            const rawStatus = await fs.readFile(statusPath, 'utf-8');
+            const status = yaml.parse(rawStatus);
+            status.stepContext = status.stepContext || {};
+            const existingCtx = status.stepContext[actualStep] || {};
+            status.stepContext[actualStep] = {
+              filesUsed: filesUsed || existingCtx.filesUsed || null,
+              fileOperations: [...(existingCtx.fileOperations || []), ...fileOperations].slice(-200),
+              modelUsed: modelUsed || existingCtx.modelUsed || null,
+            };
+            status.updatedAt = new Date().toISOString();
+            await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+          } catch (err) {
+            console.error(`[Recap] Failed to persist context: ${err.message}`);
+          }
+        }
 
         // Clear conversation after recap
         await fs.writeJson(convPath, { messages: [] }, { spaces: 2 });
 
-        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500), filesUsed });
+        sseSend(res, 'done', { ok: true, output: output?.slice(0, 500), filesUsed, fileOperations, modelUsed });
       }
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
@@ -1544,7 +1699,7 @@ INSTRUCTIONS:
             stats.byPhase[status.phase || 'discovery'] = (stats.byPhase[status.phase || 'discovery'] || 0) + 1;
             const epicKey = status.epic || 'unassigned';
             stats.byEpic[epicKey] = (stats.byEpic[epicKey] || 0) + 1;
-            stats.byStatus[status.status || 'draft'] = (stats.byStatus[status.status || 'draft'] || 0) + 1;
+            stats.byStatus[status.phase || 'discovery'] = (stats.byStatus[status.phase || 'discovery'] || 0) + 1;
           } catch {
             // Skip invalid stories
           }
@@ -1769,6 +1924,74 @@ INSTRUCTIONS:
   });
 
   /**
+   * PATCH /api/stories/:slug/test-level - Update story test level
+   */
+  router.patch('/api/stories/:slug/test-level', async (req, res, { params, root, parseBody }) => {
+    try {
+      const body = await parseBody();
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const statusPath = path.join(storyDir, 'status.yaml');
+
+      const raw = await fs.readFile(statusPath, 'utf-8');
+      const status = yaml.parse(raw);
+
+      // Validate levels
+      const validLevels = ['unit', 'integration', 'e2e', 'none'];
+      if (!Array.isArray(body.levels)) {
+        return error(res, 'levels must be an array', 400);
+      }
+      const levels = body.levels.filter(l => validLevels.includes(l));
+
+      // "none" is mutually exclusive with other levels
+      const finalLevels = levels.includes('none') ? ['none'] : levels;
+
+      const customInstructions = typeof body.custom_instructions === 'string'
+        ? body.custom_instructions.slice(0, 500)
+        : '';
+
+      // F3: Empty levels + no custom = remove override (fall back to project default)
+      if (finalLevels.length === 0 && !customInstructions) {
+        delete status.testLevel;
+      } else {
+        status.testLevel = {
+          levels: finalLevels,
+          custom_instructions: customInstructions,
+        };
+      }
+      status.updatedAt = new Date().toISOString();
+      await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+
+      json(res, { id: params.slug, testLevel: status.testLevel || null });
+    } catch (err) {
+      error(res, err.message, 500);
+    }
+  });
+
+  /**
+   * GET /api/stories/:slug/test-level - Get resolved test level (story override or project default)
+   */
+  router.get('/api/stories/:slug/test-level', async (req, res, { params, root }) => {
+    try {
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const statusPath = path.join(storyDir, 'status.yaml');
+
+      const raw = await fs.readFile(statusPath, 'utf-8');
+      const status = yaml.parse(raw);
+
+      if (status.testLevel) {
+        json(res, { testLevel: status.testLevel, source: 'story' });
+      } else {
+        // Fall back to project default
+        const config = await loadConfig(root);
+        const defaultLevel = config.default_test_level || null;
+        json(res, { testLevel: defaultLevel, source: defaultLevel ? 'project' : 'none' });
+      }
+    } catch (err) {
+      error(res, err.message, 500);
+    }
+  });
+
+  /**
    * DELETE /api/stories/:slug - Delete story (soft delete)
    */
   router.delete('/api/stories/:slug', async (req, res, { params, root }) => {
@@ -1969,17 +2192,26 @@ INSTRUCTIONS:
 
   /**
    * GET /api/models - Get available models
+   * Returns available_models from config if declared, otherwise deduplicates from config.models
    */
   router.get('/api/models', async (req, res, { root }) => {
     try {
       const config = await loadConfig(root);
-      const models = [];
+
+      // Prefer available_models if declared in config
+      if (config.available_models && Array.isArray(config.available_models) && config.available_models.length > 0) {
+        // Add backward-compat `model` field (= id) for any consumer expecting the old format
+        return json(res, config.available_models.map(m => ({ ...m, model: m.model || m.id })));
+      }
+
+      // Fallback: deduplicate from config.models, always include claude-default first
+      const models = [{ id: 'claude-default', model: 'claude-default', label: 'Auto (CLI default)', provider: 'anthropic' }];
 
       if (config.models) {
         for (const [step, stepModels] of Object.entries(config.models)) {
           for (const m of stepModels) {
-            if (!models.find(x => x.model === m.model)) {
-              models.push({ model: m.model, provider: m.provider || 'unknown' });
+            if (m.model !== 'claude-default' && !models.find(x => x.id === m.model)) {
+              models.push({ id: m.model, model: m.model, label: m.model, provider: m.provider || 'unknown' });
             }
           }
         }

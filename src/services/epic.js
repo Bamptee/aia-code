@@ -337,8 +337,17 @@ export async function calculateEpicProgress(slug, root = process.cwd()) {
     return { total: 0, completed: 0, percentage: 0 };
   }
 
-  // A story is "completed" when its status is 'done'
-  const completed = stories.filter(s => s.status === 'done').length;
+  // A story is "completed" when phase is 'done' OR all relevant steps are done/skipped
+  const completed = stories.filter(s => {
+    const phase = s.phase || 'discovery';
+    if (phase === 'done') return true;
+    const steps = s.steps || {};
+    const skippedSteps = s.skippedSteps || [];
+    const relevantStepKeys = phase === 'discovery'
+      ? ['init', 'brainstorming', 'spec-func']
+      : ['spec-tech', 'dev-plan', 'implement', 'review'];
+    return relevantStepKeys.every(k => steps[k] === 'done' || skippedSteps.includes(k));
+  }).length;
   const percentage = Math.round((completed / stories.length) * 100);
 
   return { total: stories.length, completed, percentage };

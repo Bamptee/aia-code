@@ -135,9 +135,9 @@ function parseStreamJsonEvent(line, onData, state = {}) {
   }
 }
 
-export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, idleTimeoutMs, onData, cwd, streamJson = false } = {}) {
+export function runCli(command, args, { stdin: stdinData, verbose = false, apply = false, readOnly = false, idleTimeoutMs, onData, cwd, streamJson = false } = {}) {
   if (!idleTimeoutMs) {
-    idleTimeoutMs = apply ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
+    idleTimeoutMs = (apply || readOnly) ? AGENT_IDLE_TIMEOUT_MS : DEFAULT_IDLE_TIMEOUT_MS;
   }
   return new Promise((resolve, reject) => {
     // Log command for manual replay when debugging

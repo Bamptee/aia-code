@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
 import { json, error } from '../router.js';
-import { AIA_DIR, STEP_ORDER } from '../../constants.js';
+import { AIA_DIR, STEP_ORDER, CODE_STEPS } from '../../constants.js';
 import {
   createEpic,
   loadEpic,
@@ -829,11 +829,13 @@ ${content}`;
         sseSend(res, 'log', { type: 'info', text: `Reset step ${params.step} for regeneration` });
       }
 
+      const isCodeStep = CODE_STEPS.has(params.step);
       const result = await runStep(params.step, params.slug, {
         description: body.instructions || body.description || '',
         model: body.model || undefined,
         verbose: true,
-        apply: true,
+        apply: isCodeStep,
+        readOnly: !isCodeStep,
         root,
         onData,
       });
@@ -911,12 +913,14 @@ ${content}`;
 
       // Run step with iteration instructions
       const instructions = body.instructions?.trim() || 'Please review and improve this content. Fix any issues, clarify unclear sections, and enhance overall quality.';
+      const isCodeStep = CODE_STEPS.has(params.step);
       const result = await runStep(params.step, params.slug, {
         description: instructions,
         iterateOn: currentContent,
         model: body.model || undefined,
         verbose: true,
-        apply: true,
+        apply: isCodeStep,
+        readOnly: !isCodeStep,
         root,
         onData,
       });
@@ -1066,7 +1070,7 @@ ${content}`;
 
       // Load additional context for review step (prior steps + git diff)
       let reviewContext = '';
-      const isCodeStep = ['implement', 'review'].includes(actualStep);
+      const isCodeStep = CODE_STEPS.has(actualStep);
       if (actualStep === 'review') {
         // Load prior steps for context
         const STEP_ORDER = ['init', 'brainstorming', 'spec-func', 'spec-tech', 'dev-plan', 'implement'];
@@ -1455,7 +1459,7 @@ ${content}`;
       }
 
       // Check if this is a code-action step (implement/review)
-      const isCodeStep = ['implement', 'review'].includes(actualStep);
+      const isCodeStep = CODE_STEPS.has(actualStep);
 
       if (isCodeStep) {
         // For implement/review: run in agent mode to apply code changes
@@ -1573,12 +1577,13 @@ INSTRUCTIONS:
         // Build recap instructions from conversation
         const recapInstructions = `Apply the following feedback from conversation:\n\n${conversation.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')}`;
 
-        // Use runStep with iterateOn to update the document
+        // Use runStep with iterateOn to update the document (non-code step: read-only)
         const result = await runStep(actualStep, params.slug, {
           description: recapInstructions,
           iterateOn: stepContent,
           verbose: true,
-          apply: true,
+          apply: false,
+          readOnly: true,
           root,
           onData,
         });

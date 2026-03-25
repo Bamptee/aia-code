@@ -134,7 +134,7 @@ function extractModifiedFiles(output, taskFiles) {
   return Array.from(foundFiles);
 }
 
-export async function runStep(step, feature, { description, instructions, history, attachments, model: modelOverride, verbose = false, apply = false, phase = null, task = null, root = process.cwd(), onData, attempt = 1, isRetry = false } = {}) {
+export async function runStep(step, feature, { description, instructions, history, attachments, model: modelOverride, verbose = false, apply = false, readOnly = false, phase = null, task = null, root = process.cwd(), onData, attempt = 1, isRetry = false } = {}) {
   if (!FEATURE_STEPS.includes(step)) {
     throw new Error(`Unknown step "${step}". Valid steps: ${FEATURE_STEPS.join(', ')}`);
   }
@@ -221,7 +221,7 @@ export async function runStep(step, feature, { description, instructions, histor
     }
 
     const start = performance.now();
-    const result = await callModel(model, prompt, { verbose, apply: shouldApply, onData: wrappedOnData, cwd });
+    const result = await callModel(model, prompt, { verbose, apply: shouldApply, readOnly, onData: wrappedOnData, cwd });
     const duration = performance.now() - start;
 
     // Extract output, tokenUsage, fileOperations and modelUsed from result

@@ -206,7 +206,7 @@ function useCardState(featureName, enabled = true) {
   return { state, isLoading, error };
 }
 
-function FeatureCard({ feature, availableApps, onRestore, lazyLoad = false }) {
+function FeatureCard({ feature, availableApps, onRestore, lazyLoad = false, syncEntry = null }) {
   // Use lazy loading hook if enabled, otherwise use the feature data directly
   const { state: lazyState, isLoading, error } = useCardState(
     lazyLoad ? feature.name : null,
@@ -308,6 +308,14 @@ function FeatureCard({ feature, availableApps, onRestore, lazyLoad = false }) {
         React.createElement('span', { className: 'animate-pulse' }, '\u25CF'),
         'Running'
       ),
+      !isDeleted && syncEntry && React.createElement('a', {
+        href: syncEntry.url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        className: 'text-xs text-purple-400 hover:text-purple-300',
+        title: `Synced to ClickUp`,
+        onClick: e => e.stopPropagation(),
+      }, '\uD83D\uDD17'),
     ),
 
     // Progress bar
@@ -780,6 +788,7 @@ export function Dashboard({ context = 'dev' }) {
 
   const [showCreateModal, setShowCreateModal] = React.useState(false);
   const [loadError, setLoadError] = React.useState(null);
+  const [syncMapping, setSyncMapping] = React.useState({});
 
   // Persist filter/sort changes to localStorage
   React.useEffect(() => { saveToStorage(STORAGE_KEYS.TYPE_FILTER, typeFilter); }, [typeFilter]);
@@ -803,7 +812,7 @@ export function Dashboard({ context = 'dev' }) {
     try {
       // Fetch minimal features data for fast initial render
       // Card states will be loaded asynchronously per-card
-      const [featuresData, appsData, deletedData, epicsData] = await Promise.all([
+      const [featuresData, appsData, deletedData, epicsData, mappingData] = await Promise.all([
         api.get(`/features?filter=${deletionFilter}&minimal=true`),
         api.get('/apps'),
         // Also fetch deleted count for the filter badge (minimal mode)
@@ -812,10 +821,13 @@ export function Dashboard({ context = 'dev' }) {
           : Promise.resolve([]),
         // Fetch epics for filtering
         api.get('/epics').catch(() => []),
+        // Fetch sync mapping for external links
+        api.get('/integrations/mapping').catch(() => ({})),
       ]);
       setFeatures(featuresData);
       setApps(appsData);
       setEpics(epicsData);
+      setSyncMapping(mappingData || {});
       setUseLazyLoad(true); // Enable lazy loading for new data
       // Set deleted count
       if (deletionFilter === DELETION_FILTER.DELETED) {
@@ -1024,6 +1036,7 @@ export function Dashboard({ context = 'dev' }) {
                 availableApps: apps,
                 onRestore: load,
                 lazyLoad: useLazyLoad,
+                syncEntry: syncMapping[f.name] || null,
               }))
             ),
 

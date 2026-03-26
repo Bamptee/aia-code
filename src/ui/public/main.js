@@ -8,6 +8,7 @@ import { StoryView } from '/components/story-view.js';
 import { RoadmapView } from '/components/roadmap-view.js';
 import { QADashboard } from '/components/qa-dashboard.js';
 import { TasksPage } from '/components/tasks-page.js';
+import { IntegrationsBrowser } from '/components/integrations-browser.js';
 
 // --- API client ---
 export const api = {
@@ -173,6 +174,7 @@ function parseRoute(hash) {
   if (hash === '#/dev') return { page: 'dev' };
   if (hash === '#/product') return { page: 'product' };
   if (hash === '#/config') return { page: 'config' };
+  if (hash === '#/integrations' || hash.startsWith('#/integrations/')) return { page: 'integrations' };
   return { page: 'dashboard' };
 }
 
@@ -266,6 +268,8 @@ function App() {
         return React.createElement(RoadmapView);
       case 'qa':
         return React.createElement(QADashboard);
+      case 'integrations':
+        return React.createElement(IntegrationsBrowser);
       default:
         return React.createElement(Dashboard, { context: 'dev' });
     }
@@ -311,6 +315,12 @@ function App() {
         href: '#/roadmap',
         isActive: page === 'roadmap',
       }, '📅 Roadmap'),
+
+      // Integrations
+      React.createElement(NavLink, {
+        href: '#/integrations',
+        isActive: page === 'integrations',
+      }, '🔗 Integrations'),
 
       // Config - right aligned
       React.createElement('div', { className: 'ml-auto' },

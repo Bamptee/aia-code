@@ -6,6 +6,7 @@ import { registerWorktrunkRoutes } from './worktrunk.js';
 import { registerTestQuickRoutes } from './test-quick.js';
 import { registerSimpleEpicRoutes } from './epics-simple.js';
 import { registerTaskRoutes } from './tasks.js';
+import { registerIntegrationRoutes } from './integrations.js';
 
 export function registerApiRoutes(router, root) {
   registerFeatureRoutes(router);
@@ -16,4 +17,5 @@ export function registerApiRoutes(router, root) {
   registerTestQuickRoutes(router);
   registerSimpleEpicRoutes(router);
   registerTaskRoutes(router);
+  registerIntegrationRoutes(router);
 }

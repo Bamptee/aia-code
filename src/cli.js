@@ -24,6 +24,9 @@ import { registerSystemCommands } from './commands/system.js';
 import { registerTaskCommand } from './commands/task.js';
 import { registerMigrateCommand } from './commands/migrate.js';
 import { registerQAGenCommand } from './commands/qa-gen.js';
+import { registerPushCommand } from './commands/push.js';
+import { registerPullCommand } from './commands/pull.js';
+import { registerSyncCommand } from './commands/sync.js';
 
 export function createCli() {
   const program = new Command();
@@ -54,6 +57,11 @@ export function createCli() {
   registerSystemCommands(program);
   registerMigrateCommand(program);
   registerQAGenCommand(program);
+
+  // Sync commands
+  registerPushCommand(program);
+  registerPullCommand(program);
+  registerSyncCommand(program);
 
   return program;
 }

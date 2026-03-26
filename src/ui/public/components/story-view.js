@@ -2,6 +2,7 @@ import React from 'react';
 import { api, streamPost } from '/main.js';
 import { EpicSelector } from '/components/epic-selector.js';
 import { StoryWorktrunkPanel } from '/components/worktrunk-panel.js';
+import { PushModal } from '/components/integrations-browser.js';
 
 // ============== Prompt Preview Modal ==============
 
@@ -3356,18 +3357,26 @@ export function StoryView({ slug, context = 'product' }) {
   const [error, setError] = React.useState(null);
   const [initExpanded, setInitExpanded] = React.useState(false);
   const [tokenUsage, setTokenUsage] = React.useState(null);
+  const [externalLink, setExternalLink] = React.useState(null);
+  const [syncConfigured, setSyncConfigured] = React.useState(false);
+  const [showPushModal, setShowPushModal] = React.useState(false);
+  const [syncing, setSyncing] = React.useState(false);
 
   const contextConfig = CONTEXT_CONFIG[context];
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [storyData, tokensData] = await Promise.all([
+      const [storyData, tokensData, linkData, syncConfig] = await Promise.all([
         api.get(`/stories/${slug}`),
         api.get(`/stories/${slug}/tokens`).catch(() => null),
+        api.get(`/integrations/link/${slug}`).catch(() => null),
+        api.get('/integrations/config').catch(() => null),
       ]);
       setStory(storyData);
       setTokenUsage(tokensData);
+      setExternalLink(linkData?.url ? linkData : null);
+      setSyncConfigured(syncConfig?.configured || false);
 
       // Auto-expand init panel if no enriched context yet
       const hasEnriched = storyData?.init?.enriched && storyData.init.enriched.trim().length > 0;
@@ -3478,7 +3487,37 @@ export function StoryView({ slug, context = 'product' }) {
             tokenUsage?.total?.total > 0 && React.createElement('span', {
               className: 'px-3 py-1 text-xs rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/30',
               title: `Total: ${tokenUsage.total.total} (Input: ${tokenUsage.total.input}, Output: ${tokenUsage.total.output})`,
-            }, `🎯 ${formatTokenCount(tokenUsage.total.total)} tokens`)
+            }, `🎯 ${formatTokenCount(tokenUsage.total.total)} tokens`),
+            externalLink && React.createElement('a', {
+              href: externalLink.url,
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              className: 'px-3 py-1 text-xs rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 hover:bg-purple-500/30 transition-colors',
+              title: `View in ${externalLink.provider || 'ClickUp'}`,
+            }, `🔗 ${externalLink.provider || 'ClickUp'}`),
+            syncConfigured && React.createElement('button', {
+              className: `px-3 py-1 text-xs rounded-full border transition-colors ${syncing ? 'bg-slate-700 text-slate-400 border-slate-600' : 'bg-violet-500/20 text-violet-300 border-violet-500/30 hover:bg-violet-500/30'}`,
+              disabled: syncing,
+              onClick: async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (externalLink) {
+                  // Already pushed → direct re-push, no modal needed
+                  setSyncing(true);
+                  try {
+                    await api.post('/integrations/push', { slug });
+                    const linkData = await api.get(`/integrations/link/${slug}`).catch(() => null);
+                    setExternalLink(linkData?.url ? linkData : null);
+                  } catch (err) {
+                    alert(`Push failed: ${err.message}`);
+                  }
+                  setSyncing(false);
+                } else {
+                  // First push → open modal to select list
+                  setShowPushModal(true);
+                }
+              },
+            }, syncing ? '\u21D7 Pushing...' : (externalLink ? '\u21D7 Push update' : '\u21D7 Push to ClickUp'))
           ),
           React.createElement('h1', { className: 'text-2xl font-bold text-white mb-1' }, story.title || story.name || slug),
           story.description && React.createElement('p', { className: 'text-slate-400' }, story.description)
@@ -3587,6 +3626,16 @@ export function StoryView({ slug, context = 'product' }) {
           savedStepContext: story.stepContext?.[apiStepKey] || story.stepContext?.[stepKey],
         });
       })
-    )
+    ),
+
+    // Push to ClickUp modal
+    showPushModal && React.createElement(PushModal, {
+      slug,
+      onClose: () => setShowPushModal(false),
+      onPushed: async () => {
+        const linkData = await api.get(`/integrations/link/${slug}`).catch(() => null);
+        setExternalLink(linkData?.url ? linkData : null);
+      },
+    })
   );
 }

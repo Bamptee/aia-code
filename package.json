@@ -44,7 +44,8 @@
     "test:epic:validators": "node --test tests/epic/validators.test.js",
     "test:epic:services": "node --test tests/epic/*-service.test.js",
     "test:epic:providers": "node --test tests/epic/*-provider.test.js",
-    "test:epic:e2e": "node --test tests/epic/e2e-workflow.test.js"
+    "test:epic:e2e": "node --test tests/epic/e2e-workflow.test.js",
+    "test:sync": "node --test tests/sync*.test.js"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

@@ -132,6 +132,23 @@ export async function setApps(apps, root = process.cwd()) {
   await fs.writeFile(configPath, yaml.stringify(config), 'utf-8');
 }
 
+// Sync config helpers
+export async function loadSyncConfig(root = process.cwd()) {
+  const config = await loadProjectConfig(root);
+  return config.sync || null;
+}
+
+export async function saveSyncConfig(syncConfig, root = process.cwd()) {
+  const configPath = projectConfigPath(root);
+  let config = {};
+  if (await fs.pathExists(configPath)) {
+    const raw = await fs.readFile(configPath, 'utf-8');
+    config = yaml.parse(raw) || {};
+  }
+  config.sync = syncConfig;
+  await fs.writeFile(configPath, yaml.stringify(config), 'utf-8');
+}
+
 export async function toggleApp(appName, enabled, root = process.cwd()) {
   const apps = await getApps(root);
   const app = apps.find(a => a.name === appName);

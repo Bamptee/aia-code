@@ -243,6 +243,7 @@ describe('ClickUpProvider', () => {
             url: 'https://app.clickup.com/t/t-1',
             date_updated: '1711234567000',
             attachments: [
+              { filename: 'aia--init.md', url: 'https://cdn.clickup.com/att/init.md' },
               { filename: 'aia--spec-func.md', url: 'https://cdn.clickup.com/att/spec-func.md' },
               { filename: 'human-doc.pdf', url: 'https://cdn.clickup.com/att/doc.pdf' },
             ],
@@ -259,8 +260,11 @@ describe('ClickUpProvider', () => {
       const originalFetch = mockFetch;
       const patchedFetch = async (url, opts) => {
         const res = await originalFetch(url, opts);
+        if (url.includes('cdn.clickup.com/att/init.md')) {
+          return { ...res, ok: true, text: async () => '# Auth SSO\nSetup SSO login' };
+        }
         if (url.includes('cdn.clickup.com')) {
-          return { ...res, text: async () => '# Spec Func\nFunctional spec content' };
+          return { ...res, ok: true, text: async () => '# Spec Func\nFunctional spec content' };
         }
         return res;
       };

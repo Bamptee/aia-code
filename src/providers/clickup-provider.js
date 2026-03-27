@@ -291,7 +291,6 @@ export class ClickUpProvider extends SyncProvider {
 
     const taskBody = {
       name: storyData.name,
-      description: storyData.steps?.init?.content || '',
     };
     // Only set status if we have a valid mapping — otherwise let ClickUp use the list default
     if (mappedStatus) {
@@ -336,11 +335,6 @@ export class ClickUpProvider extends SyncProvider {
     // implement step is local-only
     if (step === 'implement') {
       return { ok: true, skipped: true };
-    }
-
-    // Update description if init
-    if (step === 'init') {
-      await this._requestWithRetry('PUT', `/task/${meta.taskId}`, { description: content });
     }
 
     // Upload attachment
@@ -431,7 +425,8 @@ export class ClickUpProvider extends SyncProvider {
   // ─── Pull ───────────────────────────────────────────────────────
 
   async pullStory(externalId) {
-    const task = await this._requestWithRetry('GET', `/task/${externalId}`);
+    // Request markdown_description to get image positions in the text
+    const task = await this._requestWithRetry('GET', `/task/${externalId}?include_markdown_description=true`);
 
     // Reverse-map status
     const reverseMap = {};
@@ -449,29 +444,57 @@ export class ClickUpProvider extends SyncProvider {
       .substring(0, 60);
 
     // Download aia-- attachments (ClickUp uses 'title' for filename)
+    // Keep only the most recent version of each step (by date or position — last = newest)
     const steps = {};
-    const attachments = (task.attachments || [])
+    const allAttachments = (task.attachments || [])
       .map(a => ({ ...a, filename: a.title || a.filename || a.name }))
       .filter(a => a.filename?.startsWith('aia--'));
 
-    // init from description
-    if (task.description) {
-      steps.init = { content: task.description, status: 'done' };
-    }
-
-    for (const att of attachments) {
-      // aia--status.yaml keeps full name, others strip .md
+    // Group by step name, keep only the latest (highest date or last in array)
+    const latestByStep = {};
+    for (const att of allAttachments) {
       const isYaml = att.filename.endsWith('.yaml');
       const stepName = isYaml
         ? att.filename.replace('aia--', '')
         : att.filename.replace('aia--', '').replace('.md', '');
-      if (stepName === 'init') continue; // description is source of truth for init
-      // Sanitize stepName to prevent path traversal
       if (!/^[a-z0-9.-]+$/.test(stepName)) continue;
-      const content = await this._downloadAttachment(att.url);
-      if (!content) continue; // skip failed downloads
+      const attDate = parseInt(att.date || att.date_created || '0', 10);
+      const existing = latestByStep[stepName];
+      if (!existing || attDate >= (parseInt(existing.date || existing.date_created || '0', 10))) {
+        latestByStep[stepName] = att;
+      }
+    }
+
+    for (const [stepName, att] of Object.entries(latestByStep)) {
+      // ClickUp provides url_w_query (signed URL) which is more reliable than url
+      const downloadUrl = att.url_w_query || att.url;
+      const content = await this._downloadAttachment(downloadUrl);
+      if (!content) continue;
       steps[stepName] = { content, status: 'done' };
     }
+
+    // Fallback: use description as init.md if no aia--init.md attachment was found
+    // Prefer markdown_description (includes ![](url) image refs) over plain description
+    if (!steps.init) {
+      const descContent = task.markdown_description || task.description;
+      if (descContent) {
+        steps.init = { content: descContent, status: 'done' };
+      }
+    }
+
+    // Collect non-aia attachments (images, docs) for reference
+    const taskAttachments = (task.attachments || [])
+      .filter(a => {
+        const name = a.title || a.filename || a.name || '';
+        return !name.startsWith('aia--');
+      })
+      .map(a => ({
+        id: a.id,
+        filename: a.title || a.filename || a.name,
+        url: a.url,
+        url_w_query: a.url_w_query,
+        type: a.extension,
+      }));
 
     return {
       slug,
@@ -480,6 +503,7 @@ export class ClickUpProvider extends SyncProvider {
       url: task.url || `https://app.clickup.com/t/${task.id}`,
       dateUpdated: task.date_updated,
       steps,
+      attachments: taskAttachments,
       subtasks: task.subtasks || [],
       meta: {
         assignees: (task.assignees || []).map(a => a.username || a.email),
@@ -490,9 +514,11 @@ export class ClickUpProvider extends SyncProvider {
 
   async _downloadAttachment(url) {
     try {
-      const res = await this.fetchFn(url, {
-        headers: { Authorization: this.apiKey },
-      });
+      // Try without auth first (signed URLs don't need it), fallback with auth
+      let res = await this.fetchFn(url);
+      if (!res.ok) {
+        res = await this.fetchFn(url, { headers: { Authorization: this.apiKey } });
+      }
       if (!res.ok) {
         console.warn(`Failed to download attachment (${res.status}): ${url}`);
         return '';

@@ -150,20 +150,6 @@ export async function runStep(step, feature, { description, instructions, histor
     claim(feature);
   }
 
-  // Check for remote changes (non-blocking)
-  try {
-    const { loadSyncConfig } = await import('./config.js');
-    const syncConfig = await loadSyncConfig(root);
-    if (syncConfig?.auto_pull_check && syncConfig?.provider !== 'none') {
-      const { checkForRemoteChanges } = await import('./sync-service.js');
-      const changes = await checkForRemoteChanges(feature, root);
-      if (changes?.hasChanges) {
-        console.log(chalk.yellow(`⚠ Remote changes detected (updated ${changes.remoteDate.toISOString()})`));
-        console.log(chalk.yellow(`  Run "aia pull ${feature}" to update local files`));
-      }
-    }
-  } catch { /* silent */ }
-
   const status = await loadStatus(feature, root);
 
   // Phase mode: only for implement step
@@ -262,19 +248,6 @@ export async function runStep(step, feature, { description, instructions, histor
       await fs.writeFile(outputPath, output, 'utf-8');
       await updateStepStatus(feature, step, STEP_STATUS.DONE, root);
       console.log(chalk.green(`Step "${step}" completed for feature "${feature}".`));
-    }
-
-    // Auto-push to external provider (non-blocking)
-    try {
-      const { loadSyncConfig } = await import('./config.js');
-      const syncConfig = await loadSyncConfig(root);
-      if (syncConfig?.auto_push && syncConfig?.provider !== 'none') {
-        const { pushStep: syncPushStep } = await import('./sync-service.js');
-        await syncPushStep(feature, step, root);
-        console.log(chalk.dim(`  ↗ Synced to ${syncConfig.provider}`));
-      }
-    } catch (syncErr) {
-      console.log(chalk.yellow(`  ⚠ Sync failed: ${syncErr.message}`));
     }
 
     await logExecution({ feature, step, model, duration, phase: phaseData?.number, tokenUsage }, root);

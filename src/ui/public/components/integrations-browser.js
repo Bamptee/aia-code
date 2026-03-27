@@ -240,8 +240,6 @@ function SetupWizard({ onComplete, existingConfig }) {
   const [spaceId, setSpaceId] = useState(existingConfig?.clickup?.space_id || '');
   const [defaultListId, setDefaultListId] = useState(existingConfig?.clickup?.default_list_id || '');
   const [epicAs, setEpicAs] = useState(existingConfig?.clickup?.epic_as || 'folder');
-  const [autoPush, setAutoPush] = useState(existingConfig?.auto_push !== false);
-  const [autoPullCheck, setAutoPullCheck] = useState(existingConfig?.auto_pull_check !== false);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -303,7 +301,7 @@ function SetupWizard({ onComplete, existingConfig }) {
     setSaving(true);
     setErrorMsg('');
     try {
-      const payload = { workspaceId, spaceId, defaultListId, epicAs, autoPush, autoPullCheck };
+      const payload = { workspaceId, spaceId, defaultListId, epicAs };
       if (apiKey) payload.apiKey = apiKey;
       await api.post('/integrations/setup', payload);
       onComplete();
@@ -426,14 +424,6 @@ function SetupWizard({ onComplete, existingConfig }) {
             h('option', { value: 'list' }, 'Lists'),
           ),
         ),
-        h('label', { className: 'flex items-center gap-2 text-sm text-slate-300 cursor-pointer' },
-          h('input', { type: 'checkbox', checked: autoPush, onChange: e => setAutoPush(e.target.checked) }),
-          'Auto-push after each step completion',
-        ),
-        h('label', { className: 'flex items-center gap-2 text-sm text-slate-300 cursor-pointer' },
-          h('input', { type: 'checkbox', checked: autoPullCheck, onChange: e => setAutoPullCheck(e.target.checked) }),
-          'Check for remote changes before run',
-        ),
         !isEdit && h('div', { className: 'p-3 bg-slate-800/50 rounded border border-slate-700 text-xs text-slate-400 space-y-1' },
           h('div', null, '\u{1F4BE} API key saved in ', h('code', { className: 'text-violet-400' }, '.env')),
           h('div', null, '\u2699\uFE0F Config saved in ', h('code', { className: 'text-violet-400' }, '.aia/config.yaml')),
@@ -475,6 +465,8 @@ export function IntegrationsBrowser() {
   const [currentParentId, setCurrentParentId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [pullPreview, setPullPreview] = useState(null);
+  const [syncedTaskIds, setSyncedTaskIds] = useState(new Set());
   const [selectedItems, setSelectedItems] = useState(new Set());
   const [preview, setPreview] = useState(null);
   const [filter, setFilter] = useState('');
@@ -498,7 +490,14 @@ export function IntegrationsBrowser() {
     }).catch(() => {});
   }, []);
 
-  useEffect(() => { loadConfig(); }, [loadConfig]);
+  useEffect(() => {
+    loadConfig();
+    // Load synced task IDs for "synced" badges
+    api.get('/integrations/mapping').then(mapping => {
+      const ids = new Set(Object.values(mapping || {}).map(m => m.taskId).filter(Boolean));
+      setSyncedTaskIds(ids);
+    }).catch(() => {});
+  }, [loadConfig]);
 
   useEffect(() => {
     if (config?.configured && !showSetup) {
@@ -645,6 +644,7 @@ export function IntegrationsBrowser() {
   }
 
   async function pullSelected() {
+    // For multi-select, pull directly (no preview per item)
     setPulling(true);
     setPullResults([]);
     const ids = [...selectedItems];
@@ -665,12 +665,28 @@ export function IntegrationsBrowser() {
     else setErrorMsg('');
   }
 
-  async function pullSingle(taskId) {
+  async function startPull(taskId) {
+    // Show preview first
+    setErrorMsg('');
+    setPulling(true);
+    try {
+      const preview = await api.post('/integrations/pull-preview', { externalId: taskId });
+      setPullPreview(preview);
+    } catch (err) {
+      setErrorMsg(err.message);
+    } finally {
+      setPulling(false);
+    }
+  }
+
+  async function confirmPull() {
+    if (!pullPreview?.taskId) return;
     setPulling(true);
     setPullResults([]);
     try {
-      const result = await api.post('/integrations/pull', { externalId: taskId });
+      const result = await api.post('/integrations/pull', { externalId: pullPreview.taskId });
       setPullResults([result]);
+      setPullPreview(null);
       setSearchResult(null);
     } catch (err) {
       setErrorMsg(err.message);
@@ -793,7 +809,7 @@ export function IntegrationsBrowser() {
         h('div', { className: 'flex gap-2' },
           h('button', {
             className: 'px-3 py-1 bg-violet-600 text-white rounded text-sm',
-            onClick: () => pullSingle(searchResult.id),
+            onClick: () => startPull(searchResult.id),
             disabled: pulling,
           }, 'Pull'),
           h('button', {
@@ -946,6 +962,7 @@ export function IntegrationsBrowser() {
                               },
                                 // Row 1: ID + name + assignees
                                 h('div', { className: 'flex items-center gap-2' },
+                                  syncedTaskIds.has(item.id) && h('span', { className: 'text-[9px] font-medium text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded flex-shrink-0', title: 'Already synced locally' }, 'synced'),
                                   item.custom_id && h('span', { className: 'text-xs font-mono text-violet-400 bg-violet-500/10 px-1 rounded flex-shrink-0' }, item.custom_id),
                                   h('span', { className: 'text-white text-xs truncate max-w-[300px]' }, item.name),
                                   // Assignees
@@ -1083,10 +1100,65 @@ export function IntegrationsBrowser() {
               preview.description.substring(0, 500) + (preview.description.length > 500 ? '...' : '')),
             h('button', {
               className: 'w-full mt-3 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-sm',
-              onClick: () => pullSingle(preview.id),
+              onClick: () => startPull(preview.id),
               disabled: pulling,
             }, 'Pull this task'),
           ),
+      ),
+    ),
+
+    // Pull preview/confirm modal
+    pullPreview && h('div', {
+      className: 'fixed inset-0 bg-black/60 flex items-center justify-center z-50',
+      onClick: e => { if (e.target === e.currentTarget) setPullPreview(null); },
+    },
+      h('div', { className: 'bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-xl' },
+        h('div', { className: 'flex items-center justify-between mb-3' },
+          h('h3', { className: 'text-sm font-bold text-white' },
+            pullPreview.isNew ? 'Import new story' : 'Update local story'),
+          h('button', { className: 'text-slate-400 hover:text-white', onClick: () => setPullPreview(null) }, '\u00D7'),
+        ),
+        h('div', { className: 'text-xs text-slate-300 mb-3' }, pullPreview.name),
+
+        // Changes list
+        h('div', { className: 'space-y-1 mb-4 max-h-60 overflow-y-auto' },
+          ...pullPreview.changes.map(c =>
+            h('div', {
+              key: c.file,
+              className: 'flex items-center gap-2 text-xs px-2 py-1 rounded ' +
+                (c.status === 'new' ? 'bg-emerald-900/30 text-emerald-400' :
+                 c.status === 'modified' ? 'bg-amber-900/30 text-amber-400' :
+                 'bg-slate-800/50 text-slate-500'),
+            },
+              h('span', { className: 'w-16 flex-shrink-0 font-medium' },
+                c.status === 'new' ? '+ NEW' : c.status === 'modified' ? '\u2794 MODIFIED' : '\u2713 same'),
+              h('span', { className: 'truncate' }, c.file),
+              c.status === 'modified' && c.localSize && h('span', { className: 'text-[10px] text-slate-500 ml-auto flex-shrink-0' },
+                `${Math.round(c.localSize / 1024)}KB \u2192 ${Math.round(c.remoteSize / 1024)}KB`),
+            ),
+          ),
+        ),
+
+        // Summary
+        (() => {
+          const newCount = pullPreview.changes.filter(c => c.status === 'new').length;
+          const modCount = pullPreview.changes.filter(c => c.status === 'modified').length;
+          const sameCount = pullPreview.changes.filter(c => c.status === 'unchanged').length;
+          return h('div', { className: 'text-[10px] text-slate-500 mb-3' },
+            [newCount && `${newCount} new`, modCount && `${modCount} modified`, sameCount && `${sameCount} unchanged`].filter(Boolean).join(' \u2022 '),
+            modCount > 0 && h('span', { className: 'text-amber-500 ml-2' }, 'Modified files will be overwritten'),
+          );
+        })(),
+
+        // Actions
+        h('div', { className: 'flex gap-2' },
+          h('button', { className: btnSecondary + ' text-xs', onClick: () => setPullPreview(null) }, 'Cancel'),
+          h('button', {
+            className: btnPrimary + ' text-xs',
+            onClick: confirmPull,
+            disabled: pulling,
+          }, pulling ? 'Pulling...' : 'Confirm Pull'),
+        ),
       ),
     ),
   );

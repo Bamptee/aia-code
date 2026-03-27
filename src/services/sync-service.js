@@ -135,45 +135,173 @@ export async function pullStory(externalIdOrUrl, root = process.cwd(), options =
 
   const writtenFiles = [];
 
-  // Check if status.yaml was pushed as attachment — use it directly
-  const pulledStatus = pulled.steps?.['status.yaml'];
-  if (pulledStatus?.content) {
-    await fs.writeFile(path.join(storyDir, 'status.yaml'), pulledStatus.content, 'utf-8');
-    writtenFiles.push('status.yaml');
+  // Download images from ClickUp attachments and step content
+  const attachmentsDir = path.join(storyDir, 'attachments');
+  const imageMap = {}; // url → local relative path
+
+  // Download non-aia attachments (images, docs) from the task
+  if (pulled.attachments?.length) {
+    await fs.ensureDir(attachmentsDir);
+    const usedNames = new Set();
+    for (const att of pulled.attachments) {
+      const downloadUrl = att.url_w_query || att.url;
+      if (!downloadUrl || !att.filename) continue;
+      const ext = (att.type || att.filename.split('.').pop() || '').toLowerCase();
+      const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+      if (!isImage) continue;
+      try {
+        const res = await fetch(downloadUrl);
+        if (!res.ok) continue;
+        const buffer = Buffer.from(await res.arrayBuffer());
+        // Deduplicate filenames (ClickUp often names all images "image.png")
+        const base = att.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+        let safeFilename = base;
+        if (usedNames.has(safeFilename)) {
+          const nameWithoutExt = base.replace(/\.[^.]+$/, '');
+          const fileExt = base.match(/\.[^.]+$/)?.[0] || `.${ext}`;
+          let counter = 2;
+          while (usedNames.has(safeFilename)) {
+            safeFilename = `${nameWithoutExt}-${counter}${fileExt}`;
+            counter++;
+          }
+        }
+        usedNames.add(safeFilename);
+        await fs.writeFile(path.join(attachmentsDir, safeFilename), buffer);
+        imageMap[att.url] = `attachments/${safeFilename}`;
+        // Also map url_w_query so both URL forms get replaced
+        if (att.url_w_query && att.url_w_query !== att.url) {
+          imageMap[att.url_w_query] = `attachments/${safeFilename}`;
+        }
+        writtenFiles.push(`attachments/${safeFilename}`);
+      } catch { /* skip failed downloads */ }
+    }
   }
 
+  // Write all .md step files, downloading inline images and replacing URLs
+  const actualSteps = [];
   for (const [stepName, stepData] of Object.entries(pulled.steps || {})) {
-    if (stepName === 'status.yaml') continue; // already handled above
+    if (stepName === 'status.yaml') continue;
+    let content = stepData.content;
+
+    // Find and download inline images (markdown ![alt](url) and HTML <img src="url">)
+    const imgRegex = /!\[[^\]]*\]\((https?:\/\/[^)]+)\)|<img[^>]+src=["'](https?:\/\/[^"']+)["']/g;
+    let match;
+    while ((match = imgRegex.exec(content)) !== null) {
+      const imgUrl = match[1] || match[2];
+      if (imageMap[imgUrl]) continue; // already downloaded
+      try {
+        await fs.ensureDir(attachmentsDir);
+        const res = await fetch(imgUrl);
+        if (!res.ok) continue;
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.startsWith('image/')) continue;
+        const ext = ct.split('/')[1]?.split(';')[0] || 'png';
+        const filename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+        const buffer = Buffer.from(await res.arrayBuffer());
+        await fs.writeFile(path.join(attachmentsDir, filename), buffer);
+        imageMap[imgUrl] = `attachments/${filename}`;
+        writtenFiles.push(`attachments/${filename}`);
+      } catch { /* skip */ }
+    }
+
+    // Replace all remote image URLs with local paths
+    for (const [remoteUrl, localPath] of Object.entries(imageMap)) {
+      content = content.replaceAll(remoteUrl, localPath);
+    }
+
+    // For init.md: insert unreferenced images into the text
+    if (stepName === 'init' && Object.keys(imageMap).length > 0) {
+      const referencedImages = new Set();
+      for (const localPath of Object.values(imageMap)) {
+        if (content.includes(localPath)) referencedImages.add(localPath);
+      }
+      const unreferenced = [...new Set(Object.values(imageMap).filter(p => !referencedImages.has(p)))];
+
+      if (unreferenced.length > 0) {
+        // Heuristic: try to insert images at empty lines in the text (likely image placeholders)
+        // Split content into lines, find empty lines that follow a non-empty line
+        const lines = content.split('\n');
+        const result = [];
+        let imgIdx = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+          result.push(lines[i]);
+          // Insert an image at empty lines that follow content (likely where an image was)
+          if (
+            imgIdx < unreferenced.length &&
+            lines[i].trim() === '' &&
+            i > 0 && lines[i - 1].trim() !== '' &&
+            // Don't insert at the very first empty line (could be just paragraph spacing)
+            i > 1
+          ) {
+            const localPath = unreferenced[imgIdx];
+            const filename = localPath.split('/').pop();
+            result.push(`![${filename}](${localPath})`);
+            result.push('');
+            imgIdx++;
+          }
+        }
+
+        // Append remaining images at the end if we ran out of empty line slots
+        if (imgIdx < unreferenced.length) {
+          result.push('', '---', '', '## Additional Images', '');
+          for (; imgIdx < unreferenced.length; imgIdx++) {
+            const localPath = unreferenced[imgIdx];
+            const filename = localPath.split('/').pop();
+            result.push(`![${filename}](${localPath})`, '');
+          }
+        }
+
+        content = result.join('\n');
+      }
+    }
+
     const filePath = path.join(storyDir, `${stepName}.md`);
-    await fs.writeFile(filePath, stepData.content, 'utf-8');
+    await fs.writeFile(filePath, content, 'utf-8');
     writtenFiles.push(`${stepName}.md`);
+    actualSteps.push(stepName);
   }
 
-  // Generate status.yaml if not pulled from remote
-  if (!pulledStatus?.content) {
+  // Build status.yaml — start from pulled attachment if available, then merge actual steps
+  const pulledStatus = pulled.steps?.['status.yaml'];
+  let statusData;
+  if (pulledStatus?.content) {
+    statusData = yaml.parse(pulledStatus.content) || {};
+  } else {
     const { getDefaultEpicSlug } = await import('./epic.js');
     const defaultEpic = await getDefaultEpicSlug(root).catch(() => 'general');
-    const devSteps = ['spec-tech', 'dev-plan', 'implement', 'review'];
-    const hasDevSteps = Object.keys(pulled.steps || {}).some(s => devSteps.includes(s));
-    const statusData = {
+    statusData = {
       slug,
       name: pulled.name,
-      phase: hasDevSteps ? 'development' : 'discovery',
       type: 'story',
       epic: defaultEpic,
       createdAt: new Date().toISOString(),
-      steps: {},
     };
-    for (const stepName of Object.keys(pulled.steps || {})) {
-      statusData.steps[stepName] = 'done';
-    }
-    await fs.writeFile(
-      path.join(storyDir, 'status.yaml'),
-      yaml.stringify(statusData),
-      'utf-8',
-    );
-    writtenFiles.push('status.yaml');
   }
+
+  // Always ensure steps reflect what was actually downloaded
+  if (!statusData.steps) statusData.steps = {};
+  for (const stepName of actualSteps) {
+    statusData.steps[stepName] = statusData.steps[stepName] || 'done';
+  }
+
+  // Determine phase from actual steps
+  const devStepNames = ['spec-tech', 'dev-plan', 'implement', 'review'];
+  const hasDevSteps = actualSteps.some(s => devStepNames.includes(s));
+  if (!statusData.phase || statusData.phase === 'pending') {
+    statusData.phase = hasDevSteps ? 'development' : 'discovery';
+  }
+
+  // Ensure slug and name are current
+  statusData.slug = slug;
+  statusData.name = pulled.name || statusData.name;
+
+  await fs.writeFile(
+    path.join(storyDir, 'status.yaml'),
+    yaml.stringify(statusData),
+    'utf-8',
+  );
+  writtenFiles.push('status.yaml');
 
   // Update mapping
   await setMapping(provider.getProviderName(), slug, {
@@ -195,6 +323,40 @@ export async function pullStory(externalIdOrUrl, root = process.cwd(), options =
   }
 
   return { slug, writtenFiles, url: pulled.url, name: pulled.name, phase, isNew: !existingSlug };
+}
+
+/**
+ * Preview what a pull would change (dry-run)
+ */
+export async function previewPull(externalIdOrUrl, root = process.cwd()) {
+  const provider = await getSyncProvider(root);
+  if (!provider) throw new Error('Sync not configured.');
+
+  const externalId = parseExternalId(externalIdOrUrl);
+  const existingSlug = await findByExternalId(provider.getProviderName(), externalId, root);
+  const pulled = await provider.pullStory(externalId);
+  const slug = existingSlug || pulled.slug;
+  const storyDir = path.join(root, AIA_DIR, 'stories', slug);
+  const isNew = !(await fs.pathExists(storyDir));
+
+  const changes = [];
+  for (const [stepName, stepData] of Object.entries(pulled.steps || {})) {
+    if (stepName === 'status.yaml') continue;
+    const filePath = path.join(storyDir, `${stepName}.md`);
+    const localExists = await fs.pathExists(filePath);
+    if (!localExists) {
+      changes.push({ file: `${stepName}.md`, status: 'new' });
+    } else {
+      const localContent = await fs.readFile(filePath, 'utf-8');
+      if (localContent !== stepData.content) {
+        changes.push({ file: `${stepName}.md`, status: 'modified', localSize: localContent.length, remoteSize: stepData.content.length });
+      } else {
+        changes.push({ file: `${stepName}.md`, status: 'unchanged' });
+      }
+    }
+  }
+
+  return { slug, name: pulled.name, isNew, changes, url: pulled.url, taskId: externalId };
 }
 
 /**

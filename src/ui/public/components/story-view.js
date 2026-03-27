@@ -668,8 +668,10 @@ function AttachmentZone({ slug, attachments = [], onUpdate, readonly = false }) 
     }
 
     try {
-      const res = await api.upload(`/stories/${slug}/init/attachments`, formData);
-      if (res.story) onUpdate(res.story);
+      await api.upload(`/features/${slug}/attachments`, formData);
+      // Refresh story data to get updated attachments list
+      const updated = await api.get(`/stories/${slug}`);
+      if (updated) onUpdate(updated);
     } catch (e) {
       setError(e.message || 'Upload failed');
     }
@@ -679,8 +681,9 @@ function AttachmentZone({ slug, attachments = [], onUpdate, readonly = false }) 
   const handleRemove = async (filename) => {
     if (readonly) return;
     try {
-      const res = await api.delete(`/stories/${slug}/init/attachments/${encodeURIComponent(filename)}`);
-      if (res.story) onUpdate(res.story);
+      await api.delete(`/features/${slug}/attachments/${encodeURIComponent(filename)}`);
+      const updated = await api.get(`/stories/${slug}`);
+      if (updated) onUpdate(updated);
     } catch (e) {
       setError(e.message);
     }
@@ -1219,16 +1222,20 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
       }, `🌐 ${langConfig.communication_language}`)
     ),
 
+    // Attachments - always visible across all modes
+    (story?.init?.attachments?.length > 0 || viewMode === 'input') &&
+      React.createElement(AttachmentZone, {
+        slug,
+        attachments: story?.init?.attachments || [],
+        onUpdate: onStoryUpdate,
+        readonly: viewMode !== 'input',
+      }),
+
     // Loading state
     loading && React.createElement(StreamingPanel, { output }),
 
     // Input mode - for new descriptions to enrich
     !loading && viewMode === 'input' && React.createElement(React.Fragment, null,
-      React.createElement(AttachmentZone, {
-        slug,
-        attachments: story?.init?.attachments || [],
-        onUpdate: onStoryUpdate,
-      }),
       React.createElement('textarea', {
         value: description,
         onChange: e => setDescription(e.target.value),
@@ -1515,6 +1522,7 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
     const result = await streamPost(`/stories/${slug}/steps/${apiStepKey}/generate`, {
       instructions: description.trim() || null,
       model: model || undefined,
+      attachments: attachments || undefined,
     }, {
       onLog: (text) => setOutput(prev => (prev + text).slice(-10000)),
       onStatus: () => {},
@@ -1751,6 +1759,17 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
         React.createElement('p', { className: 'text-xs text-slate-500 text-center' },
           'The AI reviews automatically. Click "Apply to code" to apply suggested fixes.'
         )
+      ),
+
+      // Show attachments list always (even when content exists)
+      hasContent && attachments?.length > 0 && React.createElement('div', { className: 'flex flex-wrap gap-2 px-1' },
+        ...attachments.map(a => React.createElement('span', {
+          key: a.filename,
+          className: 'flex items-center gap-1 px-2 py-1 bg-slate-800 rounded text-xs text-slate-400',
+        },
+          /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(a.filename) ? '\uD83D\uDDBC\uFE0F' : '\uD83D\uDCC4',
+          a.filename,
+        )),
       ),
 
       // Regular steps: Generate section (not for chat-first steps)
@@ -3361,6 +3380,8 @@ export function StoryView({ slug, context = 'product' }) {
   const [syncConfigured, setSyncConfigured] = React.useState(false);
   const [showPushModal, setShowPushModal] = React.useState(false);
   const [syncing, setSyncing] = React.useState(false);
+  const [pullPreviewData, setPullPreviewData] = React.useState(null);
+  const [pullingStory, setPullingStory] = React.useState(false);
 
   const contextConfig = CONTEXT_CONFIG[context];
 
@@ -3517,7 +3538,23 @@ export function StoryView({ slug, context = 'product' }) {
                   setShowPushModal(true);
                 }
               },
-            }, syncing ? '\u21D7 Pushing...' : (externalLink ? '\u21D7 Push update' : '\u21D7 Push to ClickUp'))
+            }, syncing ? '\u21D7 Pushing...' : (externalLink ? '\u21D7 Push update' : '\u21D7 Push to ClickUp')),
+            externalLink && React.createElement('button', {
+              className: `px-3 py-1 text-xs rounded-full border transition-colors ${pullingStory ? 'bg-slate-700 text-slate-400 border-slate-600' : 'bg-sky-500/20 text-sky-300 border-sky-500/30 hover:bg-sky-500/30'}`,
+              disabled: pullingStory,
+              onClick: async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setPullingStory(true);
+                try {
+                  const preview = await api.post('/integrations/pull-preview', { externalId: externalLink.taskId });
+                  setPullPreviewData(preview);
+                } catch (err) {
+                  alert(`Pull failed: ${err.message}`);
+                }
+                setPullingStory(false);
+              },
+            }, pullingStory ? '\u21D9 Checking...' : '\u21D9 Pull from ClickUp')
           ),
           React.createElement('h1', { className: 'text-2xl font-bold text-white mb-1' }, story.title || story.name || slug),
           story.description && React.createElement('p', { className: 'text-slate-400' }, story.description)
@@ -3636,6 +3673,61 @@ export function StoryView({ slug, context = 'product' }) {
         const linkData = await api.get(`/integrations/link/${slug}`).catch(() => null);
         setExternalLink(linkData?.url ? linkData : null);
       },
-    })
+    }),
+
+    // Pull preview/confirm modal
+    pullPreviewData && React.createElement('div', {
+      className: 'fixed inset-0 bg-black/60 flex items-center justify-center z-50',
+      onClick: e => { if (e.target === e.currentTarget) setPullPreviewData(null); },
+    },
+      React.createElement('div', { className: 'bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-xl' },
+        React.createElement('div', { className: 'flex items-center justify-between mb-3' },
+          React.createElement('h3', { className: 'text-sm font-bold text-white' },
+            pullPreviewData.isNew ? 'Import new story' : `Update "${slug}"`),
+          React.createElement('button', { className: 'text-slate-400 hover:text-white', onClick: () => setPullPreviewData(null) }, '\u00D7'),
+        ),
+        React.createElement('div', { className: 'space-y-1 mb-4 max-h-60 overflow-y-auto' },
+          ...(pullPreviewData.changes || []).map(c =>
+            React.createElement('div', {
+              key: c.file,
+              className: 'flex items-center gap-2 text-xs px-2 py-1 rounded ' +
+                (c.status === 'new' ? 'bg-emerald-900/30 text-emerald-400' :
+                 c.status === 'modified' ? 'bg-amber-900/30 text-amber-400' :
+                 'bg-slate-800/50 text-slate-500'),
+            },
+              React.createElement('span', { className: 'w-16 flex-shrink-0 font-medium' },
+                c.status === 'new' ? '+ NEW' : c.status === 'modified' ? '\u2794 MODIFIED' : '\u2713 same'),
+              React.createElement('span', { className: 'truncate' }, c.file),
+            ),
+          ),
+        ),
+        (() => {
+          const modCount = (pullPreviewData.changes || []).filter(c => c.status === 'modified').length;
+          return modCount > 0 && React.createElement('div', { className: 'text-[10px] text-amber-500 mb-3' },
+            `${modCount} file(s) will be overwritten with remote version`);
+        })(),
+        React.createElement('div', { className: 'flex gap-2' },
+          React.createElement('button', {
+            className: 'px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-xs',
+            onClick: () => setPullPreviewData(null),
+          }, 'Cancel'),
+          React.createElement('button', {
+            className: 'px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs disabled:opacity-40',
+            disabled: pullingStory,
+            onClick: async () => {
+              setPullingStory(true);
+              try {
+                await api.post('/integrations/pull', { externalId: pullPreviewData.taskId });
+                setPullPreviewData(null);
+                loadData(); // refresh story view
+              } catch (err) {
+                alert(`Pull failed: ${err.message}`);
+              }
+              setPullingStory(false);
+            },
+          }, pullingStory ? 'Pulling...' : 'Confirm Pull'),
+        ),
+      ),
+    )
   );
 }

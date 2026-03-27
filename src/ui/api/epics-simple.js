@@ -434,12 +434,41 @@ export function registerSimpleEpicRoutes(router) {
       // Load config to get user preferences
       const config = await loadConfig(root);
 
+      // Resolve attachments for the prompt
+      const attachDir = path.join(storyDir, 'attachments');
+      let attachmentSection = '';
+      if (await fs.pathExists(attachDir)) {
+        const attachFiles = await fs.readdir(attachDir);
+        if (attachFiles.length > 0) {
+          const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'];
+          const images = attachFiles.filter(f => imageExts.includes(path.extname(f).toLowerCase()));
+          const textFiles = attachFiles.filter(f => !imageExts.includes(path.extname(f).toLowerCase()));
+
+          if (images.length > 0) {
+            attachmentSection += '\nCRITICAL — ATTACHED IMAGES:\nYou MUST read each image below with the Read tool BEFORE generating your response.\n';
+            for (const img of images) {
+              attachmentSection += `  >>> Read this image: ${path.join(attachDir, img)}\n`;
+            }
+            attachmentSection += 'Use the visual content from these images to inform your document.\n';
+          }
+
+          for (const tf of textFiles) {
+            try {
+              const content = await fs.readFile(path.join(attachDir, tf), 'utf-8');
+              if (content.length < 50000) {
+                attachmentSection += `\n--- Attached file: ${tf} ---\n${content}\n--- End of ${tf} ---\n`;
+              }
+            } catch { /* skip */ }
+          }
+        }
+      }
+
       // Build enrichment prompt
       const enrichPrompt = `You are a product discovery assistant helping to structure a story/feature idea.
 
 USER INPUT:
 ${description}
-
+${attachmentSection}
 TASK:
 Transform this input into a well-structured discovery document in Markdown format.
 
@@ -476,9 +505,12 @@ IMPORTANT:
 
       sseSend('status', { status: 'generating', message: 'AI is structuring the story...' });
 
+      // Use readOnly mode so the model can Read image files
+      const hasImages = attachmentSection.includes('Read this image');
       const callResult = await callModel(model, enrichPrompt, {
         verbose: false,
         apply: false,
+        readOnly: hasImages,
         onData
       });
       const enrichedContent = callResult.output;
@@ -830,9 +862,21 @@ ${content}`;
       }
 
       const isCodeStep = CODE_STEPS.has(params.step);
+
+      // Resolve attachment paths from filenames to absolute paths on disk
+      let resolvedAttachments;
+      if (body.attachments?.length) {
+        const attachDir = path.join(storyDir, 'attachments');
+        resolvedAttachments = body.attachments.map(a => ({
+          filename: a.filename,
+          path: path.join(attachDir, a.filename),
+        }));
+      }
+
       const result = await runStep(params.step, params.slug, {
         description: body.instructions || body.description || '',
         model: body.model || undefined,
+        attachments: resolvedAttachments,
         verbose: true,
         apply: isCodeStep,
         readOnly: !isCodeStep,
@@ -1753,10 +1797,21 @@ INSTRUCTIONS:
       // Check if init.md is just the default template (contains the placeholder comment)
       const isDefaultTemplate = initContent.includes('<!-- Describe your story here') ||
                                 initContent.includes('<!-- Add epic description here');
+      // Load attachments from story dir
+      const attachDir = path.join(storyDir, 'attachments');
+      let storyAttachments = [];
+      if (await fs.pathExists(attachDir)) {
+        const files = await fs.readdir(attachDir);
+        storyAttachments = files.map(f => ({
+          filename: f,
+          url: `/api/features/${params.slug}/attachments/${encodeURIComponent(f)}`,
+        }));
+      }
+
       const init = {
         input: (isEnriched || isDefaultTemplate) ? '' : initContent,
         enriched: isEnriched ? initContent : null,
-        attachments: [],
+        attachments: storyAttachments,
       };
 
       // Get epic info if story has an epic

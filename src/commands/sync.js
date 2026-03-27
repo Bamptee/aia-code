@@ -100,14 +100,9 @@ export function registerSyncCommand(program) {
         const epicAs = (await ask(rl, 'Map epics as [folder/list] (folder): ')).trim() || 'folder';
 
         // 8. Auto options
-        const autoPush = (await ask(rl, 'Enable auto-push after each step? [Y/n]: ')).trim().toLowerCase() !== 'n';
-        const autoPullCheck = (await ask(rl, 'Check for remote changes before run? [Y/n]: ')).trim().toLowerCase() !== 'n';
-
         // 9. Save config
         const syncConfig = {
           provider: 'clickup',
-          auto_push: autoPush,
-          auto_pull_check: autoPullCheck,
           clickup: {
             workspace_id: workspaceId,
             space_id: spaceId,
@@ -133,8 +128,6 @@ export function registerSyncCommand(program) {
         console.log(`  Space: ${chalk.cyan(spaceId)}`);
         console.log(`  Default List: ${chalk.cyan(defaultListId || '(not set)')}`);
         console.log(`  Epic as: ${chalk.cyan(epicAs)}`);
-        console.log(`  Auto-push: ${autoPush ? chalk.green('enabled') : chalk.dim('disabled')}`);
-        console.log(`  Auto-pull check: ${autoPullCheck ? chalk.green('enabled') : chalk.dim('disabled')}`);
 
         // 11. .gitignore recommendation
         console.log(chalk.yellow('\n⚠ Recommended: Add these entries to your .gitignore:'));
@@ -167,8 +160,7 @@ export function registerSyncCommand(program) {
 
         console.log(chalk.bold('\nSync Configuration:'));
         console.log(`  Provider: ${chalk.cyan(syncConfig.provider)}`);
-        console.log(`  Auto-push: ${syncConfig.auto_push ? chalk.green('enabled') : chalk.dim('disabled')}`);
-        console.log(`  Auto-pull check: ${syncConfig.auto_pull_check ? chalk.green('enabled') : chalk.dim('disabled')}`);
+
 
         if (syncConfig.provider === 'clickup' && syncConfig.clickup) {
           console.log(`  Workspace ID: ${chalk.cyan(syncConfig.clickup.workspace_id || '(not set)')}`);

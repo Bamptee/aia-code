@@ -698,14 +698,61 @@ export async function buildPrompt(feature, step, { description, instructions, hi
 
   if (attachments && attachments.length > 0) {
     parts.push('=== ATTACHMENTS ===\n');
-    parts.push('The user has attached the following files. Use the Read tool to view them:\n');
+
+    const imageExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
+    const textExts = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.csv', '.xml', '.html']);
+    const images = [];
+    const textFiles = [];
+    const otherFiles = [];
+
     for (const a of attachments) {
-      // F11: Sanitize filename to prevent prompt injection
       const safeFilename = String(a.filename || 'unknown').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 255);
       const safePath = String(a.path || '').slice(0, 1000);
-      parts.push(`- ${safeFilename}: ${safePath}`);
+      const ext = path.extname(safeFilename).toLowerCase();
+
+      if (imageExts.has(ext)) {
+        images.push({ filename: safeFilename, path: safePath });
+      } else if (textExts.has(ext)) {
+        textFiles.push({ filename: safeFilename, path: safePath });
+      } else {
+        otherFiles.push({ filename: safeFilename, path: safePath });
+      }
     }
-    parts.push('');
+
+    // Images: force the model to read them before doing anything else
+    if (images.length > 0) {
+      parts.push('CRITICAL INSTRUCTION — IMAGES ATTACHED:');
+      parts.push('The user has provided image files as context. Before producing any output, you MUST call the Read tool on EACH of the following image paths to view them. Do NOT skip this step. Do NOT say you cannot see images — the Read tool will display them to you.\n');
+      for (const img of images) {
+        parts.push(`  >>> Read this image file: ${img.path}`);
+      }
+      parts.push('\nAfter reading ALL images above, use their visual content to inform your response.\n');
+    }
+
+    // Text files: inline their content directly for immediate access
+    for (const tf of textFiles) {
+      try {
+        const content = await fs.readFile(tf.path, 'utf-8');
+        if (content.length < 50000) { // Only inline if reasonable size
+          parts.push(`--- Content of ${tf.filename} ---`);
+          parts.push(content);
+          parts.push(`--- End of ${tf.filename} ---\n`);
+        } else {
+          parts.push(`- ${tf.filename}: Read file at: ${tf.path} (${Math.round(content.length / 1024)}KB)`);
+        }
+      } catch {
+        parts.push(`- ${tf.filename}: ${tf.path}`);
+      }
+    }
+
+    // Other files: list paths
+    if (otherFiles.length > 0) {
+      parts.push('Other attached files (read with Read tool if needed):');
+      for (const f of otherFiles) {
+        parts.push(`- ${f.filename}: ${f.path}`);
+      }
+      parts.push('');
+    }
   }
 
   if (context) {

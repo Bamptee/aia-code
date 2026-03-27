@@ -14,6 +14,7 @@ import {
   pushStory,
   pushStep,
   pullStory,
+  previewPull,
   getStoryExternalLink,
   batchCheckForChanges,
 } from '../../services/sync-service.js';
@@ -160,8 +161,8 @@ export function registerIntegrationRoutes(router) {
 
       const syncConfig = {
         provider: 'clickup',
-        auto_push: body.autoPush ?? existing?.auto_push ?? true,
-        auto_pull_check: body.autoPullCheck ?? existing?.auto_pull_check ?? true,
+        auto_push: body.autoPush ?? existing?.auto_push ?? false,
+        auto_pull_check: body.autoPullCheck ?? existing?.auto_pull_check ?? false,
         clickup: {
           workspace_id: body.workspaceId || existing?.clickup?.workspace_id || '',
           space_id: body.spaceId || existing?.clickup?.space_id || '',
@@ -289,12 +290,24 @@ export function registerIntegrationRoutes(router) {
     }
   });
 
+  // Preview pull (dry-run)
+  router.post('/api/integrations/pull-preview', async (req, res, { root, parseBody }) => {
+    try {
+      const body = await parseBody(req);
+      if (!body.externalId) return error(res, 'externalId is required', 400);
+      const result = await previewPull(body.externalId, root);
+      json(res, result);
+    } catch (err) {
+      error(res, err.message, 500);
+    }
+  });
+
   router.post('/api/integrations/pull', async (req, res, { root, parseBody }) => {
     try {
       const body = await parseBody(req);
       if (!body.externalId) return error(res, 'externalId is required', 400);
 
-      const result = await pullStory(body.externalId, root, { force: body.force });
+      const result = await pullStory(body.externalId, root, { force: true });
       if (result.conflict) {
         return error(res, result.message, 409);
       }

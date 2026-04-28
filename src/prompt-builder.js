@@ -7,6 +7,7 @@ import {
   FEATURE_STEPS,
   STEP_ORDER,
   LEGACY_FEATURES_DIR,
+  CODE_STEPS,
   getSkippedSteps,
 } from './constants.js';
 import { loadConfig } from './models.js';
@@ -646,6 +647,18 @@ export async function buildPrompt(feature, step, { description, instructions, hi
   const parts = [];
 
   parts.push('IMPORTANT: You are working on a feature development pipeline. Everything you need is provided below in this prompt. Do NOT attempt to read, search for, or reference any external files. Do NOT say files are missing. Work exclusively with the content given below.\n');
+
+  // Output mode: for non-code steps, the orchestrator captures stdout and writes the file itself.
+  // The Write/Edit/Bash tools are not granted in this mode — calling them triggers permission gating
+  // and the model ends up apologizing and printing the content inline. Tell it upfront.
+  const normalizedStepForMode = STEP_FILE_MAP[step] || step;
+  if (!CODE_STEPS.has(normalizedStepForMode)) {
+    parts.push('=== OUTPUT MODE ===\n');
+    parts.push('Produce the document as your direct text response. Your stdout is captured and saved to disk automatically by the orchestrator — you do not need to (and must not) write any file yourself.');
+    parts.push('Do NOT call the Write, Edit, or Bash tools. They are not granted for this step and any attempt will be blocked.');
+    parts.push('If the instructions below use verbs like "create", "modify", "write", or list "Files:" / "Action:" fields, treat those as descriptive content of the document you are producing — never as actions to perform via tools.');
+    parts.push('Read, Glob, and Grep may be used if you genuinely need to inspect the codebase, but the final deliverable is text only.\n');
+  }
 
   // Worktree workspace isolation - if wtPath is provided, all file operations must use it
   if (wtPath) {

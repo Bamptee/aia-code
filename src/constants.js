@@ -42,7 +42,7 @@ export const STEPS = Object.freeze({
   'spec-tech': { phase: 'dev', required: false, type: 'generate' },
   'dev-plan': { phase: 'dev', required: false, type: 'generate' },
   'implement': { phase: 'dev', required: false, type: 'generate' },
-  'review': { phase: 'dev', required: false, type: 'chat-only' },
+  'review': { phase: 'dev', required: false, type: 'generate' },
 });
 
 /**

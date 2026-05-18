@@ -125,7 +125,7 @@ const STEP_CONFIG = {
   specTech: { name: 'Spec Tech', icon: '🛠️', color: 'violet', phase: 'dev', description: 'Technical specification', type: 'generate' },
   devPlan: { name: 'Dev Plan', icon: '📝', color: 'cyan', phase: 'dev', description: 'Implementation tasks', type: 'generate' },
   implement: { name: 'Implement', icon: '💻', color: 'green', phase: 'dev', description: 'Code implementation', type: 'generate' },
-  review: { name: 'Review', icon: '✅', color: 'purple', phase: 'dev', description: 'Code review', type: 'chat-only' },
+  review: { name: 'Review', icon: '✅', color: 'purple', phase: 'dev', description: 'Code review', type: 'generate' },
   // Legacy aliases for backward compatibility
   brief: { name: 'Brief', icon: '📋', color: 'emerald', phase: 'product', description: 'High-level summary', type: 'generate', legacy: true },
   baSpec: { name: 'BA Spec', icon: '📊', color: 'blue', phase: 'product', description: 'Business analysis', type: 'generate', legacy: true },

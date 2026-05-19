@@ -18,7 +18,7 @@ export function Avatar({ initials, size = 32 }: AvatarProps) {
       style={{
         width: size,
         height: size,
-        fontSize: Math.round(size * 0.4),
+        fontSize: Math.max(9, Math.round(size * 0.42)),
         backgroundImage: `linear-gradient(135deg, ${from} 0%, ${to} 100%)`,
       }}
     >

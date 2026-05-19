@@ -85,7 +85,7 @@ function PhaseCluster({ label, phase, steps, story, activeStep }: PhaseClusterPr
       className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-bg py-0.5 pl-2 pr-1.5"
     >
       <span
-        className="mr-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.06em]"
+        className="mr-1 font-mono text-[10.5px] uppercase tracking-[0.06em]"
         style={{
           color: phase === 'product' ? 'var(--phase-product)' : 'var(--phase-dev)',
         }}
@@ -117,7 +117,7 @@ function StepPill({ step, state, isActive }: StepPillProps) {
   const handleClick = () => setSearchParam('step', step);
 
   let pillClass =
-    'inline-flex shrink-0 items-center gap-1.5 rounded-full border border-transparent px-2.5 py-0.5 text-xs transition-colors whitespace-nowrap ';
+    'inline-flex shrink-0 items-center gap-[5px] rounded-full border border-transparent px-[9px] py-[3px] text-xs transition-colors whitespace-nowrap ';
   if (isActive) {
     pillClass += 'bg-accent font-medium text-accent-ink';
   } else if (status === 'done') {
@@ -138,13 +138,16 @@ function StepPill({ step, state, isActive }: StepPillProps) {
     >
       <StatusDot status={status} isActive={isActive} />
       <span>{STEP_LABEL[step]}</span>
-      {typeof tokens === 'number' && tokens > 0 && (
-        <span className={'font-mono text-[10px] ' + (isActive ? 'text-accent-ink/80' : 'text-text-3')}>
-          {tokens}
-        </span>
+      {typeof tokens === 'number' && tokens > 0 && !isActive && (
+        <span className="ml-0.5 font-mono text-[10px] text-text-3">{formatTokens(tokens)}</span>
       )}
     </button>
   );
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
 }
 
 function StatusDot({ status, isActive }: { status: StepState['status']; isActive: boolean }) {

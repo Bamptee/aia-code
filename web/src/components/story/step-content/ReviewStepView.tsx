@@ -31,15 +31,23 @@ export function ReviewStepView({ story }: ReviewStepViewProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <header className="mb-3 flex items-start gap-3">
+      <section className="overflow-hidden rounded border border-border bg-surface">
+        <header className="flex items-start gap-3 border-b border-border px-4 py-3">
           <PrPill pr={pr} size="lg" />
           <div className="flex flex-1 flex-col gap-1">
-            <h3 className="text-sm font-semibold text-text">{pr.title}</h3>
-            <div className="flex items-center gap-2 text-[11px] text-text-3">
+            <h3
+              className="text-[14.5px] font-semibold text-text"
+              style={{ letterSpacing: '-0.005em' }}
+            >
+              {pr.title}
+            </h3>
+            <div className="flex items-center gap-2 font-mono text-[11.5px] text-text-3">
               <span>{pr.author}</span>
               <span>·</span>
-              <span>+{pr.additions} / -{pr.deletions}</span>
+              <span>
+                <span className="text-green">+{pr.additions}</span>{' '}
+                <span className="text-red">−{pr.deletions}</span>
+              </span>
               <span>·</span>
               <span>→ {pr.target}</span>
             </div>
@@ -47,21 +55,21 @@ export function ReviewStepView({ story }: ReviewStepViewProps) {
         </header>
 
         {pr.reviewers && pr.reviewers.length > 0 && (
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-text-3">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-[14px]">
+            <h4 className="font-mono text-[11.5px] uppercase tracking-[0.06em] text-text-3">
               Reviewers
-            </span>
+            </h4>
             <ReviewerStack reviewers={pr.reviewers} />
           </div>
         )}
 
         {pr.pipeline && pr.pipeline.checks.length > 0 && (
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-text-3">
+          <div className="flex items-center gap-2 px-4 py-2">
+            <h4 className="font-mono text-[11.5px] uppercase tracking-[0.06em] text-text-3">
               Pipeline
-            </span>
+            </h4>
             <PipelineStack checks={pr.pipeline.checks} />
-            <span className="text-[10px] text-text-3">{pr.pipeline.status}</span>
+            <span className="font-mono text-[11.5px] text-text-3">{pr.pipeline.status}</span>
           </div>
         )}
       </section>

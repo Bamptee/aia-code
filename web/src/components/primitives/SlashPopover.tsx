@@ -59,17 +59,28 @@ export function SlashPopover({ commands, query, onSelect, onClose }: SlashPopove
     return () => window.removeEventListener('keydown', handler);
   }, [filtered, selectedIndex, onSelect, onClose]);
 
+  // Shadow box-shadow handoff (custom, plus subtil que shadow-lg Tailwind).
+  const shadowStyle: React.CSSProperties = {
+    boxShadow: '0 8px 24px -4px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.04)',
+  };
+
   if (filtered.length === 0) {
     return (
-      <div className="absolute bottom-full left-0 mb-1 w-full overflow-hidden rounded-lg border border-border bg-surface shadow-lg">
-        <div className="px-3 py-2 text-xs text-text-3">No matching commands</div>
+      <div
+        className="absolute bottom-full left-0 mb-1.5 min-w-[260px] overflow-hidden rounded border border-border bg-surface p-1"
+        style={shadowStyle}
+      >
+        <div className="px-2.5 py-1.5 text-[12.5px] text-text-3">No matching commands</div>
       </div>
     );
   }
 
   return (
-    <div className="absolute bottom-full left-0 mb-1 max-h-60 w-full overflow-y-auto rounded-lg border border-border bg-surface shadow-lg">
-      <ul role="listbox">
+    <div
+      className="absolute bottom-full left-0 mb-1.5 max-h-60 min-w-[260px] overflow-y-auto rounded border border-border bg-surface p-1"
+      style={shadowStyle}
+    >
+      <ul role="listbox" className="flex flex-col gap-0.5">
         {filtered.map((cmd, i) => {
           const isSelected = i === selectedIndex;
           return (
@@ -80,14 +91,18 @@ export function SlashPopover({ commands, query, onSelect, onClose }: SlashPopove
               onClick={() => onSelect(cmd)}
               onMouseEnter={() => setSelectedIndex(i)}
               className={
-                'flex cursor-pointer items-center gap-2 px-3 py-2 text-xs ' +
+                'grid cursor-pointer items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-[12.5px] ' +
                 (isSelected ? 'bg-surface-hover text-text' : 'text-text-2')
               }
+              style={{ gridTemplateColumns: '18px 1fr auto' }}
             >
-              <span className="font-mono text-text">/{cmd.command}</span>
-              <span className="flex-1 text-text-3">{cmd.description}</span>
+              <span className="font-mono text-[11px] text-text-3">/</span>
+              <span className="flex flex-col">
+                <span className="font-mono text-text">{cmd.command}</span>
+                <span className="text-[11px] text-text-3">{cmd.description}</span>
+              </span>
               {cmd.hint && (
-                <span className="font-mono text-[10px] text-text-3">{cmd.hint}</span>
+                <span className="font-mono text-[10.5px] text-text-3">{cmd.hint}</span>
               )}
             </li>
           );

@@ -23,7 +23,9 @@ interface StoryHeaderProps {
  */
 export function StoryHeader({ story }: StoryHeaderProps) {
   const searchParams = useSearchParams();
-  const isReadMode = searchParams?.get('read') === '1';
+  const readParam = searchParams?.get('read');
+  const isReadMode =
+    readParam === '1' || (readParam !== '0' && story.phase === 'done');
   const toast = useToast();
   const [kebabOpen, setKebabOpen] = useState(false);
   const kebabRef = useRef<HTMLDivElement>(null);
@@ -41,7 +43,11 @@ export function StoryHeader({ story }: StoryHeaderProps) {
   }, [kebabOpen]);
 
   const toggleRead = () => {
-    setSearchParam('read', isReadMode ? null : '1');
+    if (isReadMode) {
+      setSearchParam('read', story.phase === 'done' ? '0' : null);
+    } else {
+      setSearchParam('read', '1');
+    }
   };
 
   const share = async () => {

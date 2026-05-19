@@ -125,3 +125,28 @@ code, kbd, samp, pre {
   --animate-slide-in-up: slide-in-up 200ms ease-out;
 }
 
+/* ──────────────────────────────────────────────────────────────────
+ * Roadmap Gantt diagonal stripes (Epic 6 / handoff §9)
+ * Overlays `in-progress` sur les step segments
+ * ─────────────────────────────────────────────────────────────── */
+
+.stripes-product {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--phase-product) 0,
+    var(--phase-product) 4px,
+    color-mix(in srgb, var(--phase-product) 60%, white) 4px,
+    color-mix(in srgb, var(--phase-product) 60%, white) 8px
+  );
+}
+
+.stripes-dev {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--phase-dev) 0,
+    var(--phase-dev) 4px,
+    color-mix(in srgb, var(--phase-dev) 60%, white) 4px,
+    color-mix(in srgb, var(--phase-dev) 60%, white) 8px
+  );
+}
+

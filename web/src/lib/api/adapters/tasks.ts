@@ -41,9 +41,20 @@ function asStatus(raw: unknown): TaskStatus {
 }
 
 function asPriority(raw: unknown): TaskPriority {
-  return typeof raw === 'string' && (VALID_PRIORITIES as readonly string[]).includes(raw)
-    ? (raw as TaskPriority)
-    : 'med';
+  if (typeof raw !== 'string') return 'med';
+  const lc = raw.toLowerCase();
+  return (VALID_PRIORITIES as readonly string[]).includes(lc) ? (lc as TaskPriority) : 'med';
+}
+
+/**
+ * URL safe pour `<a href>` externe : http(s) ou mailto uniquement.
+ * Bloque javascript: / data: / file: qui peuvent porter du XSS.
+ */
+function asSafeUrl(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if (/^https?:\/\//i.test(trimmed) || /^mailto:/i.test(trimmed)) return trimmed;
+  return '';
 }
 
 function asStep(raw: unknown): StepKey | null {
@@ -136,7 +147,7 @@ function parseClickUpLink(raw: unknown): ClickUpLink | null {
   return {
     id: r.id,
     list: asString(r.list),
-    url: asString(r.url),
+    url: asSafeUrl(r.url),
   };
 }
 

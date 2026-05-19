@@ -49,6 +49,9 @@ export function TaskDetailPanel({ taskId }: TaskDetailPanelProps) {
   const onCommentSubmit = (body: string) => {
     addComment.mutate({ taskId: detail.id, body, author: SELF_AUTHOR });
   };
+  const onCommentRetry = (commentId: string, body: string) => {
+    addComment.mutate({ taskId: detail.id, body, author: SELF_AUTHOR, retryCommentId: commentId });
+  };
 
   return (
     <aside className="flex w-[340px] shrink-0 flex-col overflow-y-auto border-l border-border">
@@ -56,7 +59,7 @@ export function TaskDetailPanel({ taskId }: TaskDetailPanelProps) {
         <div className="flex items-center gap-2 text-[11px]">
           <span className="font-mono text-text-3">{detail.id}</span>
           <StatusChip status={detail.status} withLabel />
-          {detail.clickup && (
+          {detail.clickup && detail.clickup.url && (
             <a
               href={detail.clickup.url}
               target="_blank"
@@ -100,7 +103,7 @@ export function TaskDetailPanel({ taskId }: TaskDetailPanelProps) {
             <CommentItem
               key={c.id}
               comment={c}
-              onRetry={c.failed ? () => onCommentSubmit(c.body) : undefined}
+              onRetry={c.failed ? () => onCommentRetry(c.id, c.body) : undefined}
             />
           ))}
         </div>
@@ -199,7 +202,7 @@ function CommentItem({ comment, onRetry }: { comment: TaskComment; onRetry?: () 
   return (
     <div
       className={
-        'rounded border p-2 transition-opacity ' +
+        'rounded border p-2 transition-opacity duration-200 ' +
         (comment.failed
           ? 'border-red bg-red-soft/30'
           : 'border-border bg-surface')

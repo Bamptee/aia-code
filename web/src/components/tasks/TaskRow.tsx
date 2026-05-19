@@ -41,13 +41,7 @@ export function TaskRow({ task, active, onSelect }: TaskRowProps) {
       <PriorityIcon priority={task.priority} />
       {task.assignee && <Avatar initials={task.assignee.initials} size={22} />}
       <span className="w-16 truncate text-right text-[11px] text-text-3">{task.due}</span>
-      <span
-        role="button"
-        aria-label="Task actions"
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        className="text-text-3 hover:text-text"
-      >
+      <span aria-hidden className="text-text-3">
         <MoreHorizontal size={14} />
       </span>
     </button>

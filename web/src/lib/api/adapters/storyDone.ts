@@ -15,6 +15,23 @@ import type {
   Artifact,
   Learning,
 } from '@/lib/types/storyDone';
+import type { StepKey } from '@/lib/types/step';
+
+const VALID_STEPS: readonly StepKey[] = [
+  'init',
+  'brainstorming',
+  'spec-func',
+  'spec-tech',
+  'dev-plan',
+  'implement',
+  'review',
+];
+
+function asStep(raw: unknown): StepKey | null {
+  return typeof raw === 'string' && (VALID_STEPS as readonly string[]).includes(raw)
+    ? (raw as StepKey)
+    : null;
+}
 
 function parseOutcomeKPI(raw: unknown): OutcomeKPI | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -32,7 +49,7 @@ function parseChapter(raw: unknown): Chapter | null {
   const r = raw as Record<string, unknown>;
   if (typeof r.title !== 'string' || typeof r.body !== 'string') return null;
   return {
-    step: typeof r.step === 'string' ? r.step : '',
+    step: asStep(r.step),
     kicker: typeof r.kicker === 'string' ? r.kicker : '',
     when: typeof r.when === 'string' ? r.when : '',
     title: r.title,

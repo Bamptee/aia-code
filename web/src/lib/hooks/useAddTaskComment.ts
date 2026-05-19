@@ -8,6 +8,12 @@ interface AddCommentArgs {
   taskId: string;
   body: string;
   author: { initials: string; name: string };
+  /**
+   * Si fourni, on retente une mutation in-place sur ce comment failed existant
+   * (mute en pending, clear failed) au lieu de créer un nouveau comment optimistic.
+   * Évite la duplication silencieuse sur retry (cf. review Epic 5 D2/P2).
+   */
+  retryCommentId?: string;
 }
 
 /**
@@ -37,23 +43,34 @@ export function useAddTaskComment() {
         createdAt: typeof r.time === 'string' ? r.time : new Date().toISOString(),
       };
     },
-    onMutate: async ({ taskId, body, author }) => {
+    onMutate: async ({ taskId, body, author, retryCommentId }) => {
       await qc.cancelQueries({ queryKey: ['task-detail', taskId] });
       const previous = qc.getQueryData<TaskDetail | null>(['task-detail', taskId]) ?? null;
-      const tempId = `pending-${Date.now()}`;
+      const tempId = retryCommentId ?? `pending-${Date.now()}`;
       if (previous) {
-        const optimistic: TaskComment = {
-          id: tempId,
-          body,
-          authorInitials: author.initials,
-          authorName: author.name,
-          createdAt: new Date().toISOString(),
-          pending: true,
-        };
-        qc.setQueryData<TaskDetail>(['task-detail', taskId], {
-          ...previous,
-          comments: [...previous.comments, optimistic],
-        });
+        const exists = retryCommentId && previous.comments.some((c) => c.id === retryCommentId);
+        if (exists) {
+          // Retry in-place : mute en pending, clear failed, garde le même id.
+          qc.setQueryData<TaskDetail>(['task-detail', taskId], {
+            ...previous,
+            comments: previous.comments.map((c) =>
+              c.id === retryCommentId ? { ...c, pending: true, failed: false } : c,
+            ),
+          });
+        } else {
+          const optimistic: TaskComment = {
+            id: tempId,
+            body,
+            authorInitials: author.initials,
+            authorName: author.name,
+            createdAt: new Date().toISOString(),
+            pending: true,
+          };
+          qc.setQueryData<TaskDetail>(['task-detail', taskId], {
+            ...previous,
+            comments: [...previous.comments, optimistic],
+          });
+        }
       }
       return { previous, tempId };
     },

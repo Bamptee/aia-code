@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { GitBranch, RefreshCw } from 'lucide-react';
+import { GitBranch, RefreshCw, X } from 'lucide-react';
 import { PhaseBadge } from '@/components/primitives/PhaseBadge';
 import { Skeleton } from '@/components/primitives/Skeleton';
 import { useToast } from '@/components/primitives/Toast';
@@ -169,32 +169,19 @@ export function BitbucketPanel() {
         <h4 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-text-3">
           Required pipelines per step
         </h4>
-        <div className="grid grid-cols-[120px_1fr] items-start gap-x-3 gap-y-2 text-sm">
-          {STEPS.map((step) => {
-            const checks = data.stepPipelines[step] ?? [];
-            return (
-              <div key={step} className="contents">
-                <span className="pt-1 font-mono text-[11px] text-text-3">{step}</span>
-                <input
-                  type="text"
-                  value={checks.join(', ')}
-                  onChange={(e) =>
-                    change({
-                      stepPipelines: {
-                        ...data.stepPipelines,
-                        [step]: e.target.value
-                          .split(',')
-                          .map((s) => s.trim())
-                          .filter(Boolean),
-                      },
-                    })
-                  }
-                  placeholder="lint, typecheck, e2e"
-                  className="rounded border border-border bg-surface px-2 py-1 font-mono text-[12px] text-text outline-none focus:border-accent"
-                />
-              </div>
-            );
-          })}
+        <div className="space-y-2 text-sm">
+          {STEPS.map((step) => (
+            <PipelinesEditor
+              key={step}
+              step={step}
+              checks={data.stepPipelines[step] ?? []}
+              onChange={(next) =>
+                change({
+                  stepPipelines: { ...data.stepPipelines, [step]: next },
+                })
+              }
+            />
+          ))}
         </div>
         <p className="mt-2 text-[11px] text-text-3">
           Story can&apos;t be marked done until every pipeline in{' '}
@@ -242,3 +229,67 @@ export function BitbucketPanel() {
   );
 }
 
+/**
+ * Sous-éditeur des pipelines (tag chips + input add-on-Enter).
+ * Évite le bug original "virgule dans input" qui découpait la saisie en cours.
+ */
+function PipelinesEditor({
+  step,
+  checks,
+  onChange,
+}: {
+  step: string;
+  checks: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [pending, setPending] = useState('');
+
+  const commit = () => {
+    const v = pending.trim();
+    if (!v) return;
+    if (!checks.includes(v)) onChange([...checks, v]);
+    setPending('');
+  };
+
+  const remove = (c: string) => onChange(checks.filter((x) => x !== c));
+
+  return (
+    <div className="grid grid-cols-[120px_1fr] items-start gap-x-3">
+      <span className="pt-1.5 font-mono text-[11px] text-text-3">{step}</span>
+      <div className="flex flex-wrap items-center gap-1 rounded border border-border bg-surface px-2 py-1">
+        {checks.map((c) => (
+          <span
+            key={c}
+            className="inline-flex items-center gap-1 rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-text-2"
+          >
+            {c}
+            <button
+              type="button"
+              onClick={() => remove(c)}
+              aria-label={`Remove ${c}`}
+              className="text-text-3 hover:text-red"
+            >
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          value={pending}
+          onChange={(e) => setPending(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault();
+              commit();
+            } else if (e.key === 'Backspace' && !pending && checks.length > 0) {
+              onChange(checks.slice(0, -1));
+            }
+          }}
+          onBlur={commit}
+          placeholder={checks.length === 0 ? 'lint, typecheck, e2e (Enter to add)' : ''}
+          className="min-w-[120px] flex-1 bg-transparent font-mono text-[12px] text-text outline-none"
+        />
+      </div>
+    </div>
+  );
+}

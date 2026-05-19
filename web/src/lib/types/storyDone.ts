@@ -21,8 +21,10 @@ export interface OutcomeKPI {
   delta?: string;
 }
 
+import type { StepKey } from './step';
+
 export interface Chapter {
-  step: string;
+  step: StepKey | null;
   kicker: string;
   when: string;
   title: string;

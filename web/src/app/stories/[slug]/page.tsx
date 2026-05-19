@@ -1,6 +1,6 @@
 'use client';
 
-import { use } from 'react';
+import { Suspense, use } from 'react';
 import { useStoryQuery } from '@/lib/hooks/useStoryQuery';
 import { StoryWorkspace } from '@/components/story/StoryWorkspace';
 import { Skeleton } from '@/components/primitives/Skeleton';
@@ -44,5 +44,17 @@ export default function StoryPage({
     );
   }
 
-  return <StoryWorkspace story={story} />;
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-col gap-3 p-6">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-8 w-2/3" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      }
+    >
+      <StoryWorkspace story={story} />
+    </Suspense>
+  );
 }

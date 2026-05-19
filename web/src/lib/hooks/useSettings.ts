@@ -61,50 +61,62 @@ interface PatchArgs<T> {
   patch: Partial<T>;
 }
 
+/**
+ * PATCH peut renvoyer 204/null si le backend ne re-fetch pas l'état. Dans ce cas,
+ * on invalide pour forcer un GET frais plutôt que d'overwrite le cache avec les
+ * defaults du parser (review Epic 7 P2 / D1).
+ */
+function isEmptyResponse(raw: unknown): boolean {
+  return raw === undefined || raw === null;
+}
+
 export function useUpdateBitbucketSettings() {
   const qc = useQueryClient();
-  return useMutation<BitbucketSettings, Error, PatchArgs<BitbucketSettings>>({
+  return useMutation<BitbucketSettings | null, Error, PatchArgs<BitbucketSettings>>({
     mutationFn: async ({ patch }) => {
       const raw = await apiFetch<unknown>('/api/settings/integrations/bitbucket', {
         method: 'PATCH',
         body: patch,
       });
-      return parseBitbucketSettings(raw);
+      return isEmptyResponse(raw) ? null : parseBitbucketSettings(raw);
     },
     onSuccess: (next) => {
-      qc.setQueryData(['settings', 'bitbucket'], next);
+      if (next) qc.setQueryData(['settings', 'bitbucket'], next);
+      else qc.invalidateQueries({ queryKey: ['settings', 'bitbucket'] });
     },
   });
 }
 
 export function useUpdateClickUpSettings() {
   const qc = useQueryClient();
-  return useMutation<ClickUpSettings, Error, PatchArgs<ClickUpSettings>>({
+  return useMutation<ClickUpSettings | null, Error, PatchArgs<ClickUpSettings>>({
     mutationFn: async ({ patch }) => {
       const raw = await apiFetch<unknown>('/api/settings/integrations/clickup', {
         method: 'PATCH',
         body: patch,
       });
-      return parseClickUpSettings(raw);
+      return isEmptyResponse(raw) ? null : parseClickUpSettings(raw);
     },
     onSuccess: (next) => {
-      qc.setQueryData(['settings', 'clickup'], next);
+      if (next) qc.setQueryData(['settings', 'clickup'], next);
+      else qc.invalidateQueries({ queryKey: ['settings', 'clickup'] });
     },
   });
 }
 
 export function useUpdateModelsConfig() {
   const qc = useQueryClient();
-  return useMutation<ModelsConfig, Error, PatchArgs<ModelsConfig>>({
+  return useMutation<ModelsConfig | null, Error, PatchArgs<ModelsConfig>>({
     mutationFn: async ({ patch }) => {
       const raw = await apiFetch<unknown>('/api/settings/models', {
         method: 'PATCH',
         body: patch,
       });
-      return parseModelsConfig(raw);
+      return isEmptyResponse(raw) ? null : parseModelsConfig(raw);
     },
     onSuccess: (next) => {
-      qc.setQueryData(['settings', 'models'], next);
+      if (next) qc.setQueryData(['settings', 'models'], next);
+      else qc.invalidateQueries({ queryKey: ['settings', 'models'] });
     },
   });
 }

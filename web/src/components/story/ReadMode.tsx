@@ -129,16 +129,17 @@ function Kicker({ story, data }: { story: Story; data: StoryDone }) {
   );
 }
 
+const PHASE_BY_STEP_CHAPTER: Record<StepKey, Phase> = {
+  init: 'product',
+  brainstorming: 'product',
+  'spec-func': 'product',
+  'spec-tech': 'dev',
+  'dev-plan': 'dev',
+  implement: 'dev',
+  review: 'dev',
+};
+
 function StoryArc({ story }: { story: Story }) {
-  const phaseByStep: Record<StepKey, Phase> = {
-    init: 'product',
-    brainstorming: 'product',
-    'spec-func': 'product',
-    'spec-tech': 'dev',
-    'dev-plan': 'dev',
-    implement: 'dev',
-    review: 'dev',
-  };
   const labelByStep: Record<StepKey, string> = {
     init: 'Init',
     brainstorming: 'Brain',
@@ -151,11 +152,11 @@ function StoryArc({ story }: { story: Story }) {
 
   return (
     <section className="mt-10">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-3">Story arc</h3>
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-text-3">Story arc</h2>
       <div className="mt-3 grid grid-cols-7 gap-1 overflow-hidden rounded">
         {STEP_KEYS.map((key) => {
           const status = story.steps[key]?.status;
-          const phase = phaseByStep[key];
+          const phase = PHASE_BY_STEP_CHAPTER[key];
           return (
             <div
               key={key}
@@ -191,7 +192,7 @@ function Outcome({ data }: { data: StoryDone }) {
   if (data.outcome.length === 0) return null;
   return (
     <section className="mt-10">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-3">Outcome</h3>
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-text-3">Outcome</h2>
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {data.outcome.map((kpi, i) => (
           <div key={i} className="rounded border border-border bg-surface p-3">
@@ -211,8 +212,10 @@ function Outcome({ data }: { data: StoryDone }) {
 
 function deltaToneClass(delta: string): string {
   const trimmed = delta.trim();
-  if (trimmed.startsWith('+') || /^\+?\d/.test(trimmed) || /\bup\b/i.test(trimmed)) return 'text-green';
-  if (trimmed.startsWith('-') || trimmed.startsWith('−') || /\bdown\b/i.test(trimmed)) return 'text-red';
+  // Seuls les prefixes explicites + / - / − colorent. Pas de regex permissive sur
+  // "42%" qui virerait vert sans intention de signe (review Epic 4 P3).
+  if (trimmed.startsWith('+')) return 'text-green';
+  if (trimmed.startsWith('-') || trimmed.startsWith('−')) return 'text-red';
   return 'text-text-3';
 }
 
@@ -220,14 +223,10 @@ function HowWeGotHere({ data }: { data: StoryDone }) {
   if (data.chapters.length === 0) return null;
   return (
     <section className="mt-10">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-3">How we got here</h3>
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-text-3">How we got here</h2>
       <ol className="mt-4 space-y-6 border-l border-border pl-5">
         {data.chapters.map((ch, i) => {
-          const phase = (
-            ch.step === 'spec-tech' || ch.step === 'dev-plan' || ch.step === 'implement' || ch.step === 'review'
-              ? 'dev'
-              : 'product'
-          ) as Phase;
+          const phase: Phase = ch.step ? PHASE_BY_STEP_CHAPTER[ch.step] : 'product';
           return (
             <li key={i} className="relative">
               <span
@@ -242,9 +241,9 @@ function HowWeGotHere({ data }: { data: StoryDone }) {
                 {ch.kicker && ch.when && <span>·</span>}
                 {ch.when && <span>{ch.when}</span>}
               </div>
-              <h2 className="mt-1 text-[20px] font-semibold leading-tight tracking-tight text-text [text-wrap:balance]">
+              <h3 className="mt-1 text-[20px] font-semibold leading-tight tracking-tight text-text [text-wrap:balance]">
                 {ch.title}
-              </h2>
+              </h3>
               <div className="mt-2 space-y-2 text-[15px] leading-relaxed text-text-2">
                 {ch.body.split(/\n\n+/).map((p, j) => (
                   <p key={j}>{p}</p>
@@ -280,7 +279,7 @@ function Decisions({ data }: { data: StoryDone }) {
   if (data.decisions.length === 0) return null;
   return (
     <section className="mt-10">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-3">Decisions, in order</h3>
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-text-3">Decisions, in order</h2>
       <dl className="mt-3 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
         {data.decisions.map((d, i) => (
           <div key={i} className="contents">
@@ -316,7 +315,7 @@ function Artifacts({ story, data }: { story: Story; data: StoryDone }) {
             <span className="truncate">{pr.title}</span>
           </div>
           <div className="mt-0.5 truncate text-[11px] text-text-3">
-            {story.bitbucket.branch ?? 'branch'} → {pr.target} · <span className="text-green">+{pr.additions}</span>{' '}
+            {story.bitbucket?.branch ?? 'branch'} → {pr.target} · <span className="text-green">+{pr.additions}</span>{' '}
             <span className="text-red">−{pr.deletions}</span>
           </div>
         </div>
@@ -332,7 +331,7 @@ function Artifacts({ story, data }: { story: Story; data: StoryDone }) {
 
   return (
     <section className="mt-10">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-3">Artifacts</h3>
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-text-3">Artifacts</h2>
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">{cards}</div>
     </section>
   );
@@ -380,7 +379,7 @@ function Learnings({ data }: { data: StoryDone }) {
   if (data.learnings.length === 0) return null;
   return (
     <section className="mt-10 mb-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-text-3">What we learned</h3>
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-text-3">What we learned</h2>
       <ol className="mt-3 space-y-3 text-[15px] leading-relaxed text-text-2">
         {data.learnings.map((l, i) => {
           const n = l.number > 0 ? l.number : i + 1;

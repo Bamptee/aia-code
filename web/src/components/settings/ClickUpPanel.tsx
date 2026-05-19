@@ -78,7 +78,6 @@ export function ClickUpPanel() {
     }
   };
 
-  const maskedKey = data.apiKey ? data.apiKey.slice(0, 4) + '••••••••••••••••' : '';
 
   return (
     <PanelChrome
@@ -104,8 +103,10 @@ export function ClickUpPanel() {
       <Field label="API key" hint="Stored in .env as CLICKUP_API_KEY. Revealed for 10s.">
         <div className="flex items-center gap-2">
           <input
+            // Toujours type=password quand non revealed (vraie masque du browser, pas
+            // un masque texte qui corromprait apiKey à la saisie — review Epic 7 P1).
             type={revealed ? 'text' : 'password'}
-            value={revealed ? data.apiKey : maskedKey}
+            value={data.apiKey}
             onChange={(e) => change({ apiKey: e.target.value })}
             placeholder="pk_…"
             className="flex-1 rounded border border-border bg-surface px-2 py-1.5 font-mono text-sm text-text outline-none focus:border-accent"

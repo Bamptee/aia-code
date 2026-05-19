@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useClickUpSyncQuery, useTriggerClickUpSync } from '@/lib/hooks/useClickUpSync';
 import { formatRelative } from '@/lib/format/date';
 
@@ -36,12 +36,6 @@ export function SyncPill() {
     trigger.mutate();
   };
 
-  const dotClass = isFailed
-    ? 'bg-red'
-    : isSyncing
-      ? 'bg-green animate-spin'
-      : 'bg-green animate-pulse';
-
   return (
     <button
       type="button"
@@ -56,18 +50,45 @@ export function SyncPill() {
           : 'border-border bg-surface text-text-2 hover:bg-surface-hover')
       }
     >
-      <span className={'inline-block h-1.5 w-1.5 rounded-full ' + dotClass} />
+      <SyncDot isSyncing={isSyncing} isFailed={isFailed} />
       <span className="font-mono">{label}</span>
     </button>
   );
 }
 
-/** Tick utilitaire pour rafraîchir un "ago" timestamp chaque interval ms. */
+/**
+ * Dot du SyncPill. En `syncing`, un arc visible (border-t-transparent) tourne ;
+ * sinon, dot rond pulsant (success) ou statique rouge (failed).
+ */
+function SyncDot({ isSyncing, isFailed }: { isSyncing: boolean; isFailed: boolean }) {
+  if (isSyncing) {
+    return (
+      <span
+        aria-hidden
+        className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-green border-t-transparent"
+      />
+    );
+  }
+  if (isFailed) {
+    return <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-red" />;
+  }
+  return <span aria-hidden className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green" />;
+}
+
+/**
+ * Tick utilitaire pour rafraîchir un "ago" timestamp chaque interval ms.
+ *
+ * Pattern useSyncExternalStore : snapshot serveur = 0 (formatRelative gère 0 ms
+ * comme "now") évite hydration mismatch. Snapshot client = Date.now(). Le tick
+ * intervalle déclenche un re-render via le callback subscribe.
+ */
 function useNowTick(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
+  return useSyncExternalStore(
+    (callback) => {
+      const id = setInterval(callback, intervalMs);
+      return () => clearInterval(id);
+    },
+    () => Date.now(),
+    () => 0,
+  );
 }

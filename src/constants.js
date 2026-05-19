@@ -68,6 +68,13 @@ export const FEATURE_STEPS = Object.freeze([
 export const QUICK_STEPS = Object.freeze(['dev-plan', 'implement', 'review']);
 
 /**
+ * Dev chain steps - auto-chained when the UI auto-chain toggle is on.
+ * Excludes 'review' on purpose (review is chat-first).
+ * @type {string[]}
+ */
+export const DEV_CHAIN_STEPS = Object.freeze(['spec-tech', 'dev-plan', 'implement']);
+
+/**
  * Steps that produce code changes (Apply button applies diff)
  * @type {Set<string>}
  */

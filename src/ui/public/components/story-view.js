@@ -77,6 +77,10 @@ const ALL_STEPS = ['init', 'brainstorming', 'specFunc', 'specTech', 'devPlan', '
 // Product steps: init has dedicated InitPanel, so only show brainstorming and specFunc as steps
 const PRODUCT_STEPS = ['brainstorming', 'specFunc'];
 const DEV_STEPS = ['specTech', 'devPlan', 'implement', 'review'];
+// Dev steps that are auto-chained when the "Auto-chain" toggle is on (review excluded)
+const DEV_CHAIN_STEPS = ['specTech', 'devPlan', 'implement'];
+// localStorage key for the dev auto-chain preference (kebab-case to match aia-* convention)
+const AUTO_CHAIN_LS_KEY = 'aia-auto-chain-dev';
 
 // Steps that can be skipped (all except init)
 const SKIPPABLE_STEPS = ['brainstorming', 'specFunc', 'specTech', 'devPlan', 'review'];
@@ -1391,7 +1395,7 @@ function InitPanel({ slug, story, onComplete, onStoryUpdate, readonly = false })
 
 // ============== Step Section ==============
 
-function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, onStoryUpdate, readonly = false, tokenUsage = null, savedStepContext = null }) {
+function StepSection({ step, stepKey, slug, currentStep, storyContext, attachments, onStoryUpdate, readonly = false, tokenUsage = null, savedStepContext = null, autoChainDev = false }) {
   const config = STEP_CONFIG[stepKey];
   const formattedTokens = formatTokenCount(tokenUsage?.total);
 
@@ -1431,6 +1435,16 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
   const [fileOperations, setFileOperations] = React.useState(savedStepContext?.fileOperations || []);
   // Model used tracking (populated after generation)
   const [modelUsed, setModelUsed] = React.useState(savedStepContext?.modelUsed || null);
+
+  // Keep local state in sync with refreshed savedStepContext from parent.
+  // Without this, downstream cards (dev-plan, implement) display stale context
+  // after an auto-chain run because useState only reads initial values.
+  React.useEffect(() => {
+    if (!savedStepContext) return;
+    setFilesUsed(savedStepContext.filesUsed || null);
+    setFileOperations(savedStepContext.fileOperations || []);
+    setModelUsed(savedStepContext.modelUsed || null);
+  }, [savedStepContext]);
 
   // Convert stepKey to API format (kebab-case)
   const apiStepKey = stepKey.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
@@ -1512,6 +1526,9 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
     setSaving(false);
   };
 
+  // Eligible for backend auto-chain (spec-tech -> dev-plan -> implement)
+  const chainEligible = autoChainDev && DEV_CHAIN_STEPS.includes(stepKey);
+
   const handleGenerate = async () => {
     setGenerating(true);
     setOutput('');
@@ -1519,19 +1536,30 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
     setFileOperations([]); // Reset fileOperations
     setModelUsed(null); // Reset modelUsed
 
-    const result = await streamPost(`/stories/${slug}/steps/${apiStepKey}/generate`, {
+    const endpoint = chainEligible
+      ? `/stories/${slug}/steps/${apiStepKey}/generate-chain`
+      : `/stories/${slug}/steps/${apiStepKey}/generate`;
+
+    const result = await streamPost(endpoint, {
       instructions: description.trim() || null,
       model: model || undefined,
       attachments: attachments || undefined,
     }, {
       onLog: (text) => setOutput(prev => (prev + text).slice(-10000)),
-      onStatus: () => {},
+      onStatus: (data) => {
+        // In chain mode, surface step transitions in the streaming buffer so the
+        // user sees which downstream step is running.
+        if (data?.status === 'chain-step' && data?.step) {
+          setOutput(prev => (prev + `\n\n=== Chaining: ${data.step} ===\n`).slice(-10000));
+        }
+      },
     });
 
     setOutput('');
     setGenerating(false);
 
-    // Store filesUsed, fileOperations and modelUsed from result if available
+    // Store filesUsed, fileOperations and modelUsed from result if available.
+    // Chain mode returns { steps, results: [...] } instead of single-step fields.
     if (result.filesUsed) {
       setFilesUsed(result.filesUsed);
     }
@@ -1542,6 +1570,8 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
       setModelUsed(result.modelUsed);
     }
 
+    // streamPost always sets result.ok=true on the SSE 'done' event, so this
+    // covers both single-step and chain responses.
     if (result.ok || result.story) {
       setDescription('');
       onStoryUpdate(result.story || await api.get(`/stories/${slug}`));
@@ -1801,8 +1831,12 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
             }, '\uD83D\uDC41'),
             React.createElement('button', {
               onClick: () => {
+                // In chain mode, regenerating also resets/reruns downstream steps.
+                const confirmMsg = chainEligible
+                  ? '⚠️ Auto-chain is ON. This will regenerate this step AND re-run dev-plan + implement. Continue?'
+                  : '⚠️ This will regenerate the content from scratch and overwrite your current content. Continue?';
                 if (hasContent) {
-                  if (confirm('⚠️ This will regenerate the content from scratch and overwrite your current content. Continue?')) {
+                  if (confirm(confirmMsg)) {
                     handleGenerate();
                   }
                 } else {
@@ -1810,10 +1844,15 @@ function StepSection({ step, stepKey, slug, currentStep, storyContext, attachmen
                 }
               },
               disabled: generating,
+              title: chainEligible ? 'Auto-chain ON — runs spec-tech → dev-plan → implement from this step' : undefined,
               className: `px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
                 hasContent ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30' : `${colors.bg} ${colors.text} ${colors.border} border hover:brightness-110`
               }`,
-            }, generating ? '⏳ Generating...' : (hasContent ? '⚠️ Regenerate' : `✨ Generate ${config.name}`)),
+            }, generating
+              ? '⏳ Generating...'
+              : (hasContent
+                  ? (chainEligible ? '🔗 Regenerate + chain' : '⚠️ Regenerate')
+                  : (chainEligible ? `🔗 Generate ${config.name} + chain` : `✨ Generate ${config.name}`))),
           )
         )
       ),
@@ -3368,6 +3407,63 @@ function QAActions({ story, onStoryUpdate }) {
   );
 }
 
+// ============== Auto-Chain Toggle ==============
+
+/**
+ * Toggle for auto-chaining dev steps (spec-tech -> dev-plan -> implement).
+ * Preference is stored in localStorage so it persists across reloads.
+ */
+function AutoChainToggle({ enabled, onChange, disabled = false }) {
+  return React.createElement('div', {
+    className: `flex items-center justify-between gap-3 p-3 rounded-xl border ${
+      enabled
+        ? 'bg-violet-500/10 border-violet-500/30'
+        : 'bg-slate-800/40 border-slate-700'
+    }`,
+  },
+    React.createElement('div', { className: 'flex items-start gap-3' },
+      React.createElement('span', { className: 'text-xl mt-0.5' }, enabled ? '🔗' : '⚭'),
+      React.createElement('div', null,
+        React.createElement('div', { className: 'text-sm font-medium text-slate-200' }, 'Auto-chain dev steps'),
+        React.createElement('div', { className: 'text-xs text-slate-500' },
+          'Enchaîne spec-tech → dev-plan → implement automatiquement (review exclu).'
+        )
+      )
+    ),
+    React.createElement('button', {
+      type: 'button',
+      role: 'switch',
+      'aria-checked': enabled,
+      'aria-label': 'Toggle auto-chain dev steps',
+      disabled,
+      onClick: () => onChange(!enabled),
+      className: `relative inline-flex items-center h-6 w-11 rounded-full transition-colors flex-shrink-0 ${
+        enabled ? 'bg-violet-500' : 'bg-slate-600'
+      } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`,
+    },
+      React.createElement('span', {
+        className: `inline-block w-4 h-4 rounded-full bg-white transform transition-transform ${
+          enabled ? 'translate-x-6' : 'translate-x-1'
+        }`,
+      })
+    )
+  );
+}
+
+// Hook: load + persist the auto-chain dev preference in localStorage.
+function useAutoChainDev() {
+  const [enabled, setEnabled] = React.useState(() => {
+    try { return localStorage.getItem(AUTO_CHAIN_LS_KEY) === '1'; }
+    catch { return false; }
+  });
+  const setAndPersist = React.useCallback((value) => {
+    setEnabled(value);
+    try { localStorage.setItem(AUTO_CHAIN_LS_KEY, value ? '1' : '0'); }
+    catch {}
+  }, []);
+  return [enabled, setAndPersist];
+}
+
 // ============== Main Story View Component ==============
 
 export function StoryView({ slug, context = 'product' }) {
@@ -3382,6 +3478,7 @@ export function StoryView({ slug, context = 'product' }) {
   const [syncing, setSyncing] = React.useState(false);
   const [pullPreviewData, setPullPreviewData] = React.useState(null);
   const [pullingStory, setPullingStory] = React.useState(false);
+  const [autoChainDev, setAutoChainDev] = useAutoChainDev();
 
   const contextConfig = CONTEXT_CONFIG[context];
 
@@ -3619,6 +3716,12 @@ export function StoryView({ slug, context = 'product' }) {
       readonly: false,
     }),
 
+    // Auto-chain dev steps toggle (spec-tech -> dev-plan -> implement)
+    context === 'dev' && accessLevel === 'edit' && React.createElement(AutoChainToggle, {
+      enabled: autoChainDev,
+      onChange: setAutoChainDev,
+    }),
+
     // Product Actions (only in product context with edit access, discovery phase)
     context === 'product' && accessLevel === 'edit' && React.createElement(ProductActions, {
       story,
@@ -3661,6 +3764,7 @@ export function StoryView({ slug, context = 'product' }) {
           readonly,
           tokenUsage: tokenUsage?.steps?.[apiStepKey] || tokenUsage?.steps?.[stepKey],
           savedStepContext: story.stepContext?.[apiStepKey] || story.stepContext?.[stepKey],
+          autoChainDev: context === 'dev' && autoChainDev,
         });
       })
     ),

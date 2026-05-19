@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
 import { json, error } from '../router.js';
-import { AIA_DIR, STEP_ORDER, CODE_STEPS } from '../../constants.js';
+import { AIA_DIR, STEP_ORDER, CODE_STEPS, DEV_CHAIN_STEPS } from '../../constants.js';
 import {
   createEpic,
   loadEpic,
@@ -31,6 +31,7 @@ import { loadConfig } from '../../models.js';
 import { getApps } from '../../services/apps.js';
 import { callModel } from '../../services/model-call.js';
 import { runStep } from '../../services/runner.js';
+import { runDevChain } from '../../services/quick.js';
 import { loadPromptTemplate, loadInitSpecs, buildPrompt, buildChatContext } from '../../prompt-builder.js';
 
 /**
@@ -930,6 +931,111 @@ ${content}`;
       });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
+    }
+    res.end();
+  });
+
+  /**
+   * POST /api/stories/:slug/steps/:step/generate-chain - Generate :step and auto-chain
+   * through the remaining dev steps (spec-tech -> dev-plan -> implement).
+   * SSE streaming; emits 'status' with `chain: true` and a 'chain-step' status per
+   * step boundary so the UI can update its current-step indicator.
+   */
+  router.post('/api/stories/:slug/steps/:step/generate-chain', async (req, res, { params, root, parseBody }) => {
+    if (!DEV_CHAIN_STEPS.includes(params.step)) {
+      return error(res, `Step "${params.step}" is not in dev chain (${DEV_CHAIN_STEPS.join(', ')})`, 400);
+    }
+
+    const body = await parseBody();
+    sseHeaders(res);
+    sseSend(res, 'status', { step: params.step, status: 'started', chain: true });
+
+    const onData = ({ type, text }) => {
+      try { sseSend(res, 'log', { type, text }); } catch {}
+    };
+    const onChainStep = (step) => {
+      try { sseSend(res, 'status', { step, status: 'chain-step', chain: true }); } catch {}
+    };
+
+    try {
+      const storyDir = await getStoryDirPath(params.slug, root);
+      const statusPath = path.join(storyDir, 'status.yaml');
+
+      // Reset target step + downstream chain steps if done so they regenerate
+      {
+        const rawStatus = await fs.readFile(statusPath, 'utf-8');
+        const status = yaml.parse(rawStatus);
+        const fromIdx = DEV_CHAIN_STEPS.indexOf(params.step);
+        let resetAny = false;
+        status.steps = status.steps || {};
+        for (const s of DEV_CHAIN_STEPS.slice(fromIdx)) {
+          if (status.steps[s] === 'done') {
+            status.steps[s] = 'pending';
+            resetAny = true;
+          }
+        }
+        if (resetAny) {
+          status.updatedAt = new Date().toISOString();
+          await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+          sseSend(res, 'log', { type: 'info', text: `Reset chain steps from ${params.step} for regeneration` });
+        }
+      }
+
+      // Resolve attachment paths from filenames to absolute paths on disk
+      let resolvedAttachments;
+      if (body.attachments?.length) {
+        const attachDir = path.join(storyDir, 'attachments');
+        resolvedAttachments = body.attachments.map(a => ({
+          filename: a.filename,
+          path: path.join(attachDir, a.filename),
+        }));
+      }
+
+      const chainResult = await runDevChain(params.slug, params.step, {
+        description: body.instructions || body.description || '',
+        attachments: resolvedAttachments,
+        model: body.model || undefined,
+        verbose: true,
+        root,
+        onData,
+        onChainStep,
+      });
+
+      // Persist tokenUsage / stepContext for every step in the chain
+      try {
+        const rawStatus = await fs.readFile(statusPath, 'utf-8');
+        const status = yaml.parse(rawStatus);
+        status.tokenUsage = status.tokenUsage || {};
+        status.stepContext = status.stepContext || {};
+        for (const r of chainResult.results) {
+          if (r.tokenUsage) status.tokenUsage[r.step] = r.tokenUsage;
+          status.stepContext[r.step] = {
+            filesUsed: r.filesUsed || null,
+            fileOperations: r.fileOperations || [],
+            modelUsed: r.modelUsed || null,
+          };
+        }
+        status.updatedAt = new Date().toISOString();
+        await fs.writeFile(statusPath, yaml.stringify(status), 'utf-8');
+      } catch (persistErr) {
+        console.error(`[GenerateChain] Failed to save token/context data: ${persistErr.message}`);
+      }
+
+      sseSend(res, 'done', {
+        chain: true,
+        steps: chainResult.steps,
+        results: chainResult.results.map(r => ({
+          step: r.step,
+          tokenUsage: r.tokenUsage || null,
+          modelUsed: r.modelUsed || null,
+        })),
+      });
+    } catch (err) {
+      sseSend(res, 'error', {
+        message: err.failedStep ? `Step "${err.failedStep}" failed: ${err.message}` : err.message,
+        failedStep: err.failedStep || null,
+        completedSteps: (err.partialResults || []).map(r => r.step),
+      });
     }
     res.end();
   });

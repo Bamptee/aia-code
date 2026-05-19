@@ -1,10 +1,9 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { ArrowRight } from 'lucide-react';
 import { setSearchParam } from '@/lib/url/setParam';
 import { PRODUCT_STEPS, DEV_STEPS } from '@/lib/types/step';
-import type { StepKey, StepState } from '@/lib/types/step';
+import type { StepKey, StepState, Phase } from '@/lib/types/step';
 import type { Story } from '@/lib/types/story';
 
 interface StepRailProps {
@@ -22,23 +21,21 @@ const STEP_LABEL: Record<StepKey, string> = {
 };
 
 /**
- * Step Rail (FR-9, handoff §7.3).
+ * Step Rail (FR-9, handoff §7.3 + CSS .phase-cluster / .step-pill).
  *
- * Layout : [Product cluster] → [Dev cluster]
- * - Product cluster : init, brainstorming, spec-func
- * - Dev cluster : spec-tech, dev-plan, implement, review
- * - Dev cluster masqué si `story.phase === 'product'` (encore en product side)
+ * Layout : 2 phase-clusters rounded-999px (border 1px, bg-bg), chaque cluster
+ * contient son label PRODUCT/DEV (mono uppercase 10.5px coloré phase) + ses
+ * step-pills inside. Phase-sep `→` text-3 entre les deux clusters.
  *
- * Each pill : <dot> <label> <tokens?>
- * States visuels :
- *   - done      : dot filled accent
- *   - in-progress : dot pulse
- *   - pending   : dot outline (border-2)
- *   - skipped   : dot dashed outline
- *   - active (étape sélectionnée) : pill ring + filled bg
+ * Dev cluster collapse si `phase === 'product'` (handoff §7.3).
  *
- * Click pill → setSearchParam('step', stepKey) — URL state, pas de server re-render.
- * Active step = `?step=` ou fallback `story.currentStep`.
+ * State pills :
+ * - default : transparent, text-2
+ * - hover : bg-surface-hover, text
+ * - active : bg-accent text-accent-ink font-medium
+ * - done : color green + step-dot bg green
+ * - in-progress : step-dot bg blue (animate pulse)
+ * - skipped : text-3 + step-dot dashed
  */
 export function StepRail({ story }: StepRailProps) {
   const searchParams = useSearchParams();
@@ -48,19 +45,22 @@ export function StepRail({ story }: StepRailProps) {
   return (
     <nav
       aria-label="Story pipeline steps"
-      className="flex items-center gap-2 overflow-x-auto border-b border-border bg-surface px-6 py-2"
+      className="flex items-center gap-1 overflow-x-auto border-b border-border bg-surface px-6 py-2.5"
+      style={{ scrollbarWidth: 'none' }}
     >
-      <ClusterLabel label="PRODUCT" />
-      <StepCluster
+      <PhaseCluster
+        label="PRODUCT"
+        phase="product"
         steps={PRODUCT_STEPS}
         story={story}
         activeStep={activeStep}
       />
       {showDev && (
         <>
-          <ArrowRight size={14} className="shrink-0 text-text-3" />
-          <ClusterLabel label="DEV" />
-          <StepCluster
+          <span className="mx-1 shrink-0 text-[11px] text-text-3">→</span>
+          <PhaseCluster
+            label="DEV"
+            phase="dev"
             steps={DEV_STEPS}
             story={story}
             activeStep={activeStep}
@@ -71,25 +71,27 @@ export function StepRail({ story }: StepRailProps) {
   );
 }
 
-function ClusterLabel({ label }: { label: string }) {
-  return (
-    <span className="shrink-0 font-mono text-[10px] font-medium uppercase tracking-wider text-text-3">
-      {label}
-    </span>
-  );
-}
-
-function StepCluster({
-  steps,
-  story,
-  activeStep,
-}: {
+interface PhaseClusterProps {
+  label: string;
+  phase: Phase;
   steps: readonly StepKey[];
   story: Story;
   activeStep: StepKey;
-}) {
+}
+
+function PhaseCluster({ label, phase, steps, story, activeStep }: PhaseClusterProps) {
   return (
-    <span className="flex items-center gap-1">
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-bg py-0.5 pl-2 pr-1.5"
+    >
+      <span
+        className="mr-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.06em]"
+        style={{
+          color: phase === 'product' ? 'var(--phase-product)' : 'var(--phase-dev)',
+        }}
+      >
+        {label}
+      </span>
       {steps.map((step) => (
         <StepPill
           key={step}
@@ -112,9 +114,19 @@ function StepPill({ step, state, isActive }: StepPillProps) {
   const status = state?.status ?? 'pending';
   const tokens = state?.tokens;
 
-  const handleClick = () => {
-    setSearchParam('step', step);
-  };
+  const handleClick = () => setSearchParam('step', step);
+
+  let pillClass =
+    'inline-flex shrink-0 items-center gap-1.5 rounded-full border border-transparent px-2.5 py-0.5 text-xs transition-colors whitespace-nowrap ';
+  if (isActive) {
+    pillClass += 'bg-accent font-medium text-accent-ink';
+  } else if (status === 'done') {
+    pillClass += 'text-green hover:bg-surface-hover';
+  } else if (status === 'skipped') {
+    pillClass += 'text-text-3 hover:bg-surface-hover';
+  } else {
+    pillClass += 'text-text-2 hover:bg-surface-hover hover:text-text';
+  }
 
   return (
     <button
@@ -122,15 +134,10 @@ function StepPill({ step, state, isActive }: StepPillProps) {
       onClick={handleClick}
       aria-pressed={isActive}
       title={`${STEP_LABEL[step]}${tokens ? ` · ${tokens} tokens` : ''} · ${status}`}
-      className={
-        'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ' +
-        (isActive
-          ? 'border-accent bg-accent text-accent-ink shadow-sm ring-2 ring-accent/30'
-          : 'border-border bg-surface text-text-2 hover:bg-surface-hover hover:text-text')
-      }
+      className={pillClass}
     >
       <StatusDot status={status} isActive={isActive} />
-      <span className="font-medium">{STEP_LABEL[step]}</span>
+      <span>{STEP_LABEL[step]}</span>
       {typeof tokens === 'number' && tokens > 0 && (
         <span className={'font-mono text-[10px] ' + (isActive ? 'text-accent-ink/80' : 'text-text-3')}>
           {tokens}
@@ -141,33 +148,64 @@ function StepPill({ step, state, isActive }: StepPillProps) {
 }
 
 function StatusDot({ status, isActive }: { status: StepState['status']; isActive: boolean }) {
-  // Active step déjà highlight via le pill ring → dot reste cohérent avec status.
-  const baseStyle: React.CSSProperties = {
+  const base: React.CSSProperties = {
     width: 8,
     height: 8,
     borderRadius: '50%',
+    flexShrink: 0,
   };
+
+  if (isActive) {
+    return (
+      <span
+        aria-hidden
+        style={{
+          ...base,
+          background: 'var(--accent-ink)',
+          border: '1.5px solid var(--accent-ink)',
+        }}
+      />
+    );
+  }
 
   if (status === 'done') {
     return (
       <span
-        aria-hidden="true"
+        aria-hidden
+        className="relative"
         style={{
-          ...baseStyle,
-          backgroundColor: isActive ? 'var(--accent-ink)' : 'var(--accent)',
+          ...base,
+          background: 'var(--green)',
+          border: '1.5px solid var(--green)',
         }}
-      />
+      >
+        <svg
+          viewBox="0 0 10 10"
+          className="absolute inset-[1px]"
+          aria-hidden
+        >
+          <path
+            d="M2 5l2 2 4-4"
+            stroke="white"
+            strokeWidth="1.8"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
     );
   }
 
   if (status === 'in-progress') {
     return (
       <span
-        aria-hidden="true"
+        aria-hidden
         className="animate-pulse"
         style={{
-          ...baseStyle,
-          backgroundColor: 'var(--pipe-run)',
+          ...base,
+          background: 'var(--blue)',
+          border: '1.5px solid var(--blue)',
         }}
       />
     );
@@ -176,24 +214,24 @@ function StatusDot({ status, isActive }: { status: StepState['status']; isActive
   if (status === 'skipped') {
     return (
       <span
-        aria-hidden="true"
+        aria-hidden
         style={{
-          ...baseStyle,
-          border: '1px dashed currentColor',
-          backgroundColor: 'transparent',
+          ...base,
+          background: 'transparent',
+          border: '1.5px dashed var(--text-3)',
         }}
       />
     );
   }
 
-  // pending — empty outline
+  // pending
   return (
     <span
-      aria-hidden="true"
+      aria-hidden
       style={{
-        ...baseStyle,
-        border: '1.5px solid currentColor',
-        backgroundColor: 'transparent',
+        ...base,
+        background: 'transparent',
+        border: '1.5px solid var(--border-strong)',
       }}
     />
   );

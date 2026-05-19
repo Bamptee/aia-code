@@ -1,0 +1,162 @@
+/* ──────────────────────────────────────────────────────────────────
+ * AIA — Design Tokens
+ * Source: design_handoff_aia_workspace/tokens.css (handoff v3)
+ * Adapted for Tailwind v4 + next/font/google (Geist).
+ *
+ * Two themes :
+ *   :root              → light (default)
+ *   [data-theme="dark"] → dark (default in our app via SSR — see Story 1.8)
+ *
+ * Set <html data-theme="dark"> to switch. Persist in localStorage + system pref.
+ * ─────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Surfaces ──────────────────────────────────── */
+  --bg:             #f7f7f6;
+  --surface:        #ffffff;
+  --surface-2:      #f1f1ef;
+  --surface-hover:  #ececea;
+  --border:         #e7e7e4;
+  --border-strong:  #d4d4d0;
+
+  /* ── Text ──────────────────────────────────────── */
+  --text:           #111111;
+  --text-2:         #555555;
+  --text-3:         #8e8e8b;
+  --text-inv:       #f7f7f6;
+
+  /* ── Accent (palette neutral / indigo / forest / rust — neutral par default) ── */
+  --accent:         #111111;
+  --accent-soft:    #ececea;
+  --accent-ink:     #ffffff;
+
+  /* ── Phase tints (Product → Dev → QA → Done) ──── */
+  --phase-product:      #6c4d99;
+  --phase-product-soft: #efe9f7;
+  --phase-dev:          #1f5d8c;
+  --phase-dev-soft:     #e3eef6;
+  --phase-qa:           #2f6f3d;
+  --phase-qa-soft:      #e8f1e8;
+
+  /* ── Semantic ──────────────────────────────────── */
+  --green:       #2f6f3d;  --green-soft:   #e8f1e8;
+  --amber:       #8a5a00;  --amber-soft:   #faf1dc;
+  --red:         #9b2c2c;  --red-soft:     #f8e8e8;
+  --blue:        #1e4d8c;  --blue-soft:    #e7eef8;
+  --purple:      #5b3a8c;  --purple-soft:  #efe8f5;
+
+  /* ── Source-control (Bitbucket-themed) ─────────── */
+  --bb-open:        #0052cc;  --bb-open-soft:     #e3edfa;
+  --bb-merged:      #5e36bf;  --bb-merged-soft:   #ece5fa;
+  --bb-declined:    #de350b;  --bb-declined-soft: #fbe3dd;
+  --bb-draft:       #6b778c;  --bb-draft-soft:    #ebecf0;
+
+  /* ── Pipeline / CI status ──────────────────────── */
+  --pipe-ok:        #207a35;  --pipe-ok-soft:      #e2efe5;
+  --pipe-fail:      #c5221f;  --pipe-fail-soft:    #fbe2e1;
+  --pipe-run:       #b07e00;  --pipe-run-soft:     #fbf1d6;
+  --pipe-pending:   #8e8e8b;  --pipe-pending-soft: #ececea;
+
+  /* ── Radii ─────────────────────────────────────── */
+  --r-sm: 6px;
+  --r:    10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+
+  /* ── Typography (bridge avec next/font/google) ─── */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+[data-theme="dark"] {
+  --bg:             #131318;
+  --surface:        #23232a;
+  --surface-2:      #1a1a20;
+  --surface-hover:  #2c2c34;
+  --border:         #2d2d36;
+  --border-strong:  #3d3d48;
+
+  --text:           #ededeb;
+  --text-2:         #aeaea8;
+  --text-3:         #76766f;
+  --text-inv:       #131318;
+
+  --accent:         #ededeb;
+  --accent-soft:    #2c2c34;
+  --accent-ink:     #131318;
+
+  --phase-product:      #b29ad8;
+  --phase-product-soft: #2a223f;
+  --phase-dev:          #7ba8db;
+  --phase-dev-soft:     #18283c;
+  --phase-qa:           #7eb78b;
+  --phase-qa-soft:      #1b2d21;
+
+  --green:  #74ba80;  --green-soft:  #1c2d21;
+  --amber:  #d8a55a;  --amber-soft:  #34281a;
+  --red:    #db7a7a;  --red-soft:    #381f1f;
+  --blue:   #82afd8;  --blue-soft:   #1a2638;
+  --purple: #b39ad6;  --purple-soft: #2a2440;
+
+  --bb-open:        #5b9bff;  --bb-open-soft:     #1a253a;
+  --bb-merged:      #b09cf0;  --bb-merged-soft:   #271f3e;
+  --bb-declined:    #f08e7a;  --bb-declined-soft: #3a1f1e;
+  --bb-draft:       #9aa3b3;  --bb-draft-soft:    #25272d;
+
+  --pipe-ok:        #74ba80;  --pipe-ok-soft:      #1c2d21;
+  --pipe-fail:      #f08e7a;  --pipe-fail-soft:    #3a1f1e;
+  --pipe-run:       #d8a55a;  --pipe-run-soft:     #34281a;
+  --pipe-pending:   #76766f;  --pipe-pending-soft: #25252c;
+
+  color-scheme: dark;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+ * Accent swatches (à appliquer dynamiquement via [data-accent="..."])
+ *
+ * LIGHT theme :
+ *   neutral → #111111 / #ececea / #ffffff
+ *   indigo  → #3d3a8a / #ecebf7 / #ffffff
+ *   forest  → #2f5a3d / #e5efe6 / #ffffff
+ *   rust    → #8a3f2a / #f5e8e2 / #ffffff
+ *
+ * DARK theme :
+ *   neutral → #ededeb / #2c2c34 / #131318
+ *   indigo  → #a09cf0 / #21204a / #131318
+ *   forest  → #7eb78b / #1b2d21 / #131318
+ *   rust    → #d99c81 / #3a261e / #131318
+ *
+ * Wiring via ThemeProvider Context (Story 1.8) qui set --accent / --accent-soft / --accent-ink.
+ * ─────────────────────────────────────────────────────────────── */
+
+[data-accent="indigo"] {
+  --accent:      #3d3a8a;
+  --accent-soft: #ecebf7;
+  --accent-ink:  #ffffff;
+}
+[data-accent="forest"] {
+  --accent:      #2f5a3d;
+  --accent-soft: #e5efe6;
+  --accent-ink:  #ffffff;
+}
+[data-accent="rust"] {
+  --accent:      #8a3f2a;
+  --accent-soft: #f5e8e2;
+  --accent-ink:  #ffffff;
+}
+
+[data-theme="dark"][data-accent="indigo"] {
+  --accent:      #a09cf0;
+  --accent-soft: #21204a;
+  --accent-ink:  #131318;
+}
+[data-theme="dark"][data-accent="forest"] {
+  --accent:      #7eb78b;
+  --accent-soft: #1b2d21;
+  --accent-ink:  #131318;
+}
+[data-theme="dark"][data-accent="rust"] {
+  --accent:      #d99c81;
+  --accent-soft: #3a261e;
+  --accent-ink:  #131318;
+}

@@ -1,0 +1,127 @@
+@import "tailwindcss";
+@import "../styles/tokens.css";
+
+/* ──────────────────────────────────────────────────────────────────
+ * Tailwind v4 theme bindings (handoff §1 + tokens.css mapping)
+ * Exposes les CSS vars du design system comme utility classes Tailwind.
+ * Exemples : bg-surface, text-text-2, border-border, font-sans, rounded-lg
+ * ─────────────────────────────────────────────────────────────── */
+
+@theme inline {
+  /* Surfaces */
+  --color-bg:             var(--bg);
+  --color-surface:        var(--surface);
+  --color-surface-2:      var(--surface-2);
+  --color-surface-hover:  var(--surface-hover);
+  --color-border:         var(--border);
+  --color-border-strong:  var(--border-strong);
+
+  /* Text */
+  --color-text:     var(--text);
+  --color-text-2:   var(--text-2);
+  --color-text-3:   var(--text-3);
+  --color-text-inv: var(--text-inv);
+
+  /* Accent */
+  --color-accent:      var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink:  var(--accent-ink);
+
+  /* Phase */
+  --color-phase-product:      var(--phase-product);
+  --color-phase-product-soft: var(--phase-product-soft);
+  --color-phase-dev:          var(--phase-dev);
+  --color-phase-dev-soft:     var(--phase-dev-soft);
+  --color-phase-qa:           var(--phase-qa);
+  --color-phase-qa-soft:      var(--phase-qa-soft);
+
+  /* Semantic */
+  --color-green:        var(--green);
+  --color-green-soft:   var(--green-soft);
+  --color-amber:        var(--amber);
+  --color-amber-soft:   var(--amber-soft);
+  --color-red:          var(--red);
+  --color-red-soft:     var(--red-soft);
+  --color-blue:         var(--blue);
+  --color-blue-soft:    var(--blue-soft);
+  --color-purple:       var(--purple);
+  --color-purple-soft:  var(--purple-soft);
+
+  /* Source control (Bitbucket-themed) */
+  --color-bb-open:       var(--bb-open);
+  --color-bb-open-soft:  var(--bb-open-soft);
+  --color-bb-merged:     var(--bb-merged);
+  --color-bb-merged-soft: var(--bb-merged-soft);
+  --color-bb-declined:   var(--bb-declined);
+  --color-bb-declined-soft: var(--bb-declined-soft);
+  --color-bb-draft:      var(--bb-draft);
+  --color-bb-draft-soft: var(--bb-draft-soft);
+
+  /* Pipeline / CI */
+  --color-pipe-ok:           var(--pipe-ok);
+  --color-pipe-ok-soft:      var(--pipe-ok-soft);
+  --color-pipe-fail:         var(--pipe-fail);
+  --color-pipe-fail-soft:    var(--pipe-fail-soft);
+  --color-pipe-run:          var(--pipe-run);
+  --color-pipe-run-soft:     var(--pipe-run-soft);
+  --color-pipe-pending:      var(--pipe-pending);
+  --color-pipe-pending-soft: var(--pipe-pending-soft);
+
+  /* Radii */
+  --radius-sm: var(--r-sm);
+  --radius:    var(--r);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+
+  /* Fonts */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+/* ──────────────────────────────────────────────────────────────────
+ * Base typography & global styles (handoff §19)
+ * ─────────────────────────────────────────────────────────────── */
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  letter-spacing: -0.005em;
+  font-feature-settings: "ss01", "cv11";
+  text-wrap: pretty;
+  transition: background-color .25s ease;
+}
+
+h1, h2, h3, h4 {
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+code, kbd, samp, pre {
+  font-family: var(--font-mono);
+}
+
+/* ──────────────────────────────────────────────────────────────────
+ * Animations (primitives — Story 1.10)
+ * ─────────────────────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes fade-out {
+  to { opacity: 0; }
+}
+
+@keyframes slide-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@theme inline {
+  --animate-shimmer: shimmer 2s linear infinite;
+  --animate-fade-out: fade-out 150ms ease-out forwards;
+  --animate-slide-in-up: slide-in-up 200ms ease-out;
+}
+

@@ -1,3 +1,22 @@
 node_modules/
 .env
 .aia
+
+# Next.js (web/)
+.next/
+web/.next/
+web/out/
+web/build/
+*.tsbuildinfo
+
+# Coverage
+/coverage
+
+# Misc
+.DS_Store
+.vercel
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+.pnpm-debug.log*

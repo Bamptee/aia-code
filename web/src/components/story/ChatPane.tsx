@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Message } from '@/components/primitives/Message';
 import { ChatComposer } from './ChatComposer';
+import { ChatActionBar, getComposerPlaceholder } from './ChatActionBar';
 import { TypingIndicator } from './TypingIndicator';
 import { CancelActionBar } from './CancelActionBar';
 import { useChatStream } from '@/lib/sse/useChatStream';
@@ -64,17 +65,9 @@ export function ChatPane({ story }: ChatPaneProps) {
 
   return (
     <aside className="flex flex-1 flex-col overflow-hidden bg-surface-2">
-      <header className="flex items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-text-3">Step</span>
-          <span className="font-mono font-medium text-text">{activeStep}</span>
-        </div>
-        <span className="text-[10px] text-text-3">{messages.length} messages</span>
-      </header>
-
       <div ref={listRef} className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 ? (
-          <EmptyChat />
+          <EmptyChat activeStep={activeStep} />
         ) : (
           <div className="flex flex-col gap-4">
             {messages.map((m) => (
@@ -102,18 +95,35 @@ export function ChatPane({ story }: ChatPaneProps) {
         )}
       </div>
 
-      <ChatComposer onSubmit={send} onCancel={cancel} status={status} />
+      <ChatActionBar
+        step={activeStep}
+        state={story.steps[activeStep]}
+        hasMessages={messages.length > 0}
+      />
+
+      <ChatComposer
+        onSubmit={send}
+        onCancel={cancel}
+        status={status}
+        placeholder={getComposerPlaceholder(activeStep)}
+      />
     </aside>
   );
 }
 
-function EmptyChat() {
+function EmptyChat({ activeStep }: { activeStep: StepKey }) {
   return (
     <div className="flex h-full items-center justify-center text-center">
       <div className="max-w-xs text-xs text-text-3">
-        No messages yet. Type below or use{' '}
-        <kbd className="rounded border border-border px-1 font-mono">/</kbd> to start
-        with a slash command.
+        {activeStep === 'brainstorming' || activeStep === 'review'
+          ? 'No messages yet. Share ideas, ask questions, explore…'
+          : 'No messages yet. Type below or use '}
+        {activeStep !== 'brainstorming' && activeStep !== 'review' && (
+          <>
+            <kbd className="rounded border border-border px-1 font-mono">/</kbd> to start
+            with a slash command.
+          </>
+        )}
       </div>
     </div>
   );

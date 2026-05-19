@@ -9,6 +9,8 @@ interface ChatComposerProps {
   onSubmit: (prompt: string) => void;
   onCancel: () => void;
   status: StreamStatus;
+  /** Placeholder step-aware (handoff §7.4). Override le défaut générique. */
+  placeholder?: string;
 }
 
 const SLASH_COMMANDS: SlashCommand[] = [
@@ -27,7 +29,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
  * - Tap `/` au début → SlashPopover.
  * - Pendant streaming → bouton X (cancel) à la place de Send.
  */
-export function ChatComposer({ onSubmit, onCancel, status }: ChatComposerProps) {
+export function ChatComposer({ onSubmit, onCancel, status, placeholder }: ChatComposerProps) {
   const [value, setValue] = useState('');
   const [forceCloseSlash, setForceCloseSlash] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -90,7 +92,7 @@ export function ChatComposer({ onSubmit, onCancel, status }: ChatComposerProps) 
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={2}
-          placeholder={isStreaming ? 'Streaming…' : 'Type a message or / for commands…'}
+          placeholder={isStreaming ? 'Streaming…' : (placeholder ?? 'Type a message or / for commands…')}
           disabled={isStreaming}
           className="flex-1 resize-none rounded border border-border bg-surface-2 px-3 py-2 text-sm text-text placeholder:text-text-3 focus:border-border-strong focus:outline-none disabled:opacity-50"
         />

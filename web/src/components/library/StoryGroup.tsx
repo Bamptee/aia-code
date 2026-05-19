@@ -44,20 +44,40 @@ export function StoryGroup({ epic, stories }: StoryGroupProps) {
   );
 }
 
+/**
+ * 14 colonnes × 4 rows grid, conforme handoff §10.
+ * Les cells "filled" sont distribuées par colonnes : ratio doneCount/total
+ * appliqué à chaque colonne (4 rows). Approche déterministe et lisible.
+ */
 function ProgressMeter({ filled, total }: { filled: number; total: number }) {
+  const ROWS = 4;
+  const COLS = total;
+  // Cells distribuées column-first : chaque colonne remplit ses 4 cells avant
+  // de passer à la suivante. Donc isFilled = (col < filled).
+  const cells = COLS * ROWS;
+
   return (
     <span
       aria-label={`${filled} of ${total} done`}
-      className="flex h-1 gap-0.5"
+      className="grid h-3 gap-px"
+      style={{
+        gridTemplateColumns: `repeat(${COLS}, 2px)`,
+        gridTemplateRows: `repeat(${ROWS}, 1fr)`,
+      }}
     >
-      {Array.from({ length: total }).map((_, i) => (
-        <span
-          key={i}
-          className={
-            'h-1 w-2 rounded-sm ' + (i < filled ? 'bg-accent' : 'bg-surface-hover')
-          }
-        />
-      ))}
+      {Array.from({ length: cells }).map((_, i) => {
+        const col = i % COLS;
+        // Column-first fill : la colonne `col` est entièrement remplie si col < filled.
+        const isFilled = col < filled;
+        return (
+          <span
+            key={i}
+            className={
+              'rounded-[1px] ' + (isFilled ? 'bg-accent' : 'bg-surface-hover')
+            }
+          />
+        );
+      })}
     </span>
   );
 }

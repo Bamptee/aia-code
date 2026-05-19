@@ -34,7 +34,10 @@ export function parseEpic(raw: unknown): Epic {
 
 export function parseEpicList(raw: unknown): Epic[] {
   if (!Array.isArray(raw)) {
-    throw new Error('parseEpicList: expected array');
+    if (typeof console !== 'undefined') {
+      console.warn('[adapters/epics] parseEpicList: expected array, got', typeof raw, raw);
+    }
+    return [];
   }
   return raw
     .filter((entry): entry is RawEpic => !!entry && typeof entry === 'object')

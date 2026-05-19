@@ -72,14 +72,19 @@ function normalizeStep(raw: unknown): StepKey {
   return 'init';
 }
 
-/** Convertit un slug en ID display style "STORY-024" — simple hash stable. */
+/**
+ * Convertit un slug en ID display style "STORY-12345" — hash stable, 5 digits.
+ * Mod 100000 ramène les collisions à un niveau statistiquement négligeable
+ * jusqu'à plusieurs milliers de stories (vs mod 1000 où collisions > 50% à 37 stories).
+ * Story future : remplacer par l'ID réel si l'API Express l'expose.
+ */
 function deriveId(slug: string): string {
   let hash = 0;
   for (let i = 0; i < slug.length; i++) {
     hash = ((hash << 5) - hash + slug.charCodeAt(i)) | 0;
   }
-  const n = Math.abs(hash) % 1000;
-  return `STORY-${String(n).padStart(3, '0')}`;
+  const n = Math.abs(hash) % 100000;
+  return `STORY-${String(n).padStart(5, '0')}`;
 }
 
 export function parseStory(raw: unknown): Story {
@@ -102,7 +107,10 @@ export function parseStory(raw: unknown): Story {
     cuTaskCount: 0,
     steps: {}, // Status par step pas exposé par /api/features minimal (Story 3.x).
     collaborators: [],
-    updated: typeof f.createdAt === 'string' ? f.createdAt : new Date(0).toISOString(),
+    // Fallback à `now` plutôt que `new Date(0)` (epoch 1970) — sans ça les stories
+    // sans `createdAt` côté backend affichent "55y ago" et tombent en bas du tri
+    // updated-desc, ce qui masque les nouvelles stories.
+    updated: typeof f.createdAt === 'string' ? f.createdAt : new Date().toISOString(),
     tasksTotal: 0,
     tasksDone: 0,
     messages: 0,
@@ -116,10 +124,23 @@ export function parseStory(raw: unknown): Story {
 }
 
 export function parseStoryList(raw: unknown): Story[] {
+  // Si l'API renvoie autre chose qu'un array (ex: { error } HTTP 200 legacy), on log
+  // et retourne un tableau vide plutôt que de throw — évite de casser toute la Sidebar/Library.
   if (!Array.isArray(raw)) {
-    throw new Error('parseStoryList: expected array');
+    if (typeof console !== 'undefined') {
+      console.warn('[adapters/stories] parseStoryList: expected array, got', typeof raw, raw);
+    }
+    return [];
   }
-  return raw
-    .filter((entry): entry is RawFeature => !!entry && typeof entry === 'object' && !('error' in entry))
-    .map(parseStory);
+  return raw.filter((entry): entry is RawFeature => {
+    if (!entry || typeof entry !== 'object') return false;
+    if ('error' in entry) {
+      // Une entrée individuelle erronée → log + skip plutôt que silent swallow.
+      if (typeof console !== 'undefined') {
+        console.warn('[adapters/stories] skipping erroneous feature entry:', entry);
+      }
+      return false;
+    }
+    return true;
+  }).map(parseStory);
 }

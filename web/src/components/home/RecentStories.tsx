@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { useStoriesQuery } from '@/lib/hooks/useStoriesQuery';
 import { PhaseBadge } from '@/components/primitives/PhaseBadge';
@@ -13,6 +14,14 @@ import { formatRelative } from '@/lib/format/date';
  */
 export function RecentStories() {
   const { data, isLoading, isError } = useStoriesQuery();
+  const sorted = useMemo(
+    () =>
+      (data ?? [])
+        .slice()
+        .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime())
+        .slice(0, 8),
+    [data]
+  );
 
   return (
     <section className="mt-12">
@@ -35,25 +44,21 @@ export function RecentStories() {
         </div>
       ) : (
         <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
-          {(data ?? [])
-            .slice()
-            .sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime())
-            .slice(0, 8)
-            .map((story) => (
-              <li key={story.slug}>
-                <Link
-                  href={`/stories/${story.slug}`}
-                  className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-surface-hover"
-                >
-                  <span className="flex-1 truncate text-sm text-text">{story.title}</span>
-                  <PhaseBadge phase={story.phase} />
-                  <span className="font-mono text-[11px] text-text-3">{story.id}</span>
-                  <span className="w-16 text-right text-[11px] text-text-3">
-                    {formatRelative(story.updated)}
-                  </span>
-                </Link>
-              </li>
-            ))}
+          {sorted.map((story) => (
+            <li key={story.slug}>
+              <Link
+                href={`/stories/${story.slug}`}
+                className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-surface-hover"
+              >
+                <span className="flex-1 truncate text-sm text-text">{story.title}</span>
+                <PhaseBadge phase={story.phase} />
+                <span className="font-mono text-[11px] text-text-3">{story.id}</span>
+                <span className="w-16 text-right text-[11px] text-text-3">
+                  {formatRelative(story.updated)}
+                </span>
+              </Link>
+            </li>
+          ))}
         </ul>
       )}
     </section>

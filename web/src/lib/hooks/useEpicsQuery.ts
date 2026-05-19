@@ -12,8 +12,8 @@ import type { Epic } from '@/lib/types/epic';
 export function useEpicsQuery() {
   return useQuery<Epic[]>({
     queryKey: ['epics'],
-    queryFn: async () => {
-      const raw = await apiFetch<unknown>('/api/epics');
+    queryFn: async ({ signal }) => {
+      const raw = await apiFetch<unknown>('/api/epics', { signal });
       return parseEpicList(raw);
     },
   });

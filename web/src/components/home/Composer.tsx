@@ -15,6 +15,9 @@ import { useToast } from '@/components/primitives/Toast';
 export function Composer() {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Guard synchrone contre les double-submits (⌘↵ spam, double-clic) avant que
+  // create.isPending ne devienne true sur le tick suivant.
+  const submittingRef = useRef(false);
   const router = useRouter();
   const toast = useToast();
   const create = useCreateStory();
@@ -27,12 +30,15 @@ export function Composer() {
   const canSubmit = value.trim().length > 0 && !create.isPending;
 
   const submit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || submittingRef.current) return;
+    submittingRef.current = true;
     try {
       const result = await create.mutateAsync({ name: value.trim() });
       router.push(`/stories/${result.slug}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create story');
+    } finally {
+      submittingRef.current = false;
     }
   };
 

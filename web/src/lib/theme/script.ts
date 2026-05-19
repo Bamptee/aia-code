@@ -13,4 +13,12 @@
  *
  * Must remain ES5-compatible (runs before any bundling/transpilation).
  */
-export const themeScript = `(function(){try{var t=localStorage.getItem('theme');var a=localStorage.getItem('accent');var r=document.documentElement;if(t&&t!=='undefined')r.dataset.theme=t;if(a&&a!=='undefined')r.dataset.accent=a;}catch(e){}})();`;
+/*
+ * Whitelist explicite des valeurs acceptées pour `theme` et `accent`. Si localStorage
+ * contient une valeur inattendue (corruption, vieille version, injection manuelle),
+ * on l'ignore plutôt que d'appliquer un attribut data-* invalide qui casserait le rendu.
+ *
+ * IMPORTANT : ne JAMAIS interpoler de variable dans cette string template-literal.
+ * Si tu dois ajouter du dynamisme un jour, utilise un nonce CSP côté script tag.
+ */
+export const themeScript = `(function(){try{var t=localStorage.getItem('theme');var a=localStorage.getItem('accent');var r=document.documentElement;if(t==='light'||t==='dark')r.dataset.theme=t;if(a==='neutral'||a==='indigo'||a==='forest'||a==='rust')r.dataset.accent=a;}catch(e){}})();`;

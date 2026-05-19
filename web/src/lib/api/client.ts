@@ -12,18 +12,23 @@
 
 import { QueryClient } from '@tanstack/react-query';
 
+/**
+ * Codes sémantiques pour ApiError. `status` (HTTP code numérique) est séparé pour
+ * permettre des switch consumer-side propres : `err.code === 'NOT_FOUND'` plutôt
+ * que de comparer à `'404'`.
+ */
+export type ApiErrorCode = 'NETWORK' | 'PARSE' | 'INVALID_PATH' | 'HTTP_ERROR';
+
 export class ApiError extends Error {
-  readonly code: string;
+  readonly code: ApiErrorCode;
   readonly status?: number;
 
-  constructor(message: string, opts: { code: string; status?: number; cause?: unknown }) {
+  constructor(message: string, opts: { code: ApiErrorCode; status?: number; cause?: unknown }) {
     super(message);
     this.name = 'ApiError';
     this.code = opts.code;
     this.status = opts.status;
     if (opts.cause !== undefined) {
-      // Standard cause is supported in Node 18+/modern browsers via Error options,
-      // but TypeScript's ErrorOptions type isn't always picked up; assign explicitly.
       (this as Error & { cause?: unknown }).cause = opts.cause;
     }
   }
@@ -34,12 +39,22 @@ export interface ApiFetchOptions extends Omit<RequestInit, 'body'> {
 }
 
 /**
- * Wrapper fetch unique. Sérialise body en JSON, ajoute Content-Type, normalise erreurs en ApiError.
+ * Wrapper fetch unique. Sérialise body en JSON, ajoute Content-Type, normalise erreurs.
+ *
+ * Sécurité : `path` doit être relatif (commence par `/`). Évite les open redirects
+ * si jamais un callsite passait une URL absolue contrôlée par user.
+ *
+ * Cancel : si options.signal est fourni (typiquement par React Query queryFn),
+ * il est forward à fetch, ce qui annule la requête sur unmount/navigation.
  */
 export async function apiFetch<T = unknown>(
   path: string,
   options: ApiFetchOptions = {}
 ): Promise<T> {
+  if (typeof path !== 'string' || !path.startsWith('/')) {
+    throw new ApiError('apiFetch: path must start with "/"', { code: 'INVALID_PATH' });
+  }
+
   const { body, headers, ...rest } = options;
   const init: RequestInit = {
     ...rest,
@@ -68,7 +83,7 @@ export async function apiFetch<T = unknown>(
       (typeof errorBody === 'object' && errorBody && 'error' in errorBody && typeof errorBody.error === 'string')
         ? errorBody.error
         : `HTTP ${response.status}`;
-    throw new ApiError(message, { code: String(response.status), status: response.status });
+    throw new ApiError(message, { code: 'HTTP_ERROR', status: response.status });
   }
 
   // Empty body responses (204 etc.)

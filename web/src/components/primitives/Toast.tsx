@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -13,40 +14,86 @@ import { X, CircleCheck, CircleAlert } from 'lucide-react';
 export type ToastVariant = 'success' | 'error';
 
 interface ToastItem {
-  id: number;
+  id: string;
   variant: ToastVariant;
   message: string;
+  closing?: boolean; // true pendant la fade-out de 150ms avant unmount
 }
 
 interface ToastContextValue {
   success: (message: string) => void;
   error: (message: string) => void;
-  dismiss: (id: number) => void;
+  dismiss: (id: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 /**
+ * Génère un id unique pour chaque toast. `crypto.randomUUID()` est disponible
+ * dans tous les browsers modernes ciblés (Chrome/Safari/Firefox récents).
+ * Fallback en cas d'environnement bizarre : combo timestamp+random+counter.
+ */
+let toastCounter = 0;
+function generateToastId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  toastCounter++;
+  return `toast-${Date.now()}-${toastCounter}`;
+}
+
+/**
  * Toast portal (handoff §13, Pattern Error Handling).
  * - Bottom-right discret.
- * - success → 2s slide-out doux.
- * - error  → sticky jusqu'à dismiss manuel.
+ * - success → 2s slide-out doux (fade-out 150ms avant unmount).
+ * - error  → sticky jusqu'à dismiss manuel (idem fade-out 150ms).
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  // Track tous les setTimeouts en cours pour cleanup à l'unmount du Provider.
+  const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const dismiss = useCallback((id: number) => {
+  const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+    const t = timeoutsRef.current.get(id);
+    if (t) {
+      clearTimeout(t);
+      timeoutsRef.current.delete(id);
+    }
   }, []);
 
+  const dismiss = useCallback((id: string) => {
+    // Marque le toast comme `closing` pour déclencher l'animation fade-out CSS,
+    // puis remove pour de bon après 150ms.
+    setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, closing: true } : t)));
+    const t = setTimeout(() => removeToast(id), 150);
+    // Si un timeout d'auto-dismiss existait déjà pour cet id, l'écrase (clean dans removeToast).
+    const prev = timeoutsRef.current.get(id);
+    if (prev) clearTimeout(prev);
+    timeoutsRef.current.set(id, t);
+  }, [removeToast]);
+
   const push = useCallback((variant: ToastVariant, message: string) => {
-    const id = Date.now() + Math.random();
+    const id = generateToastId();
     setToasts((prev) => [...prev, { id, variant, message }]);
     // Auto-dismiss success after 2s ; error stays until manual dismiss.
     if (variant === 'success') {
-      setTimeout(() => dismiss(id), 2000);
+      const t = setTimeout(() => dismiss(id), 2000);
+      timeoutsRef.current.set(id, t);
     }
   }, [dismiss]);
+
+  // Cleanup tous les timeouts en cours quand le Provider unmount.
+  useEffect(() => {
+    // Copie la ref dans une variable locale capturée par la closure du cleanup.
+    // Pattern recommandé par react-hooks/exhaustive-deps : la ref peut être réassignée
+    // entre le mount et l'unmount, donc on capture la Map au mount.
+    const timeouts = timeoutsRef.current;
+    return () => {
+      timeouts.forEach((t) => clearTimeout(t));
+      timeouts.clear();
+    };
+  }, []);
 
   const value: ToastContextValue = {
     success: (message) => push('success', message),
@@ -67,7 +114,7 @@ function ToastPortal({
   dismiss,
 }: {
   toasts: ToastItem[];
-  dismiss: (id: number) => void;
+  dismiss: (id: string) => void;
 }) {
   if (toasts.length === 0) return null;
   return (
@@ -92,10 +139,9 @@ function ToastCard({
     <div
       role={isError ? 'alert' : 'status'}
       className={
-        'pointer-events-auto flex max-w-sm items-start gap-2 rounded-lg border bg-surface px-3 py-2 text-sm shadow-md animate-slide-in-up ' +
-        (isError
-          ? 'border-red text-text'
-          : 'border-green text-text')
+        'pointer-events-auto flex max-w-sm items-start gap-2 rounded-lg border bg-surface px-3 py-2 text-sm shadow-md transition-opacity duration-150 ' +
+        (toast.closing ? 'opacity-0' : 'animate-slide-in-up opacity-100') + ' ' +
+        (isError ? 'border-red text-text' : 'border-green text-text')
       }
     >
       {isError ? (

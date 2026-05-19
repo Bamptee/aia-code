@@ -29,7 +29,9 @@ const nextConfig: NextConfig = {
    */
   async rewrites() {
     return [
-      { source: '/api/:path*', destination: 'http://localhost:3001/api/:path*' },
+      // 127.0.0.1 explicite (pas `localhost`) pour éviter les fails IPv6 — Node 18+
+      // peut résoudre localhost vers ::1 alors qu'Express bind IPv4 only.
+      { source: '/api/:path*', destination: 'http://127.0.0.1:3001/api/:path*' },
     ];
   },
 };

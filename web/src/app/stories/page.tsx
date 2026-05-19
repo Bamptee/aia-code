@@ -1,8 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { Layers, Plus } from 'lucide-react';
 import { useStoriesQuery } from '@/lib/hooks/useStoriesQuery';
 import { useEpicsQuery } from '@/lib/hooks/useEpicsQuery';
+import { useToast } from '@/components/primitives/Toast';
 import { Filters, phaseToFilter, type LibraryFilter } from '@/components/library/Filters';
 import { SearchBox } from '@/components/library/SearchBox';
 import { StoryGroup } from '@/components/library/StoryGroup';
@@ -20,6 +22,7 @@ import type { Epic } from '@/lib/types/epic';
 export default function LibraryPage() {
   const stories = useStoriesQuery();
   const epics = useEpicsQuery();
+  const toast = useToast();
 
   const [filter, setFilter] = useState<LibraryFilter>('all');
   const [search, setSearch] = useState('');
@@ -48,10 +51,33 @@ export default function LibraryPage() {
   const isError = stories.isError || epics.isError;
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-text">Library</h1>
-      </div>
+    <div className="mx-auto max-w-5xl px-6 py-8">
+      <header className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-text">Stories</h1>
+          <p className="mt-1 text-sm text-text-3">
+            Organized by Epic. Each story flows through 7 steps — Product, then Dev.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => toast.success('New epic — coming soon')}
+            className="inline-flex items-center gap-1.5 rounded border border-border bg-surface px-2.5 py-1.5 text-xs text-text-2 transition-colors hover:bg-surface-hover hover:text-text"
+          >
+            <Layers size={13} />
+            New epic
+          </button>
+          <button
+            type="button"
+            onClick={() => toast.success('New story — coming soon')}
+            className="inline-flex items-center gap-1.5 rounded bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-ink transition-opacity hover:opacity-90"
+          >
+            <Plus size={14} />
+            New story
+          </button>
+        </div>
+      </header>
       <div className="mb-6 flex items-center justify-between gap-4">
         <Filters active={filter} counts={counts} onChange={setFilter} />
         <SearchBox value={search} onChange={setSearch} />

@@ -7,7 +7,9 @@ import { Share2, BookOpen, ListChecks, MoreHorizontal } from 'lucide-react';
 import { PhaseBadge } from '@/components/primitives/PhaseBadge';
 import { TypeBadge } from '@/components/primitives/TypeBadge';
 import { CuPill } from '@/components/primitives/CuPill';
+import { PrPill } from '@/components/primitives/PrPill';
 import { useToast } from '@/components/primitives/Toast';
+import { useEpicsQuery } from '@/lib/hooks/useEpicsQuery';
 import { setSearchParam } from '@/lib/url/setParam';
 import type { Story } from '@/lib/types/story';
 
@@ -27,6 +29,10 @@ export function StoryHeader({ story }: StoryHeaderProps) {
   const isReadMode =
     readParam === '1' || (readParam !== '0' && story.phase === 'done');
   const toast = useToast();
+  const epics = useEpicsQuery();
+  const epicName = story.epicId
+    ? epics.data?.find((e) => e.id === story.epicId)?.name ?? story.epicId
+    : null;
   const [kebabOpen, setKebabOpen] = useState(false);
   const kebabRef = useRef<HTMLDivElement>(null);
 
@@ -67,21 +73,17 @@ export function StoryHeader({ story }: StoryHeaderProps) {
     <div className="border-b border-border bg-surface px-6 py-3">
       <div className="flex items-center gap-2">
         <span className="font-mono text-[11px] text-text-3">{story.id}</span>
-        {story.epicId && (
+        {epicName && (
           <>
             <span className="text-text-3">·</span>
-            <span className="text-xs text-text-2">{story.epicId}</span>
+            <span className="text-xs text-text-2">{epicName}</span>
           </>
         )}
         <span className="text-text-3">·</span>
         <PhaseBadge phase={story.phase} />
         <TypeBadge type={story.type} />
         <CuPill state={story.cu} taskCount={story.cuTaskCount} />
-        {story.bitbucket.pr && (
-          <span className="font-mono text-[11px] text-text-2">
-            PR#{story.bitbucket.pr.number}
-          </span>
-        )}
+        {story.bitbucket.pr && <PrPill pr={story.bitbucket.pr} size="sm" />}
 
         <div className="ml-auto flex items-center gap-1">
           <Link

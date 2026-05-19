@@ -32,7 +32,7 @@ export function StoryWorkspace({ story }: StoryWorkspaceProps) {
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full flex-col">
       <StoryHeader story={story} />
       <SourceStrip story={story} />
       <StepRail story={story} />

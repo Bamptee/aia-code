@@ -40,12 +40,15 @@ export function RoadmapView() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to today on mount.
+  // Auto-scroll to today on mount uniquement. `todayWeek` est figé via useState
+  // dans useRoadmapWeeks → ce useLayoutEffect ne s'exécute qu'une fois et ne réécrit
+  // pas scrollLeft à chaque render (review Epic 6 P1).
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const targetLeft = ROADMAP_CONFIG.LABEL_COL_PX + (todayWeek - 3) * ROADMAP_CONFIG.COL_PX - 60;
-    el.scrollLeft = Math.max(0, targetLeft);
+    const vw = el.clientWidth;
+    const todayX = ROADMAP_CONFIG.LABEL_COL_PX + todayWeek * ROADMAP_CONFIG.COL_PX;
+    el.scrollLeft = Math.max(0, todayX - vw / 2);
   }, [todayWeek]);
 
   const filteredStories = useMemo(() => {

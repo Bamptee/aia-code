@@ -1,5 +1,6 @@
 'use client';
 
+import { ROADMAP_CONFIG } from '@/lib/hooks/useRoadmapWeeks';
 import { STEP_KEYS, type StepKey, type Phase, type StepStatus } from '@/lib/types/step';
 import type { Story } from '@/lib/types/story';
 
@@ -45,7 +46,14 @@ export function StoryBar({ story }: StoryBarProps) {
   const r = story.roadmap;
   if (!r) return null;
 
-  const span = Math.max(1, r.end - r.start);
+  // Clamp à la fenêtre [0, WEEK_COUNT-1] pour éviter implicit grid lines hors
+  // viewport, et invariant end >= start (review Epic 6 P2/P3).
+  const maxIdx = ROADMAP_CONFIG.WEEK_COUNT - 1;
+  const start = Math.max(0, Math.min(maxIdx, r.start));
+  const end = Math.max(start, Math.min(maxIdx, r.end));
+  const target = r.target !== undefined && r.target >= 0 && r.target <= maxIdx ? r.target : undefined;
+
+  const span = Math.max(1, end - start);
   const segWidthFr = span / STEP_KEYS.length;
 
   return (
@@ -53,8 +61,8 @@ export function StoryBar({ story }: StoryBarProps) {
       <div
         className="relative flex h-7 overflow-hidden rounded"
         style={{
-          gridColumnStart: r.start + 1,
-          gridColumnEnd: r.end + 2,
+          gridColumnStart: start + 1,
+          gridColumnEnd: end + 2,
           gridRow: 1,
         }}
       >
@@ -77,17 +85,17 @@ export function StoryBar({ story }: StoryBarProps) {
           );
         })}
       </div>
-      {r.target !== undefined && story.phase !== 'done' && (
+      {target !== undefined && story.phase !== 'done' && (
         <div
           aria-hidden
           className="pointer-events-none h-3 w-3 rotate-45 border-[1.5px] border-text bg-surface"
           style={{
-            gridColumnStart: r.target + 1,
+            gridColumnStart: target + 1,
             gridRow: 1,
             justifySelf: 'center',
             alignSelf: 'center',
           }}
-          title={`Target — week ${r.target}`}
+          title={`Target — week ${target}`}
         />
       )}
     </>

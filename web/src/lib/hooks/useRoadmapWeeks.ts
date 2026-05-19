@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 export interface RoadmapWeek {
   idx: number;
@@ -21,14 +21,17 @@ const MS_PER_WEEK = 7 * MS_PER_DAY;
 /**
  * useRoadmapWeeks — génère une timeline 16 semaines avec "today" au milieu.
  *
- * Pourquoi côté client : pas d'endpoint backend exposant la grille. La logique
- * est déterministe (Date.now()) donc OK pour un solo-dev. Story future :
- * remplacer par `useRoadmapQuery()` si le backend expose une grille canonique.
+ * `now` est figé au mount via useState lazy init pour éviter une boucle infinie
+ * d'invalidation : sans ça, `Date.now()` change à chaque render → useMemo
+ * réinvalidé → todayWeek change → useLayoutEffect réécrit scrollLeft → le user
+ * ne peut plus scroller (review Epic 6 D2/P1).
  *
  * `todayWeek` est fractionnaire pour positionner la ligne dashed au bon jour
  * dans la semaine courante.
  */
-export function useRoadmapWeeks(now: number = Date.now()): RoadmapTimeline {
+export function useRoadmapWeeks(): RoadmapTimeline {
+  const [now] = useState(() => Date.now());
+
   return useMemo(() => {
     const today = new Date(now);
     today.setHours(0, 0, 0, 0);

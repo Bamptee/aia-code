@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, X } from 'lucide-react';
+import { Send, X, Paperclip, Slash } from 'lucide-react';
 import { SlashPopover, type SlashCommand } from '@/components/primitives/SlashPopover';
 import type { StreamStatus } from '@/lib/sse/useChatStream';
 
@@ -75,8 +75,11 @@ export function ChatComposer({ onSubmit, onCancel, status, placeholder }: ChatCo
     textareaRef.current?.focus();
   };
 
+  const chip =
+    'inline-flex items-center justify-center rounded-full border border-border bg-surface px-2 py-1 text-xs text-text-2 transition-colors hover:bg-surface-hover hover:text-text';
+
   return (
-    <div className="relative border-t border-border bg-surface px-3 py-2">
+    <div className="relative bg-surface-2 px-4 pt-2 pb-[14px]">
       {slashOpen && (
         <SlashPopover
           commands={SLASH_COMMANDS}
@@ -85,42 +88,59 @@ export function ChatComposer({ onSubmit, onCancel, status, placeholder }: ChatCo
           onClose={() => setForceCloseSlash(true)}
         />
       )}
-      <div className="flex items-end gap-2">
+      {/* Inner composer card — bg-surface + border + radius (handoff §7.4 .composer) */}
+      <div className="rounded-lg border border-border bg-surface px-3 py-2 shadow-sm">
         <textarea
           ref={textareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          rows={2}
+          rows={1}
           placeholder={isStreaming ? 'Streaming…' : (placeholder ?? 'Type a message or / for commands…')}
           disabled={isStreaming}
-          className="flex-1 resize-none rounded border border-border bg-surface-2 px-3 py-2 text-sm text-text placeholder:text-text-3 focus:border-border-strong focus:outline-none disabled:opacity-50"
+          className="w-full resize-none border-none bg-transparent text-[13px] leading-[1.5] text-text outline-none placeholder:text-text-3 disabled:opacity-50"
+          style={{ minHeight: 22 }}
         />
-        {isStreaming ? (
+        <div className="flex items-center gap-1.5 pt-1.5">
           <button
             type="button"
-            onClick={onCancel}
-            aria-label="Cancel streaming"
-            className="rounded bg-red-soft p-2 text-red transition-colors hover:bg-red-soft/80"
+            aria-label="Attach"
+            className={chip}
+            onClick={() => { /* stub : pas câblé v1 */ }}
           >
-            <X size={14} />
+            <Paperclip size={13} />
           </button>
-        ) : (
           <button
             type="button"
-            onClick={submit}
-            disabled={!value.trim()}
-            aria-label="Send message"
-            className="rounded bg-accent p-2 text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Slash commands"
+            className={chip}
+            onClick={() => setValue((v) => (v.startsWith('/') ? v : '/'))}
           >
-            <Send size={14} />
+            <Slash size={13} />
           </button>
-        )}
+          <span className="ml-auto font-mono text-[11px] text-text-3">↵</span>
+          {isStreaming ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              aria-label="Cancel streaming"
+              className="grid h-[30px] w-[30px] place-items-center rounded-sm bg-red-soft text-red transition-colors hover:bg-red-soft/80"
+            >
+              <X size={13} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!value.trim()}
+              aria-label="Send message"
+              className="grid h-[30px] w-[30px] place-items-center rounded-sm bg-accent text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Send size={13} />
+            </button>
+          )}
+        </div>
       </div>
-      <p className="mt-1 text-[10px] text-text-3">
-        <kbd className="rounded border border-border px-1 font-mono">⌘↵</kbd> to send ·{' '}
-        <kbd className="rounded border border-border px-1 font-mono">/</kbd> for commands
-      </p>
     </div>
   );
 }

@@ -7,11 +7,18 @@ const TYPE_LABEL: Record<StoryType, string> = {
   chore: 'Chore',
 };
 
-const TYPE_STYLES: Record<StoryType, { bg: string; text: string }> = {
-  feature: { bg: 'var(--blue-soft)', text: 'var(--blue)' },
-  bug: { bg: 'var(--red-soft)', text: 'var(--red)' },
-  spike: { bg: 'var(--amber-soft)', text: 'var(--amber)' },
-  chore: { bg: 'var(--surface-hover)', text: 'var(--text-3)' },
+/**
+ * Mapping handoff (.badge variants .active/.draft/.review/.shipped) :
+ * - feature → active (green)
+ * - bug → draft (amber)
+ * - spike → review (blue)
+ * - chore → shipped (text-2)
+ */
+const TYPE_STYLES: Record<StoryType, { bg: string; text: string; dot: string }> = {
+  feature: { bg: 'var(--green-soft)', text: 'var(--green)', dot: 'var(--green)' },
+  bug: { bg: 'var(--amber-soft)', text: 'var(--amber)', dot: 'var(--amber)' },
+  spike: { bg: 'var(--blue-soft)', text: 'var(--blue)', dot: 'var(--blue)' },
+  chore: { bg: 'var(--surface-2)', text: 'var(--text-2)', dot: 'var(--text-3)' },
 };
 
 interface TypeBadgeProps {
@@ -19,16 +26,26 @@ interface TypeBadgeProps {
 }
 
 /**
- * Story type badge (handoff §13).
- * Used in StoryHeader and Library rows.
+ * Story type badge (handoff §13 / views-v3.jsx:28-41 .badge).
+ *
+ * Format pill 999px : dot prefix 5px + label casse normale + 11.5px + border 1px @ 20%.
  */
 export function TypeBadge({ type }: TypeBadgeProps) {
-  const { bg, text } = TYPE_STYLES[type];
+  const { bg, text, dot } = TYPE_STYLES[type];
   return (
     <span
-      className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
-      style={{ backgroundColor: bg, color: text }}
+      className="inline-flex items-center gap-[5px] rounded-full px-2 py-0.5 text-[11.5px] font-medium tracking-[-0.005em]"
+      style={{
+        backgroundColor: bg,
+        color: text,
+        border: `1px solid ${text}33`,
+      }}
     >
+      <span
+        aria-hidden
+        className="inline-block h-[5px] w-[5px] rounded-full"
+        style={{ backgroundColor: dot }}
+      />
       {TYPE_LABEL[type]}
     </span>
   );

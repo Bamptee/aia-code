@@ -69,9 +69,17 @@ export function StoryHeader({ story }: StoryHeaderProps) {
 
   const tasksDisabled = story.tasksTotal === 0;
 
+  // Bouton styles handoff (.btn variants) :
+  // - btn-ghost : transparent, text-2, hover surface-hover/text. Pas de border.
+  // - btn-secondary : bg-surface, border-border, text-text. Pas de hover bg différent.
+  const btnGhost =
+    'inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-[13px] transition-colors text-text-2 hover:bg-surface-hover hover:text-text';
+  const btnSecondary =
+    'inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface px-3 py-1.5 text-[13px] text-text transition-colors hover:bg-surface-hover';
+
   return (
-    <div className="border-b border-border bg-surface px-6 py-3">
-      <div className="flex items-center gap-2">
+    <div className="border-b border-border bg-bg px-6 py-3">
+      <div className="mb-[3px] flex items-center gap-2">
         <span className="font-mono text-[11px] text-text-3">{story.id}</span>
         {epicName && (
           <>
@@ -79,49 +87,47 @@ export function StoryHeader({ story }: StoryHeaderProps) {
             <span className="text-xs text-text-2">{epicName}</span>
           </>
         )}
-        <span className="text-text-3">·</span>
         <PhaseBadge phase={story.phase} />
         <TypeBadge type={story.type} />
         <CuPill state={story.cu} taskCount={story.cuTaskCount} />
         {story.bitbucket.pr && <PrPill pr={story.bitbucket.pr} size="sm" />}
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1.5">
           <Link
             href={tasksDisabled ? '#' : `/tasks?story=${story.slug}`}
             aria-disabled={tasksDisabled}
             onClick={(e) => tasksDisabled && e.preventDefault()}
             className={
-              'inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs transition-colors ' +
-              (tasksDisabled
-                ? 'cursor-not-allowed text-text-3 opacity-50'
-                : 'text-text-2 hover:bg-surface-hover hover:text-text')
+              btnGhost +
+              (tasksDisabled ? ' pointer-events-none opacity-50' : '')
             }
           >
-            <ListChecks size={12} />
-            <span className="font-mono">
-              {story.tasksDone}/{story.tasksTotal}
+            <ListChecks size={13} />
+            <span>
+              <span className="font-mono">{story.tasksDone}/{story.tasksTotal}</span> tasks
             </span>
           </Link>
           <button
             type="button"
             onClick={toggleRead}
+            aria-pressed={isReadMode}
             className={
-              'inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs transition-colors ' +
-              (isReadMode
-                ? 'bg-accent text-accent-ink'
-                : 'text-text-2 hover:bg-surface-hover hover:text-text')
+              isReadMode
+                ? 'inline-flex items-center gap-1.5 rounded-sm bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink transition-opacity hover:opacity-90'
+                : btnSecondary
             }
           >
-            <BookOpen size={12} />
+            <BookOpen size={13} />
             <span>Read</span>
           </button>
           <button
             type="button"
             onClick={share}
             aria-label="Share story link"
-            className="rounded border border-border p-1.5 text-text-2 transition-colors hover:bg-surface-hover hover:text-text"
+            className={btnSecondary}
           >
-            <Share2 size={12} />
+            <Share2 size={13} />
+            <span>Share</span>
           </button>
           <div ref={kebabRef} className="relative">
             <button
@@ -129,9 +135,9 @@ export function StoryHeader({ story }: StoryHeaderProps) {
               onClick={() => setKebabOpen((o) => !o)}
               aria-label="More actions"
               aria-expanded={kebabOpen}
-              className="rounded border border-border p-1.5 text-text-2 transition-colors hover:bg-surface-hover hover:text-text"
+              className="inline-flex items-center rounded-sm border border-border bg-surface p-1.5 text-text transition-colors hover:bg-surface-hover"
             >
-              <MoreHorizontal size={12} />
+              <MoreHorizontal size={14} />
             </button>
             {kebabOpen && (
               <div
@@ -166,7 +172,10 @@ export function StoryHeader({ story }: StoryHeaderProps) {
         </div>
       </div>
 
-      <h1 className="mt-2 truncate text-[17px] font-semibold text-text">
+      <h1
+        className="truncate text-[17px] font-semibold text-text"
+        style={{ letterSpacing: '-0.016em' }}
+      >
         {story.title}
       </h1>
     </div>

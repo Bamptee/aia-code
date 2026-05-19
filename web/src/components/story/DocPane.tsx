@@ -45,28 +45,33 @@ export function DocPane({ story }: DocPaneProps) {
   const tokens = stepState?.tokens;
 
   return (
-    <div className="flex-[1.55] overflow-y-auto bg-surface px-6 py-5">
-      {/* Step kicker (handoff §7.4 views-v3.jsx:491-499) */}
-      <div className="mb-4 flex items-center gap-2 font-mono text-[11px] uppercase tracking-wider text-text-3">
-        <span
-          aria-hidden
-          className={
-            'inline-block h-1.5 w-1.5 rounded-full ' +
-            (status === 'in-progress'
-              ? 'animate-pulse bg-blue'
-              : status === 'done'
-                ? 'bg-green'
-                : 'bg-text-3')
-          }
-        />
-        <span>Step · {conf.name}</span>
-        <span>·</span>
-        <span>{conf.type}</span>
-        {typeof tokens === 'number' && tokens > 0 && (
-          <span className="ml-auto">{formatTokens(tokens)} tokens</span>
-        )}
+    <div className="flex-[1.55] overflow-y-auto bg-surface">
+      <div className="mx-auto max-w-[760px] px-14 pt-8 pb-20">
+        {/* Step kicker (handoff §7.4 views-v3.jsx:491-499) */}
+        <div
+          className="mb-[18px] flex items-center gap-2 font-mono text-[11px] uppercase text-text-3"
+          style={{ letterSpacing: '0.06em' }}
+        >
+          <span
+            aria-hidden
+            className={
+              'inline-block h-1.5 w-1.5 rounded-full ' +
+              (status === 'in-progress'
+                ? 'animate-pulse bg-blue shadow-[0_0_0_4px_rgba(31,93,140,0.12)]'
+                : status === 'done'
+                  ? 'bg-green'
+                  : 'bg-amber')
+            }
+          />
+          <span>Step · {conf.name}</span>
+          <span>·</span>
+          <span>{conf.type}</span>
+          {typeof tokens === 'number' && tokens > 0 && (
+            <span className="ml-auto">{formatTokens(tokens)} tokens</span>
+          )}
+        </div>
+        <StepContent step={activeStep} story={story} />
       </div>
-      <StepContent step={activeStep} story={story} />
     </div>
   );
 }

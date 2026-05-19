@@ -15,8 +15,10 @@ const PR_STYLES: Record<PullRequest['state'], { bg: string; text: string; label:
 };
 
 /**
- * Pull Request pill (handoff §13). Affiche #num · State.
- * size=sm utilisé en Library row, size=lg en SourceStrip.
+ * Pull Request pill (handoff §13 + .pr-pill CSS lignes 170-192).
+ *
+ * Format `rounded-[4px]` (pas pill 999), tout en font-mono. Affiche `<icon> #num · State`.
+ * size=sm pour Library row (text-11px), size=lg pour SourceStrip (text-12px).
  */
 export function PrPill({ pr, size = 'sm' }: PrPillProps) {
   const s = PR_STYLES[pr.state];
@@ -25,13 +27,13 @@ export function PrPill({ pr, size = 'sm' }: PrPillProps) {
   return (
     <span
       className={
-        'inline-flex items-center gap-1 rounded font-medium ' +
-        (isLg ? 'px-2 py-1 text-xs' : 'px-1.5 py-0.5 text-[10px]')
+        'inline-flex items-center gap-1 rounded-[4px] font-mono font-medium ' +
+        (isLg ? 'px-2.5 py-1 text-xs' : 'px-[7px] py-0.5 text-[11px]')
       }
       style={{ backgroundColor: s.bg, color: s.text }}
     >
-      <Icon size={isLg ? 12 : 10} />
-      <span className="font-mono">#{pr.number}</span>
+      <Icon size={isLg ? 13 : 11} />
+      <span>#{pr.number}</span>
       <span>·</span>
       <span>{s.label}</span>
     </span>

@@ -65,11 +65,11 @@ export function ChatPane({ story }: ChatPaneProps) {
 
   return (
     <aside className="flex flex-1 flex-col overflow-hidden bg-surface-2">
-      <div ref={listRef} className="flex-1 overflow-y-auto p-4">
+      <div ref={listRef} className="flex-1 overflow-y-auto px-[18px] pb-2 pt-4">
         {messages.length === 0 ? (
           <EmptyChat activeStep={activeStep} />
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
             {messages.map((m) => (
               <Message
                 key={m.id}

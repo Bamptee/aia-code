@@ -1,3 +1,4 @@
+import { Check, RefreshCw } from 'lucide-react';
 import type { CuSyncState } from '@/lib/types/story';
 
 interface CuPillProps {
@@ -5,32 +6,45 @@ interface CuPillProps {
   taskCount?: number;
 }
 
-const CU_STYLES: Record<CuSyncState, { bg: string; text: string; label: string; dot: string }> = {
-  synced: { bg: 'var(--green-soft)', text: 'var(--green)', label: 'synced', dot: 'var(--green)' },
-  drift: { bg: 'var(--amber-soft)', text: 'var(--amber)', label: 'drift', dot: 'var(--amber)' },
-  none: { bg: 'var(--surface-hover)', text: 'var(--text-3)', label: 'none', dot: 'var(--text-3)' },
-};
-
 /**
- * ClickUp sync state pill (handoff §13).
+ * ClickUp sync state pill (handoff §13 + .cu-pill CSS lignes 1742-1752).
+ *
+ * Labels par état (handoff views-v3.jsx:172-176) :
+ * - synced → `<Check> CU` (vert)
+ * - drift → `<RefreshCw> drift` (amber)
+ * - none → `— not pushed` (text-3)
+ *
+ * Format : rounded-4px font-mono 11px padding 2px 7px.
  */
 export function CuPill({ state, taskCount }: CuPillProps) {
-  const s = CU_STYLES[state];
+  const showCount = state === 'synced' && typeof taskCount === 'number' && taskCount > 0;
+
+  if (state === 'none') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-[4px] px-[7px] py-0.5 font-mono text-[11px]"
+        style={{ backgroundColor: 'var(--surface-2)', color: 'var(--text-3)' }}
+        title="Not pushed to ClickUp"
+      >
+        — not pushed
+      </span>
+    );
+  }
+
+  const { bg, fg, label, Icon } =
+    state === 'drift'
+      ? { bg: 'var(--amber-soft)', fg: 'var(--amber)', label: 'drift', Icon: RefreshCw }
+      : { bg: 'var(--green-soft)', fg: 'var(--green)', label: 'CU', Icon: Check };
+
   return (
     <span
-      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
-      style={{ backgroundColor: s.bg, color: s.text }}
-      title={state === 'none' ? 'Not synced to ClickUp' : `ClickUp ${s.label}`}
+      className="inline-flex items-center gap-1 rounded-[4px] px-[7px] py-0.5 font-mono text-[11px]"
+      style={{ backgroundColor: bg, color: fg }}
+      title={state === 'synced' ? 'Synced with ClickUp' : 'Drift detected'}
     >
-      <span
-        aria-hidden="true"
-        className="inline-block h-1.5 w-1.5 rounded-full"
-        style={{ backgroundColor: s.dot }}
-      />
-      <span>CU</span>
-      {typeof taskCount === 'number' && taskCount > 0 && (
-        <span className="font-mono">{taskCount}</span>
-      )}
+      <Icon size={10} />
+      <span>{label}</span>
+      {showCount && <span>{taskCount}</span>}
     </span>
   );
 }

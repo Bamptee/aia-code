@@ -31,58 +31,67 @@ export function SourceStrip({ story }: SourceStripProps) {
   const pipelineChecks = bb.pr?.pipeline?.checks ?? [];
   const reviewers = bb.pr?.reviewers ?? [];
 
+  const pipeline = bb.pr?.pipeline;
   return (
-    <div className="flex items-center gap-3 border-b border-border bg-surface-2 px-6 py-2 text-xs">
+    <div
+      className="flex items-center gap-2.5 overflow-x-auto border-b border-border bg-surface-2 px-6 py-2 text-xs text-text-2"
+      style={{ scrollbarWidth: 'none' }}
+    >
       <BitbucketIcon />
       <BranchChip branch={bb.branch} />
       {bb.commits > 0 && (
-        <span className="text-text-3">
-          <span className="font-mono">{bb.commits}</span>{' '}
-          {bb.commits === 1 ? 'commit' : 'commits'}
-        </span>
+        <>
+          <Sep />
+          <span className="font-mono text-[11px] text-text-3">
+            {bb.commits} {bb.commits === 1 ? 'commit' : 'commits'}
+          </span>
+        </>
       )}
       {bb.pr && (
         <>
-          <span className="text-text-3">·</span>
+          <Sep />
           <PrPill pr={bb.pr} size="lg" />
-          <span className="text-text-3">→</span>
-          <span className="font-mono text-[11px] text-text-2">{bb.pr.target}</span>
+          <span className="font-mono text-[11px] text-text-3">→ {bb.pr.target}</span>
         </>
       )}
       {pipelineChecks.length > 0 && (
         <>
-          <span className="text-text-3">·</span>
+          <Sep />
           <PipelineStack checks={pipelineChecks} compact />
+          {pipeline && (
+            <span className="font-mono text-[11px] text-text-3">
+              {pipeline.buildId ?? '—'} · {pipeline.duration}
+            </span>
+          )}
         </>
       )}
       {reviewers.length > 0 && (
         <>
-          <span className="text-text-3">·</span>
+          <Sep />
           <ReviewerStack reviewers={reviewers} size={20} />
         </>
       )}
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex items-center gap-1.5">
         {bb.pr ? (
           <a
             href={`https://bitbucket.org/_/pull-requests/${bb.pr.number}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-text-2 transition-colors hover:bg-surface hover:text-text"
+            className="inline-flex items-center gap-1 rounded-sm px-2 py-[3px] text-[11.5px] text-text-2 transition-colors hover:bg-surface-hover hover:text-text"
           >
-            <ExternalLink size={10} />
+            <ExternalLink size={11} />
             <span>Open in Bitbucket</span>
           </a>
         ) : (
           <button
             type="button"
             onClick={() => {
-              // Stub : actual create PR endpoint pas câblé en v1.
               if (typeof window !== 'undefined') {
                 window.alert('Create PR — endpoint à câbler côté Express (ADD-13).');
               }
             }}
-            className="rounded bg-accent px-2 py-1 text-[11px] font-medium text-accent-ink transition-opacity hover:opacity-90"
+            className="rounded-sm border border-border bg-surface px-3 py-1.5 text-[13px] text-text transition-colors hover:bg-surface-hover"
           >
             Open PR
           </button>
@@ -92,6 +101,10 @@ export function SourceStrip({ story }: SourceStripProps) {
   );
 }
 
+function Sep() {
+  return <span className="text-border-strong">·</span>;
+}
+
 /**
  * Bitbucket logo icon — lucide-react n'inclut pas Bitbucket nativement (handoff §18
  * suggère simple-icons). Pour v1 minimal, on inline un SVG simple représentatif.
@@ -99,8 +112,8 @@ export function SourceStrip({ story }: SourceStripProps) {
 function BitbucketIcon() {
   return (
     <svg
-      width="14"
-      height="14"
+      width="13"
+      height="13"
       viewBox="0 0 24 24"
       fill="currentColor"
       aria-hidden="true"

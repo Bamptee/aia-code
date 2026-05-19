@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Sparkles, MessageCircle, Slash, RefreshCw } from 'lucide-react';
+import { Check, Sparkles, Bot, Slash, RefreshCw } from 'lucide-react';
 import { useToast } from '@/components/primitives/Toast';
 import type { StepKey, StepState, StepType } from '@/lib/types/step';
 
@@ -48,18 +48,21 @@ export function ChatActionBar({ step, state, hasMessages, onPrimary }: ChatActio
   };
 
   return (
-    <div className="flex flex-col gap-1 border-t border-border bg-surface-2 px-3 pt-2">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-text-3">
+    <>
+      {/* Context kicker — sibling au-dessus de l'action bar (handoff CSS lignes 1696-1707) */}
+      <div
+        className="flex items-center gap-1 border-t border-border bg-surface-2 px-4 pt-1 font-mono text-[11px] text-text-3"
+      >
         <Sparkles size={11} />
         <span>
           Step: <span className="text-text-2">{conf.name}</span> · {status}
         </span>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 bg-surface-2 px-4 py-2">
         <button
           type="button"
           onClick={handlePrimary}
-          className="inline-flex items-center gap-1.5 rounded bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-ink transition-opacity hover:opacity-90"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-sm bg-accent px-3 py-[7px] text-[13px] font-medium text-accent-ink transition-opacity hover:opacity-90"
         >
           <action.Icon size={13} />
           {action.label}
@@ -68,22 +71,22 @@ export function ChatActionBar({ step, state, hasMessages, onPrimary }: ChatActio
           type="button"
           onClick={() => toast.success('Slash commands — Cmd+/')}
           aria-label="Slash commands"
-          className="rounded border border-border bg-surface p-1.5 text-text-2 transition-colors hover:bg-surface-hover hover:text-text"
+          className="inline-flex items-center justify-center rounded-sm border border-border bg-surface px-2.5 py-[7px] text-text-2 transition-colors hover:bg-surface-hover hover:text-text"
           title="Slash commands"
         >
-          <Slash size={12} />
+          <Slash size={13} />
         </button>
         <button
           type="button"
           onClick={() => toast.success('Push to ClickUp — coming soon')}
           aria-label="Push to ClickUp"
-          className="rounded border border-border bg-surface p-1.5 text-text-2 transition-colors hover:bg-surface-hover hover:text-text"
+          className="inline-flex items-center justify-center rounded-sm border border-border bg-surface px-2.5 py-[7px] text-text-2 transition-colors hover:bg-surface-hover hover:text-text"
           title="Push to ClickUp"
         >
-          <RefreshCw size={12} />
+          <RefreshCw size={13} />
         </button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -95,7 +98,7 @@ function pickPrimary(step: StepKey, state: StepState | undefined, hasMessages: b
   if (conf.type === 'chat-only') {
     return hasMessages
       ? { label: 'Save summary', Icon: Check }
-      : { label: 'Start brainstorming', Icon: MessageCircle };
+      : { label: 'Start brainstorming', Icon: Bot };
   }
   if (status === 'in-progress') return { label: `Save ${conf.name}`, Icon: Check };
   return { label: `Generate ${conf.name}`, Icon: Sparkles };

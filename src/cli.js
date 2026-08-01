@@ -13,6 +13,7 @@ import { registerStatusCommand } from './commands/status.js';
 import { registerResetCommand } from './commands/reset.js';
 import { registerNextCommand } from './commands/next.js';
 import { registerQuickCommand } from './commands/quick.js';
+import { registerSquadCommand } from './commands/squad.js';
 import { registerIterateCommand } from './commands/iterate.js';
 import { registerUiCommand } from './commands/ui.js';
 import { registerEpicCommand } from './commands/epic.js';
@@ -41,6 +42,7 @@ export function createCli() {
   registerRunCommand(program);
   registerNextCommand(program);
   registerQuickCommand(program);
+  registerSquadCommand(program);
   registerRepoCommand(program);
   registerStatusCommand(program);
   registerResetCommand(program);

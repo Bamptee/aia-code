@@ -67,6 +67,42 @@ export const FEATURE_STEPS = Object.freeze([
 
 export const QUICK_STEPS = Object.freeze(['dev-plan', 'implement', 'review']);
 
+// ============== Squad mode (multi-agent orchestration) ==============
+
+/**
+ * Model tiers used to route each build sub-agent to a model sized to the task.
+ * @type {string[]}
+ */
+export const MODEL_TIERS = Object.freeze(['high', 'medium', 'low']);
+
+/**
+ * Fallback tier -> model mapping when config.model_tiers is absent.
+ * Uses the CLI-default alias so it works with any setup (no assumption about
+ * which concrete models the user has access to). Override in .aia/config.yaml.
+ * @type {Object<string, string>}
+ */
+export const DEFAULT_TIER_MODELS = Object.freeze({
+  high: 'claude-default',
+  medium: 'claude-default',
+  low: 'claude-default',
+});
+
+/** Default tier for a task that does not declare one. */
+export const DEFAULT_TIER = 'medium';
+
+/** Default max number of build sub-agents running concurrently. */
+export const DEFAULT_MAX_PARALLEL = 3;
+
+/**
+ * Squad pipeline: sequential spec/plan steps reused from the normal flow, then a
+ * parallel `build` phase (driven by the orchestrator, NOT by runStep/status), then
+ * review. `build` is intentionally absent from FEATURE_STEPS so the status schema
+ * and the web UI stay untouched.
+ * @type {string[]}
+ */
+export const SQUAD_PRE_STEPS = Object.freeze(['spec-tech', 'dev-plan']);
+export const SQUAD_POST_STEPS = Object.freeze(['review']);
+
 /**
  * Dev chain steps - auto-chained when the UI auto-chain toggle is on.
  * Excludes 'review' on purpose (review is chat-first).

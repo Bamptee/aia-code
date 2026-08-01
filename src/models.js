@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import yaml from 'yaml';
 import chalk from 'chalk';
-import { AIA_DIR } from './constants.js';
+import { AIA_DIR, MODEL_TIERS, DEFAULT_TIER_MODELS, DEFAULT_TIER } from './constants.js';
 import { loadGlobalConfig } from './services/config.js';
 
 export async function loadConfig(root = process.cwd()) {
@@ -92,4 +92,40 @@ export async function resolveModel(step, root = process.cwd()) {
   console.log(chalk.cyan(`[AI] step=${step} model=${selected}`));
 
   return selected;
+}
+
+/**
+ * Resolve the concrete model for a build sub-agent from its tier.
+ *
+ * Resolution order: config.model_tiers[tier] -> DEFAULT_TIER_MODELS[tier] ->
+ * the `implement` step model. Never throws on an unknown tier (falls back to
+ * DEFAULT_TIER).
+ *
+ * @param {string} tier - 'high' | 'medium' | 'low'
+ * @param {string} [root]
+ * @returns {Promise<string>} model id or alias
+ */
+export async function resolveModelForTier(tier, root = process.cwd()) {
+  const normalized = MODEL_TIERS.includes(tier) ? tier : DEFAULT_TIER;
+
+  let config = null;
+  try {
+    config = await loadConfig(root);
+  } catch {
+    config = null;
+  }
+
+  const fromConfig = config?.model_tiers?.[normalized];
+  if (fromConfig) {
+    console.log(chalk.cyan(`[AI] tier=${normalized} model=${fromConfig}`));
+    return fromConfig;
+  }
+
+  const fallback = DEFAULT_TIER_MODELS[normalized];
+  if (fallback) {
+    console.log(chalk.cyan(`[AI] tier=${normalized} model=${fallback} (default)`));
+    return fallback;
+  }
+
+  return resolveModel('implement', root);
 }

@@ -81,6 +81,8 @@ import { createStory, skipStep, unskipStep } from '../../services/feature.js';
 import { STORY_PHASES } from '../../constants.js';
 import { runStep } from '../../services/runner.js';
 import { runQuick } from '../../services/quick.js';
+import { runSquad } from '../../services/squad.js';
+import { DEFAULT_MAX_PARALLEL } from '../../constants.js';
 import { suggestFlowType } from '../../services/flow-analyzer.js';
 import { getGuidance } from '../../services/suggestions.js';
 import { callModel } from '../../services/model-call.js';
@@ -358,6 +360,42 @@ export function registerFeatureRoutes(router) {
         onData,
       });
       sseSend(res, 'done', { status: 'completed' });
+    } catch (err) {
+      sseSend(res, 'error', { message: err.message });
+    }
+    res.end();
+  });
+
+  // Squad multi-agent build with SSE streaming
+  // spec-tech -> dev-plan -> build (parallel sub-agents) -> review
+  router.post('/api/features/:name/squad', async (req, res, { params, root, parseBody }) => {
+    const body = await parseBody();
+    sseHeaders(res);
+    sseSend(res, 'status', { kind: 'started', mode: 'squad' });
+
+    const onData = ({ type, text, taskId }) => {
+      try { sseSend(res, 'log', { type, text, taskId }); } catch {}
+    };
+    const onEvent = (ev) => {
+      try { sseSend(res, 'status', ev); } catch {}
+    };
+
+    try {
+      const maxParallel = Math.max(1, parseInt(body.parallel, 10) || DEFAULT_MAX_PARALLEL);
+      const { report } = await runSquad(params.name, {
+        description: body.description,
+        maxParallel,
+        review: body.review !== false,
+        root,
+        onData,
+        onEvent,
+      });
+      sseSend(res, 'done', {
+        verdict: report.verdict,
+        ok: report.ok,
+        failed: report.failed,
+        tasks: report.tasks,
+      });
     } catch (err) {
       sseSend(res, 'error', { message: err.message });
     }

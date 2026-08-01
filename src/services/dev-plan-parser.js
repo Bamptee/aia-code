@@ -48,6 +48,8 @@ export function parseDevPlan(markdown) {
       details: extractDetails(taskContent),
       dependencies: extractDependencies(taskContent),
       tests: extractTests(taskContent),
+      tier: extractTier(taskContent),
+      parallelizable: extractParallelizable(taskContent),
       status: 'pending',
     };
 
@@ -149,6 +151,33 @@ function extractDependencies(content) {
   }
 
   return deps;
+}
+
+/**
+ * Extracts the model tier (high|medium|low) from task content.
+ * @param {string} content - Task content
+ * @returns {string|null}
+ */
+function extractTier(content) {
+  const m = content.match(/(?:Model\s*tier|Tier)\s*:[\s*]*(high|medium|low|haut|moyen|bas)\b/i);
+  if (!m) return null;
+  const raw = m[1].toLowerCase();
+  if (raw === 'haut') return 'high';
+  if (raw === 'moyen') return 'medium';
+  if (raw === 'bas') return 'low';
+  return raw;
+}
+
+/**
+ * Extracts the parallelizable flag from task content.
+ * Returns true/false when explicitly stated, otherwise null (unknown).
+ * @param {string} content - Task content
+ * @returns {boolean|null}
+ */
+function extractParallelizable(content) {
+  const m = content.match(/Parallel(?:izable|isable)?\s*:[\s*]*(yes|no|true|false|oui|non)\b/i);
+  if (!m) return null;
+  return /^(yes|true|oui)$/i.test(m[1]);
 }
 
 /**

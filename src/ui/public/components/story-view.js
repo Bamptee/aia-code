@@ -3,6 +3,7 @@ import { api, streamPost } from '/main.js';
 import { EpicSelector } from '/components/epic-selector.js';
 import { StoryWorktrunkPanel } from '/components/worktrunk-panel.js';
 import { PushModal } from '/components/integrations-browser.js';
+import { SquadPanel } from '/components/squad-panel.js';
 
 // ============== Prompt Preview Modal ==============
 
@@ -3720,6 +3721,11 @@ export function StoryView({ slug, context = 'product' }) {
     context === 'dev' && accessLevel === 'edit' && React.createElement(AutoChainToggle, {
       enabled: autoChainDev,
       onChange: setAutoChainDev,
+    }),
+
+    // Squad multi-agent build (only in dev context with edit access)
+    context === 'dev' && accessLevel === 'edit' && React.createElement(SquadPanel, {
+      slug,
     }),
 
     // Product Actions (only in product context with edit access, discovery phase)

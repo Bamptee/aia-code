@@ -259,6 +259,8 @@ Ordered list of tasks. For each task:
 - **Dependencies:** Which previous tasks must be done first
 - **Tests:** What tests to write for this task
 - **Complexity:** S (< 1h) / M (1-3h) / L (3-8h)
+- **Model tier:** high | medium | low  (match task difficulty to model size — high = complex logic/architecture, medium = standard, low = boilerplate/UI/config)
+- **Parallelizable:** yes | no  (yes ONLY if this task's Files do not overlap sibling tasks AND its Dependencies are respected — the squad orchestrator runs parallelizable tasks concurrently)
 
 ### Summary
 - Total tasks: N
@@ -291,6 +293,7 @@ Ordered list of tasks. For each task:
 - [ ] Dependencies are explicitly stated
 - [ ] File paths match existing project conventions
 - [ ] Test coverage is planned for every task
+- [ ] Every task declares a Model tier (high|medium|low) and a Parallelizable flag
 - [ ] All assumptions marked [HYPOTHESE]`,
 
   implement: `---

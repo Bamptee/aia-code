@@ -44,6 +44,14 @@ const DEFAULT_PROJECT_CONFIG = {
       { model: 'openai-default', weight: 1 },
     ],
   },
+  // Squad mode: model used per build sub-agent, by task tier.
+  // Customize with concrete model ids you have access to, e.g.
+  // high: claude-opus-4-6, medium: claude-sonnet-4-6, low: gemini-2.5-flash
+  model_tiers: {
+    high: 'claude-default',
+    medium: 'claude-default',
+    low: 'claude-default',
+  },
   knowledge_default: ['backend'],
   context_files: [
     'context/project.md',

@@ -9,6 +9,7 @@ AIA structures your feature development into steps (brief, spec, tech-spec, dev-
 - [Quick start](#quick-start)
 - [Prerequisites](#prerequisites)
 - [Commands](#commands)
+- [Squad Mode (multi-agent build)](#squad-mode-multi-agent-build)
 - [Integrate into an existing project](#integrate-into-an-existing-project)
 - [Web UI](#web-ui)
 - [Epic & Product Management](#epic--product-management)
@@ -52,6 +53,7 @@ Each CLI manages its own authentication. Run `claude`, `codex`, or `gemini` once
 | `aia reset <step> <feature>` | Reset a step to pending so it can be re-run |
 | `aia iterate <step> <feature> <instructions>` | Re-run a step with additional instructions to refine the output |
 | `aia quick <name> [description]` | Quick story/ticket: dev-plan → implement → review only |
+| `aia squad <name> [description]` | Multi-agent build: spec-tech → dev-plan → parallel sub-agents → review |
 | `aia repo scan` | Scan codebase and generate `repo-map.json` |
 | `aia ui` | Launch the local web UI to manage features and config |
 
@@ -63,6 +65,41 @@ Each CLI manages its own authentication. Run `claude`, `codex`, or `gemini` once
 | `-a, --apply` | Let the AI edit and create files in the project (agent mode) |
 
 The `implement` step forces `--apply` automatically.
+
+## Squad Mode (multi-agent build)
+
+Squad mode replaces the single-agent `implement` step with an **orchestrated, parallel build** — inspired by the "orchestrator + sub-agents" pattern: one coordinator splits the work, many specialized agents execute it concurrently, each on a model sized to its task.
+
+```bash
+aia squad session-replay "Record and replay user sessions for debugging"
+```
+
+Pipeline:
+
+```
+spec-tech  →  dev-plan  →  build (parallel sub-agents)  →  review
+```
+
+How it works:
+
+1. **spec-tech** and **dev-plan** run through the normal sequential engine. The dev-plan prompt tags every task with a `Model tier` (`high` | `medium` | `low`) and a `Parallelizable` flag, in addition to `Files` and `Dependencies`.
+2. **build** is driven by the orchestrator (`src/services/orchestrator.js`): tasks are grouped into waves that respect their declared dependencies; each wave runs up to `--parallel <n>` sub-agents concurrently (default 3). Each sub-agent is a standalone CLI process, scoped to its task's files, and routed to the model mapped to its tier. If a task fails, its dependents are skipped rather than built on broken code. Results are merged into `build.md` with a per-task report and a verdict: **SHIP** / **SHIP WITH FIXES** / **NEEDS REWORK**. When every task lands, the `implement` step is marked done automatically.
+3. **review** runs the normal review step over the whole implementation (skip it with `--no-review`).
+
+Map tiers to concrete models in `.aia/config.yaml` (defaults to `claude-default` for every tier):
+
+```yaml
+model_tiers:
+  high: claude-opus-4-6      # complex logic, architecture
+  medium: claude-sonnet-4-6  # standard tasks
+  low: gemini-2.5-flash      # boilerplate, UI, config
+```
+
+Options: `-p, --parallel <n>` (max concurrent sub-agents), `--no-review`, `-v, --verbose`.
+
+Squad mode is fully additive: `run`, `next`, `quick`, the status schema and existing stories are untouched — `build` is not a status step; its report lives in `build.md` inside the story folder. In the web UI, open a story in the **Dev** view and use the **⚡ Squad build** panel: it streams the pipeline steps, the sub-agent cards (tier, model, status) and the final verdict live.
+
+> Current limits: sub-agent file-scope isolation is enforced by prompt contract, not by sandboxing (worktree-per-agent is on the roadmap), and the UI panel does not yet reconnect to an in-flight build after a page reload.
 
 ## Integrate into an existing project
 

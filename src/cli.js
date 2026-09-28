@@ -28,6 +28,7 @@ import { registerQAGenCommand } from './commands/qa-gen.js';
 import { registerPushCommand } from './commands/push.js';
 import { registerPullCommand } from './commands/pull.js';
 import { registerSyncCommand } from './commands/sync.js';
+import { registerBuildAutoCommand } from './commands/build-auto.js';
 
 export function createCli() {
   const program = new Command();
@@ -64,6 +65,9 @@ export function createCli() {
   registerPushCommand(program);
   registerPullCommand(program);
   registerSyncCommand(program);
+
+  // BMAD Build Auto
+  registerBuildAutoCommand(program);
 
   return program;
 }

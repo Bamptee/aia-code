@@ -10,6 +10,7 @@ AIA structures your feature development into steps (brief, spec, tech-spec, dev-
 - [Prerequisites](#prerequisites)
 - [Commands](#commands)
 - [Squad Mode (multi-agent build)](#squad-mode-multi-agent-build)
+- [BMAD Build Auto](#bmad-build-auto)
 - [Integrate into an existing project](#integrate-into-an-existing-project)
 - [Web UI](#web-ui)
 - [Epic & Product Management](#epic--product-management)
@@ -56,6 +57,8 @@ Each CLI manages its own authentication. Run `claude`, `codex`, or `gemini` once
 | `aia squad <name> [description]` | Multi-agent build: spec-tech → dev-plan → parallel sub-agents → review |
 | `aia repo scan` | Scan codebase and generate `repo-map.json` |
 | `aia ui` | Launch the local web UI to manage features and config |
+| `aia build-auto [input]` | Run `bmad-build-auto` headless on one story, in an isolated worktree |
+| `aia bmad-doctor` | Check the BMAD install in the current directory |
 
 ### Options for `run`, `next`, `quick`, and `iterate`
 
@@ -100,6 +103,65 @@ Options: `-p, --parallel <n>` (max concurrent sub-agents), `--no-review`, `-v, -
 Squad mode is fully additive: `run`, `next`, `quick`, the status schema and existing stories are untouched — `build` is not a status step; its report lives in `build.md` inside the story folder. In the web UI, open a story in the **Dev** view and use the **⚡ Squad build** panel: it streams the pipeline steps, the sub-agent cards (tier, model, status) and the final verdict live.
 
 > Current limits: sub-agent file-scope isolation is enforced by prompt contract, not by sandboxing (worktree-per-agent is on the roadmap), and the UI panel does not yet reconnect to an in-flight build after a page reload.
+
+## BMAD Build Auto
+
+`aia build-auto` drives [`bmad-build-auto`](https://github.com/bmad-code-org/BMAD-METHOD) (BMAD ≥ 6.11) as an unattended worker: it checks the BMAD install, creates an isolated git worktree, runs `claude -p "/bmad-build-auto …"` headless, reads the final status **from the spec frontmatter** (never from the chat output), then handles commits.
+
+```bash
+aia bmad-doctor                                  # check the install (skill, uv, claude, git, permissions)
+aia build-auto "Add CSV export to the orders page"
+aia build-auto _bmad-output/…/spec-orders-export.md --plan-only
+aia build-auto --folder _bmad-output/my-epic --id 1.2 --cleanup
+```
+
+Run it from the repo root (where `_bmad/` and `.claude/skills/` live). Worktrees are created **outside** the repo, in `../<repo>-worktrees/`, and the untracked BMAD files (`_bmad/`, `.claude/skills`, `.claude/settings.local.json`) are copied into them without overwriting.
+
+| Flag | Description |
+|------|-------------|
+| `--folder <dir>` + `--id <id>` | Folder + story ID dispatch (`stories.yaml`) |
+| `--plan-only` | Stop at `ready-for-dev` for human validation of the spec |
+| `--no-worktree` | Run in the current repo (clean tree required) |
+| `--setup <cmd>` / `--no-setup` | Worktree preparation command. Default: detected from the lockfile (`pnpm install --frozen-lockfile --prefer-offline`, `yarn install --frozen-lockfile --prefer-offline` or `npm ci --prefer-offline`) |
+| `--no-autocommit` | Undo the run's commits (`reset --soft` to the baseline), keep everything staged for review. `--cleanup` is then ignored |
+| `--cleanup` | On `done`, copy the spec back into the repo and remove the worktree (the branch is kept) |
+| `--force` | Ignore install-check errors |
+| `--json` | Machine-readable output (see below) |
+
+By default, after a `done` run the CLI makes sure the tree is clean; leftovers are committed as `chore(bmad): finalise <title>` (reported in `safetyNetCommit`).
+
+**Exit codes:** `0` done · `1` error or unknown status · `2` blocked · `3` ready-for-dev (`--plan-only`) · `4` incomplete BMAD install.
+
+**`--json` contract:** a single `BuildAutoResult` object on **stdout**; everything else (install report, Claude `stream-json` events, logs) goes to **stderr**. `aia bmad-doctor --json` follows the same rule with a `BmadReport`.
+
+```ts
+interface BuildAutoResult {
+  status: "draft" | "ready-for-dev" | "in-progress" | "in-review" | "done" | "blocked" | "unknown";
+  spec?: string;
+  worktree: string;            // "" after --cleanup
+  branch: string;              // bmad-auto/<label>-<timestamp>
+  baselineRevision?: string;
+  commits?: string;            // "<base>..<branch>"
+  commitCount?: number;
+  safetyNetCommit?: string[];  // files committed by the CLI safety net
+  staged?: boolean;            // --no-autocommit
+  followupReviewRecommended: boolean;
+  deferred: Array<{ summary: string; evidence?: string; location?: string; severity?: string }>;
+  blockingCondition?: string;
+  claudeExitCode: number;
+}
+
+interface BmadReport {
+  cwd: string;
+  items: Array<{ id: string; level: "ok" | "warn" | "error"; message: string; hint?: string }>;
+  canRun: boolean;
+  skillSource?: "project" | "agents" | "global";
+}
+```
+
+When the install check fails without `--force`, `build-auto --json` prints `{ "status": "install-check-failed", "report": BmadReport }` and exits with `4`.
+
+Headless runs need a Claude Code permission allowlist (`permissions.allow` in `.claude/settings.json`), e.g. `["Bash(git:*)", "Bash(uv run:*)", "Bash(pnpm:*)"]`, otherwise tool calls are denied and the run ends `blocked`.
 
 ## Integrate into an existing project
 

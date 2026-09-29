@@ -207,7 +207,17 @@ async function loadFeatureFilesForReview(featureDir) {
     console.log(`[PromptBuilder]   - Loaded prior step: init.md (${init.length} chars)`);
   }
 
-  // 2. Load spec-tech.md summary (key technical decisions)
+  // 2. Load spec-func.md (acceptance criteria + edge-case matrix are the review's checklist)
+  const specFunc = await readIfExists(path.join(featureDir, 'spec-func.md'));
+  if (specFunc) {
+    const capped = specFunc.length > 15000
+      ? specFunc.slice(0, 15000) + '\n[... truncated — open spec-func.md from STORY FILES ...]'
+      : specFunc;
+    sections.push('## Functional Spec\n' + capped);
+    loadedFiles.push({ step: 'spec-func', file: 'spec-func.md', chars: specFunc.length });
+  }
+
+  // 3. Load spec-tech.md summary (key technical decisions)
   const specTech = await readIfExists(path.join(featureDir, 'spec-tech.md'));
   if (specTech) {
     const summary = extractTechSpecSummary(specTech);
@@ -216,7 +226,7 @@ async function loadFeatureFilesForReview(featureDir) {
     console.log(`[PromptBuilder]   - Loaded prior step: spec-tech.md (${specTech.length} chars, summarized)`);
   }
 
-  // 3. Load dev-plan.md task list
+  // 4. Load dev-plan.md task list
   const devPlan = await readIfExists(path.join(featureDir, 'dev-plan.md'));
   if (devPlan) {
     const taskList = extractTaskList(devPlan);
@@ -225,7 +235,7 @@ async function loadFeatureFilesForReview(featureDir) {
     console.log(`[PromptBuilder]   - Loaded prior step: dev-plan.md (${devPlan.length} chars, tasks extracted)`);
   }
 
-  // 4. Load implement.md in FULL (this is the code output to review)
+  // 5. Load implement.md in FULL (this is the code output to review)
   const implement = await readIfExists(path.join(featureDir, 'implement.md'));
   if (implement) {
     // F3: Warn if implement.md is very large (may cause token limits)
@@ -238,7 +248,7 @@ async function loadFeatureFilesForReview(featureDir) {
   }
 
   // Build priorSteps array from what was actually loaded
-  const priorSteps = ['init', 'spec-tech', 'dev-plan', 'implement'].filter(s =>
+  const priorSteps = ['init', 'spec-func', 'spec-tech', 'dev-plan', 'implement'].filter(s =>
     loadedFiles.some(f => f.step === s)
   );
 
@@ -263,15 +273,18 @@ function extractTechSpecSummary(techSpec) {
   let lineCount = 0;
 
   // Look for key sections: Solution, Architecture, Technical Decisions
-  const relevantHeaders = /^#+\s*(solution|architecture|technical decisions|approach|overview|implementation)/i;
+  const relevantHeaders = /^#+\s*(solution|architecture|technical decisions|decisions|approach|overview|implementation|code map|interface contracts|contracts|security|irreversibles|verification)/i;
+  let sectionLevel = 0;
 
   for (const line of lines) {
+    const headerLevel = (line.match(/^(#+)\s/) || [])[1]?.length || 0;
     if (relevantHeaders.test(line)) {
       inRelevantSection = true;
+      sectionLevel = headerLevel;
       summaryLines.push(line);
       lineCount = 0;
     } else if (inRelevantSection) {
-      if (line.startsWith('#')) {
+      if (headerLevel && headerLevel <= sectionLevel) {
         inRelevantSection = false;
       } else if (lineCount < 100) {
         summaryLines.push(line);
@@ -533,6 +546,44 @@ export async function getGitDiff(root) {
   return execGit(['diff', 'HEAD~1', 'HEAD', '--', '.', ':!.aia'], root);
 }
 
+const MAX_DIFF_CHARS = 150000;
+
+/**
+ * Collect the diff of a story. When the story is scoped to apps that are their own git
+ * repositories (nested repos, not submodules), a root-level diff misses their changes, so
+ * each app repo is diffed separately. Falls back to the root diff. Output is capped.
+ * @param {string} feature - Story slug
+ * @param {string} root - Project root
+ * @param {Object|null} [storyStatus] - Parsed status.yaml, if already loaded
+ * @returns {Promise<string>}
+ */
+export async function getStoryGitDiff(feature, root, storyStatus = undefined) {
+  let status = storyStatus;
+  if (status === undefined) {
+    const raw = await readIfExists(path.join(await getStoryDir(feature, root), 'status.yaml'));
+    status = raw ? yaml.parse(raw) : null;
+  }
+
+  const sections = [];
+  const appPaths = status?.apps?.length ? await getAppPaths(status.apps, root) : [];
+  for (const appPath of appPaths) {
+    if (!(await fs.pathExists(path.join(appPath, '.git')))) continue;
+    const appDiff = await getGitDiff(appPath);
+    if (appDiff) sections.push(`# repository: ${path.relative(root, appPath) || '.'}\n${appDiff}`);
+  }
+
+  if (sections.length === 0) {
+    const rootDiff = await getGitDiff(root);
+    if (rootDiff) sections.push(rootDiff);
+  }
+
+  const diff = sections.join('\n\n');
+  if (diff.length > MAX_DIFF_CHARS) {
+    return `${diff.slice(0, MAX_DIFF_CHARS)}\n\n[... diff truncated at ${MAX_DIFF_CHARS} chars — run git diff yourself for the rest ...]`;
+  }
+  return diff;
+}
+
 /**
  * Parse YAML front matter from a markdown file
  * @param {string} content - Markdown content with optional front matter
@@ -646,7 +697,13 @@ export async function buildPrompt(feature, step, { description, instructions, hi
 
   const parts = [];
 
-  parts.push('IMPORTANT: You are working on a feature development pipeline. Everything you need is provided below in this prompt. Do NOT attempt to read, search for, or reference any external files. Do NOT say files are missing. Work exclusively with the content given below.\n');
+  const normalizedStepForPreamble = STEP_FILE_MAP[step] || step;
+  const needsCodebase = Boolean(taskMetadata?.scan_required) || CODE_STEPS.has(normalizedStepForPreamble);
+  if (needsCodebase) {
+    parts.push('IMPORTANT: You are working on a feature development pipeline. Everything the pipeline could assemble is provided below: it is your starting context, not the whole truth. Prior-step documents are testimony about intent; the codebase is the evidence about its current state. Read and search the code — and the story files listed under STORY FILES — whenever a decision depends on it. Do NOT ask the user for files; if something is genuinely missing, say what and continue with a marked hypothesis.\n');
+  } else {
+    parts.push('IMPORTANT: You are working on a feature development pipeline. Everything you need is provided below in this prompt. Do NOT attempt to read, search for, or reference any external files. Do NOT say files are missing. Work exclusively with the content given below.\n');
+  }
 
   // Output mode: for non-code steps, the orchestrator captures stdout and writes the file itself.
   // The Write/Edit/Bash tools are not granted in this mode — calling them triggers permission gating
@@ -690,6 +747,23 @@ export async function buildPrompt(feature, step, { description, instructions, hi
       parts.push('\nFocus your analysis and changes on these directories only.');
       parts.push('Do NOT scan or modify files outside of these directories unless absolutely necessary.\n');
       console.log(`[PromptBuilder] ✓ App scope: ${storyStatus.apps.join(', ')} → ${appPaths.length} paths`);
+    }
+  }
+
+  // Story files by absolute path: the documents below may be truncated or summarized,
+  // so code/scan steps can open the full versions (spec is the source of truth for intent).
+  if (needsCodebase) {
+    const storyFiles = [];
+    for (const s of STEP_ORDER) {
+      if (s === normalizedStepForPreamble) break;
+      const candidate = path.join(storyDir, `${s}.md`);
+      if (await fs.pathExists(candidate) && (await fs.stat(candidate)).size > 0) storyFiles.push(candidate);
+    }
+    if (storyFiles.length > 0) {
+      parts.push('=== STORY FILES ===\n');
+      parts.push('Full versions of the story documents (open them when the content below is truncated or summarized):');
+      for (const f of storyFiles) parts.push(`- ${f}`);
+      parts.push('');
     }
   }
 
@@ -827,20 +901,16 @@ export async function buildPrompt(feature, step, { description, instructions, hi
 
   // For the review step, include actual code changes so the reviewer can see the code
   if (step === 'review') {
-    const diff = await getGitDiff(root);
+    const diff = await getStoryGitDiff(feature, root, storyStatus);
     parts.push('\n\n=== CODE CHANGES (git diff) ===\n');
     if (diff) {
-      parts.push('Below is the actual git diff of the implementation. Review this code:\n');
+      parts.push('Below is the git diff collected by the pipeline. Check that it is the complete change before relying on it:\n');
       parts.push('```diff');
       parts.push(diff);
       parts.push('```');
     } else {
-      parts.push('**NO CHANGES DETECTED**\n');
-      parts.push('No git diff was found. This could mean:\n');
-      parts.push('- No changes have been made yet\n');
-      parts.push('- Changes are not staged or committed\n');
-      parts.push('- You are on the main/master branch with no feature commits\n');
-      parts.push('\nPlease ensure code changes exist before requesting a review.');
+      parts.push('**NO DIFF COLLECTED BY THE PIPELINE**\n');
+      parts.push('This does not prove there are no changes. The project may use nested repositories, or the change may live on a branch the pipeline did not compare. Retrieve the diff yourself inside each affected directory (see SCOPE) before reviewing; if there is really nothing to review, say so and stop.');
     }
   }
 

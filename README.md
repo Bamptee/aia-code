@@ -785,7 +785,26 @@ When you run a step, the prompt is built from up to 7 sections:
 (content of prompts/<step>.md)
 ```
 
+For steps that need the codebase (`scan_required: true`, `implement`, `review`), two more sections are added:
+
+- `=== STORY FILES ===` — absolute paths of the non-empty story documents, so the agent can open the full versions when the inlined ones are truncated or summarized.
+- `=== CODE CHANGES (git diff) ===` (review only) — when the story's `apps` are their own git repositories (nested repos, not submodules), each one is diffed separately; otherwise the root repository is. The diff is capped at 150k chars.
+
 The full prompt is piped to the CLI tool via stdin, so there are no argument length limits.
+
+### Default prompt conventions
+
+The default templates (`aia init`, or **Reset** in the UI) share one vocabulary, inspired by BMAD-METHOD 6.12:
+
+- **Intent gap vs. own call** — something the inputs don't say, the code can't settle *and* the user would notice goes to **Open Questions** (options + consequences); any other choice is decided and marked `[HYPOTHESE]`.
+- **Frozen intent** — init's `Intent`, `Scope v1` and `Boundaries` are human-owned; later steps raise an *Intent conflict* instead of rewriting them.
+- **Traceability** — `US-n` → `FR-nnn` / `AC-nnn.m` / matrix `#n` (spec-func) → `AD-n` (spec-tech) → `Task N` / `Covers` (dev-plan) → coverage table (implement, review).
+- **spec-tech** stores its investigation as a **Code Map** and records only decisions that parallel builders could otherwise take incompatibly (`AD-n`: Binds / Prevents / Rule).
+- **dev-plan** tasks declare `Files` (their whole edit scope), `Covers`, `Dependencies` (`none` or `Task 1, Task 3`), `Tests`, `Done when`, `Model tier` and `Parallelizable` — all parsed by the squad orchestrator.
+- **implement** records a baseline, stops with `BLOCKED` on an intent gap, an unlisted irreversible or scope growth, and reports evidence (commands actually run, AC/matrix coverage).
+- **review** runs independent lenses (blind pass, edge cases, deletions, verification gaps, claims check, intent alignment), triages every finding with a route (`patch` / `bad_spec` / `intent_gap` / `defer`) and derives the verdict from it.
+
+Existing `.aia/prompts/*.md` files are never overwritten; use **Reset** in the UI to pick up the new defaults.
 
 ## Project structure
 

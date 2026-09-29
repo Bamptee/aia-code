@@ -54,14 +54,21 @@ ${fileScope}
 ## DEPENDENCIES
 ${deps}
 
+## COVERS
+${task.covers || '(not declared — see dev-plan.md)'}
+
 ## TESTS
 ${task.tests || 'Add or adjust tests for this task, following the project conventions.'}
+
+## DONE WHEN
+${task.doneWhen || 'The task compiles, its tests pass, and nothing outside FILE SCOPE changed.'}
 
 ## SHARED CONTEXT
 Feature: ${feature}
 Before editing, read these files for the full picture (they already exist):
-- ${path.join(storyDir, 'init.md')}
-- ${path.join(storyDir, 'spec-tech.md')}
+- ${path.join(storyDir, 'init.md')} (intent and boundaries — frozen)
+- ${path.join(storyDir, 'spec-func.md')} (acceptance criteria and edge-case matrix, if present)
+- ${path.join(storyDir, 'spec-tech.md')} (Code Map, decisions AD-n, contracts — follow them)
 - ${path.join(storyDir, 'dev-plan.md')}
 Also read the surrounding code and match the project's conventions (naming, imports, error
 handling, style) exactly.
@@ -71,6 +78,9 @@ handling, style) exactly.
 - Edit ONLY files listed in FILE SCOPE. Never refactor unrelated code.
 - Do NOT change shared interfaces other tasks depend on unless this task's details require it.
 - Keep the change minimal, production-ready, and consistent with the codebase.
+- Check DONE WHEN before finishing. Never change a test expectation or skip a test to get green.
+- If the task cannot be done within FILE SCOPE, or needs a decision the specs do not settle,
+  stop, leave the code compiling, and explain why in your final message (prefix: BLOCKED:).
 - Prose/notes language: ${outputLang}.
 
 ## WHEN DONE
@@ -98,6 +108,11 @@ async function runOneTask(task, { feature, storyDir, outputLang, verbose, root, 
   try {
     const result = await callModel(model, prompt, { verbose, apply: true, onData: taggedOnData, cwd: root });
     const duration = performance.now() - start;
+
+    // A sub-agent that stops on purpose (out-of-scope need, undecided intent) must not count
+    // as a success, otherwise its dependents would build on an unfinished task.
+    const blocked = (result.output || '').match(/^\s*BLOCKED:\s*(.+)$/m);
+    if (blocked) throw new Error(`Sub-agent blocked: ${blocked[1].trim().slice(0, 300)}`);
 
     await logExecution({
       feature,

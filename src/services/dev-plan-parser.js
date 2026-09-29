@@ -37,7 +37,7 @@ export function parseDevPlan(markdown) {
   for (let i = 0; i < taskPositions.length; i++) {
     const task = taskPositions[i];
     const nextTaskStart = taskPositions[i + 1]?.start ?? markdown.length;
-    const taskContent = markdown.slice(task.headerEnd, nextTaskStart).trim();
+    const taskContent = normalizeFieldLabels(markdown.slice(task.headerEnd, nextTaskStart).trim());
 
     // Parse task content for structured fields
     const parsedTask = {
@@ -48,6 +48,8 @@ export function parseDevPlan(markdown) {
       details: extractDetails(taskContent),
       dependencies: extractDependencies(taskContent),
       tests: extractTests(taskContent),
+      covers: extractField(taskContent, /(?:Covers|Couvre|Traces?)/),
+      doneWhen: extractField(taskContent, /(?:Done\s*when|Termin[ée]\s*quand)/),
       tier: extractTier(taskContent),
       parallelizable: extractParallelizable(taskContent),
       status: 'pending',
@@ -60,6 +62,32 @@ export function parseDevPlan(markdown) {
 }
 
 /**
+ * Turns markdown-bold field labels ("- **Files:** x", "**Files**: x") into plain
+ * "- Files: x" so every field line starts with "- <Capital>" and field bodies stop there.
+ * @param {string} content
+ * @returns {string}
+ */
+function normalizeFieldLabels(content) {
+  return content
+    .replace(/\*\*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ ]{0,30}?)\s*:\s*\*\*/g, '$1:')
+    .replace(/\*\*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ ]{0,30}?)\*\*\s*:/g, '$1:');
+}
+
+const FIELD_BODY = '([^\\n]+(?:\\n(?!\\s*[-*]\\s*[A-Z]|#|[A-Z][a-z]+:)[^\\n]+)*)';
+
+/**
+ * Extracts the body of a "- Label: body" field (multi-line until the next field).
+ * @param {string} content
+ * @param {RegExp} label
+ * @returns {string}
+ */
+function extractField(content, label) {
+  const re = new RegExp(`(?:^|\\n)\\s*[-*]?\\s*(?:${label.source})\\s*:\\s*${FIELD_BODY}`, 'i');
+  const m = content.match(re);
+  return m ? m[1].trim() : '';
+}
+
+/**
  * Extracts file paths from task content
  * @param {string} content - Task content
  * @returns {string[]}
@@ -68,7 +96,7 @@ function extractFiles(content) {
   const files = [];
 
   // Match "Files:" or "File:" section
-  const filesMatch = content.match(/(?:Files?|Fichiers?)\s*:\s*([^\n]+(?:\n(?!-|\*|#|[A-Z][a-z]+:)[^\n]+)*)/i);
+  const filesMatch = content.match(/(?:^|\n)\s*[-*]?\s*(?:Files?|Fichiers?)\s*:\s*([^\n]+(?:\n(?!\s*[-*]\s*[A-Z]|#|[A-Z][a-z]+:)[^\n]+)*)/i);
   if (filesMatch) {
     const fileList = filesMatch[1];
     // Extract file paths (look for patterns like path/to/file.ext)
@@ -76,9 +104,12 @@ function extractFiles(content) {
     if (pathMatches) {
       files.push(...pathMatches.map(f => f.replace(/[`']/g, '').trim()));
     }
+    // The Files line is the declared scope: paths quoted elsewhere (e.g. "follow the
+    // pattern in `x.ts`") are references, not files the task may edit.
+    return [...new Set(files)];
   }
 
-  // Also look for inline code blocks with file paths
+  // No Files line: fall back to inline code blocks with file paths
   const inlineFiles = content.match(/`([^`]+\.[a-z]+)`/gi);
   if (inlineFiles) {
     for (const file of inlineFiles) {
@@ -101,9 +132,10 @@ function extractFiles(content) {
  */
 function extractDetails(content) {
   // Look for "Details:" or "Description:" section
-  const detailsMatch = content.match(/(?:Details?|Description|Actions?)\s*:\s*([^\n]+(?:\n(?!-\s*[A-Z]|#|[A-Z][a-z]+:)[^\n]+)*)/i);
-  if (detailsMatch) {
-    return detailsMatch[1].trim();
+  // Prefer Details, then Description, then Action (alternation would pick whichever comes first)
+  for (const label of [/Details?|Détails?/, /Description/, /Actions?/]) {
+    const value = extractField(content, label);
+    if (value) return value;
   }
 
   // Otherwise, get the first paragraph that's not a field
@@ -139,14 +171,16 @@ function extractDependencies(content) {
   const depsMatch = content.match(/(?:Dependencies?|Dépendances?|Requires?)\s*:\s*([^\n]+)/i);
   if (depsMatch) {
     const depList = depsMatch[1];
-    // Look for task references
-    const taskRefs = depList.match(/(?:Task\s*)?(\d+)/gi);
-    if (taskRefs) {
-      deps.push(...taskRefs.map(t => `task-${t.replace(/\D/g, '')}`));
-    }
-    // Handle "none" or "aucune"
-    if (/none|aucune|n\/a|-/i.test(depList)) {
+    // "None", "Aucune", "-", "N/A" as the leading value means no hard dependency,
+    // whatever explanation follows ("None (but merge with Tasks 4–6)").
+    if (/^[\s*_`]*(none|aucune|n\/a|-|—)\b/i.test(depList) || /^[\s*_`]*[-—][\s*_`.]*$/.test(depList)) {
       return [];
+    }
+    // Task references, including ranges ("Tasks 3–5")
+    for (const m of depList.matchAll(/(\d+)(?:\s*[–—-]\s*(\d+))?/g)) {
+      const from = parseInt(m[1], 10);
+      const to = m[2] ? parseInt(m[2], 10) : from;
+      for (let n = from; n <= to && n - from < 50; n++) deps.push(`task-${n}`);
     }
   }
 
@@ -187,11 +221,7 @@ function extractParallelizable(content) {
  */
 function extractTests(content) {
   // Match "Tests:" section
-  const testsMatch = content.match(/(?:Tests?|Testing)\s*:\s*([^\n]+(?:\n(?!-\s*[A-Z]|#|[A-Z][a-z]+:)[^\n]+)*)/i);
-  if (testsMatch) {
-    return testsMatch[1].trim();
-  }
-  return '';
+  return extractField(content, /(?:Tests?|Testing)/);
 }
 
 /**

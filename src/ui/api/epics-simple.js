@@ -1243,8 +1243,8 @@ ${content}`;
 
         // Load git diff for code review context
         try {
-          const { getGitDiff } = await import('../../prompt-builder.js');
-          const diff = await getGitDiff(root);
+          const { getStoryGitDiff } = await import('../../prompt-builder.js');
+          const diff = await getStoryGitDiff(params.slug, root);
           if (diff) {
             reviewContext += `\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\`\n`;
           }
@@ -1397,11 +1397,9 @@ INSTRUCTIONS:
           chatPrompt += `INIT DOCUMENT (story context):\n---\n${initContent}\n---\n\n`;
         }
         chatPrompt += `INSTRUCTIONS:
-- You are initiating a brainstorming session for this feature
-- Analyze the init document and identify key areas that need clarification
-- Use the project context and knowledge above to ask more targeted questions
-- Ask 3-5 focused questions to guide the discussion
-- Be specific and actionable
+- You are opening the brainstorming session for this story
+- Follow the OPENING MESSAGE rules of the template at the top of this prompt (the template is authoritative)
+- Use the project context and knowledge above instead of asking what they already answer
 - Respond in ${commLang}`;
 
       } else if (params.step === 'review') {
@@ -1434,8 +1432,8 @@ INSTRUCTIONS:
         // Load git diff
         let gitDiffContext = '';
         try {
-          const { getGitDiff } = await import('../../prompt-builder.js');
-          const diff = await getGitDiff(root);
+          const { getStoryGitDiff } = await import('../../prompt-builder.js');
+          const diff = await getStoryGitDiff(params.slug, root);
           if (diff) {
             gitDiffContext = `\n\nCODE CHANGES (git diff):\n\`\`\`diff\n${diff}\n\`\`\``;
           }
@@ -1461,11 +1459,10 @@ INSTRUCTIONS:
         chatPrompt += `${gitDiffContext}\n\n`;
 
         chatPrompt += `INSTRUCTIONS:
-- You are initiating a code review session for this feature
-- Perform a comprehensive analysis of the implementation
-- For each issue found, specify: file/line reference, severity (critical/warning/suggestion), description, and suggested fix
-- End with a clear verdict: ship / ship with fixes / needs rework
-- Be thorough but fair — acknowledge what's done well too
+- You are opening the code review session for this story
+- Follow the review template at the top of this prompt (gather, lenses, triage, output format) — it is authoritative
+- The prior steps above are truncated to 2000 chars: read the full story files from ${storyDir} before judging coverage
+- If the diff above is empty or partial, retrieve it yourself inside each affected repository and state the range you reviewed
 - Respond in ${commLang}`;
       }
 

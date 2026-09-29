@@ -11,13 +11,13 @@ const STATUS_COLORS = {
 
 export function registerStatusCommand(program) {
   program
-    .command('status <feature>')
-    .description('Show the current status of a feature')
+    .command('status <story>')
+    .description('Show the current status of a story')
     .action(async (feature) => {
       try {
         const status = await loadStatus(feature);
 
-        console.log(chalk.bold(`Feature: ${status.feature}`));
+        console.log(chalk.bold(`Story: ${status.name ?? status.slug ?? status.feature}`));
         console.log(chalk.bold(`Current step: ${status.current_step}\n`));
 
         for (const [step, value] of Object.entries(status.steps)) {

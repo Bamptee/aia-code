@@ -5,7 +5,7 @@ import { QUICK_STEPS } from '../constants.js';
 export function registerQuickCommand(program) {
   program
     .command('quick <name> [description]')
-    .description(`Quick story/ticket: create feature then run ${QUICK_STEPS.join(' \u2192 ')}`)
+    .description(`Quick story/ticket: create story then run ${QUICK_STEPS.join(' \u2192 ')}`)
     .option('-v, --verbose', 'Show AI thinking/tool usage')
     .option('-a, --apply', 'Force agent mode (file editing) for all steps')
     .action(async (name, description, opts) => {

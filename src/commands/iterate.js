@@ -4,7 +4,7 @@ import { runStep } from '../services/runner.js';
 
 export function registerIterateCommand(program) {
   program
-    .command('iterate <step> <feature> <instructions>')
+    .command('iterate <step> <story> <instructions>')
     .description('Re-run a step with additional instructions to refine the output')
     .option('-v, --verbose', 'Show AI thinking/tool usage')
     .option('-a, --apply', 'Force agent mode (file editing)')

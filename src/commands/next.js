@@ -4,8 +4,8 @@ import { runStep } from '../services/runner.js';
 
 export function registerNextCommand(program) {
   program
-    .command('next <feature> [description]')
-    .description('Run the next pending step for a feature')
+    .command('next <story> [description]')
+    .description('Run the next pending step for a story')
     .option('-v, --verbose', 'Show CLI logs (thinking, tool use, etc.)')
     .option('-a, --apply', 'Let the AI edit and create files in the project')
     .action(async (feature, description, opts) => {
@@ -14,7 +14,7 @@ export function registerNextCommand(program) {
         const nextStep = status.current_step;
 
         if (!nextStep) {
-          console.log(chalk.green(`All steps completed for feature "${feature}".`));
+          console.log(chalk.green(`All steps completed for story "${feature}".`));
           return;
         }
 

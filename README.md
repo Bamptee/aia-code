@@ -2,7 +2,7 @@
 
 CLI tool that orchestrates AI-assisted development workflows using a `.aia` folder convention.
 
-AIA structures your feature development into steps (brief, spec, tech-spec, dev-plan, implement, etc.), builds rich prompts from project context and knowledge files, and delegates execution to AI CLI tools (Claude Code, Codex CLI, Gemini CLI) with weighted random model selection.
+AIA structures your development into stories that go through steps (spec-func, spec-tech, dev-plan, implement, review, etc.), builds rich prompts from project context and knowledge files, and delegates execution to AI CLI tools (Claude Code, Codex CLI, Gemini CLI) with weighted random model selection.
 
 ## Table of contents
 
@@ -14,7 +14,7 @@ AIA structures your feature development into steps (brief, spec, tech-spec, dev-
 - [Integrate into an existing project](#integrate-into-an-existing-project)
 - [Web UI](#web-ui)
 - [Epic & Product Management](#epic--product-management)
-- [Feature workflow](#feature-workflow)
+- [Story workflow (steps)](#story-workflow-steps)
 - [Prompt assembly](#prompt-assembly)
 - [Project structure](#project-structure)
 - [Dependencies](#dependencies)
@@ -26,7 +26,7 @@ AIA structures your feature development into steps (brief, spec, tech-spec, dev-
 ```bash
 npm install -g @bamptee/aia-code
 aia init
-aia feature session-replay
+aia feature session-replay          # creates .aia/stories/session-replay/
 aia next session-replay "Record and replay user sessions for debugging"
 ```
 
@@ -47,16 +47,16 @@ Each CLI manages its own authentication. Run `claude`, `codex`, or `gemini` once
 | Command | Description |
 |---------|-------------|
 | `aia init` | Create `.aia/` folder structure and default config |
-| `aia feature <name>` | Create a new feature workspace |
-| `aia run <step> <feature> [description]` | Execute a step for a feature |
-| `aia next <feature> [description]` | Run the next pending step automatically |
-| `aia status <feature>` | Show the current status of a feature |
-| `aia reset <step> <feature>` | Reset a step to pending so it can be re-run |
-| `aia iterate <step> <feature> <instructions>` | Re-run a step with additional instructions to refine the output |
+| `aia feature <name>` | Create a story in `.aia/stories/<name>/`, starting at the dev phase (legacy alias of `story create`) |
+| `aia run <step> <story> [description]` | Execute a step for a story |
+| `aia next <story> [description]` | Run the next pending step automatically |
+| `aia status <story>` | Show the current status of a story |
+| `aia reset <step> <story>` | Reset a step to pending so it can be re-run |
+| `aia iterate <step> <story> <instructions>` | Re-run a step with additional instructions to refine the output |
 | `aia quick <name> [description]` | Quick story/ticket: dev-plan → implement → review only |
 | `aia squad <name> [description]` | Multi-agent build: spec-tech → dev-plan → parallel sub-agents → review |
 | `aia repo scan` | Scan codebase and generate `repo-map.json` |
-| `aia ui` | Launch the local web UI to manage features and config |
+| `aia ui` | Launch the local web UI to manage stories and config |
 | `aia build-auto [input]` | Run `bmad-build-auto` headless on one story, in an isolated worktree |
 | `aia bmad-doctor` | Check the BMAD install in the current directory |
 
@@ -193,7 +193,8 @@ your-project/
     context/
     knowledge/
     prompts/
-    features/
+    epics/
+    stories/
     logs/
 ```
 
@@ -244,33 +245,32 @@ knowledge_default:
   - backend
 ```
 
-Each feature can override this via its `status.yaml` `knowledge` field.
+Each story can override this via its `status.yaml` `knowledge` field.
 
 ### 5. Write prompt templates
 
-One template per step, stored in `.aia/prompts/`:
+One template per step, stored in `.aia/prompts/`. `aia init` writes a default template for every step (existing files are never overwritten), so you only need to edit them:
 
 ```markdown
-<!-- .aia/prompts/brief.md -->
-Write a product brief for this feature.
+<!-- .aia/prompts/spec-func.md -->
+Write a functional specification for this story.
 Include: problem statement, target users, success metrics.
 ```
 
 ```markdown
 <!-- .aia/prompts/implement.md -->
-Implement the feature following the dev-plan.
+Implement the story following the dev-plan.
 Create all necessary files (controllers, services, models, routes, tests).
 Follow the project conventions from the context and knowledge files.
 ```
 
-Required templates (one per step you want to run):
+Templates (one per step):
 
 ```
-.aia/prompts/brief.md
-.aia/prompts/ba-spec.md
-.aia/prompts/questions.md
-.aia/prompts/tech-spec.md
-.aia/prompts/challenge.md
+.aia/prompts/init.md
+.aia/prompts/brainstorming.md
+.aia/prompts/spec-func.md
+.aia/prompts/spec-tech.md
 .aia/prompts/dev-plan.md
 .aia/prompts/implement.md
 .aia/prompts/review.md
@@ -333,17 +333,17 @@ In `config.yaml`, assign models to steps with probability weights:
 
 ```yaml
 models:
-  brief:
+  init:
     - model: claude-default
       weight: 1
 
-  questions:
+  spec-func:
     - model: claude-default
       weight: 0.5
     - model: openai-default
       weight: 0.5
 
-  tech-spec:
+  spec-tech:
     - model: gpt-4.1
       weight: 0.6
     - model: gemini-2.5-pro
@@ -375,30 +375,33 @@ Use aliases to delegate to the CLI's default model:
 | `gpt-*`, `o[0-9]*` | `codex exec` | `gpt-4.1`, `o3`, `o4-mini` |
 | `gemini-*` | `gemini` | `gemini-2.5-pro`, `gemini-2.5-flash` |
 
-### 8. Run the feature pipeline
+### 8. Run the story pipeline
+
+Each story lives in `.aia/stories/<slug>/` (`status.yaml`, `init.md` and one `.md` file per step). Projects created before the switch to stories still have `.aia/features/<name>/`: it is still read as a fallback, but new stories are always created in `.aia/stories/`.
+
+`aia feature <name>` creates the story with `<name>` as its slug, directly in the **dev phase** (the product steps `brainstorming` and `spec-func` are skipped), so the pipeline starts at `spec-tech`. See [Story workflow (steps)](#story-workflow-steps) for the full list of steps.
 
 #### Step by step
 
 ```bash
 aia feature session-replay
-aia run brief session-replay "Record and replay user sessions"
+aia run spec-tech session-replay "Record and replay user sessions"
 aia status session-replay
-aia run ba-spec session-replay
-aia run tech-spec session-replay
+aia run dev-plan session-replay
 ```
 
 #### Initial specs (`init.md`)
 
-When you create a feature, AIA generates an `init.md` file. Edit it to add your initial specs, requirements, and constraints -- this content is injected into **every step** as context:
+When you create a story, AIA generates an `init.md` file. Edit it to add your initial specs, requirements, and constraints -- this content is injected into **every step** as context:
 
 ```bash
 aia feature session-replay
-# Edit .aia/features/session-replay/init.md with your specs
+# Edit .aia/stories/session-replay/init.md with your specs
 aia next session-replay
 ```
 
 ```markdown
-<!-- .aia/features/session-replay/init.md -->
+<!-- .aia/stories/session-replay/init.md -->
 # session-replay
 
 ## Description
@@ -420,11 +423,7 @@ Record and replay user sessions for debugging.
 
 ```bash
 aia feature session-replay
-aia next session-replay "Record and replay user sessions"   # -> brief
-aia next session-replay                                      # -> ba-spec
-aia next session-replay                                      # -> questions
-aia next session-replay                                      # -> tech-spec
-aia next session-replay                                      # -> challenge
+aia next session-replay "Record and replay user sessions"   # -> spec-tech
 aia next session-replay                                      # -> dev-plan
 aia next session-replay                                      # -> implement (auto --apply)
 aia next session-replay                                      # -> review
@@ -432,10 +431,10 @@ aia next session-replay                                      # -> review
 
 #### Description parameter
 
-Pass a short description in quotes to give context to the AI. Especially useful for the `brief` step:
+Pass a short description in quotes to give context to the AI. Especially useful for the first step you run:
 
 ```bash
-aia run brief session-replay "Record DOM + network requests, replay for debugging"
+aia run spec-tech session-replay "Record DOM + network requests, replay for debugging"
 aia next session-replay "Capture DOM snapshots, max 30 min sessions"
 ```
 
@@ -444,8 +443,8 @@ aia next session-replay "Capture DOM snapshots, max 30 min sessions"
 When you re-run a step, the previous output is fed back as context so the AI can improve it:
 
 ```bash
-aia reset tech-spec session-replay
-aia run tech-spec session-replay "Add WebSocket support and rate limiting"
+aia reset spec-tech session-replay
+aia run spec-tech session-replay "Add WebSocket support and rate limiting"
 ```
 
 #### Iterating on a step
@@ -453,8 +452,8 @@ aia run tech-spec session-replay "Add WebSocket support and rate limiting"
 Use `aia iterate` to refine a completed step with specific instructions. It resets the step, feeds back the previous output, and applies your instructions in a single command:
 
 ```bash
-aia iterate tech-spec session-replay "Add error handling for WebSocket disconnections"
-aia iterate brief session-replay "Focus more on mobile use cases"
+aia iterate spec-tech session-replay "Add error handling for WebSocket disconnections"
+aia iterate spec-func session-replay "Focus more on mobile use cases"
 aia iterate dev-plan session-replay "Split the implementation into smaller PRs" -v
 ```
 
@@ -462,15 +461,15 @@ You can iterate multiple times — each run builds on the previous output.
 
 #### Quick mode (stories & tickets)
 
-For small stories or tickets that don't need the full 8-step pipeline, use `aia quick`. It skips brief, ba-spec, questions, tech-spec, and challenge, and runs only **dev-plan → implement → review**:
+For small stories or tickets that don't need the full pipeline, use `aia quick`. It skips the product steps and `spec-tech`, and runs only **dev-plan → implement → review**:
 
 ```bash
-# Create feature + run 3 steps in sequence
+# Create story + run 3 steps in sequence
 aia quick fix-login-bug "Fix the login timeout issue on mobile"
 
-# Or create the feature first, edit init.md, then run
+# Or create the story first, edit init.md, then run
 aia feature fix-login-bug
-# Edit .aia/features/fix-login-bug/init.md with details
+# Edit .aia/stories/fix-login-bug/init.md with details
 aia quick fix-login-bug
 ```
 
@@ -488,7 +487,7 @@ With `--apply`, AIA runs in **agent mode** -- the AI can edit and create files i
 
 ```bash
 # Print mode (default) -- generates a document
-aia run tech-spec session-replay
+aia run spec-tech session-replay
 
 # Agent mode -- AI writes code in your project
 aia run dev-plan session-replay --apply
@@ -516,7 +515,7 @@ Generates `.aia/repo-map.json` -- a categorized index of your source files (serv
 
 ## Web UI
 
-Launch the local web interface to manage features visually:
+Launch the local web interface to manage stories visually:
 
 ```bash
 aia ui
@@ -525,12 +524,12 @@ aia ui
 
 ### Dashboard
 
-- View all features with their current step and progress
-- Create new features
-- Delete features
+- View all stories with their current step and progress
+- Create new stories
+- Delete stories
 - Quick access to run next step
 
-### Feature detail
+### Story detail
 
 - Execute steps with real-time log streaming (SSE)
 - View step outputs (specs, plans, code)
@@ -610,7 +609,7 @@ The Epic system is fully integrated into the Web UI with dedicated views:
 
 #### Story Detail (`#/stories/:id`)
 
-- Step completion tracking (Brief, BA Spec, Questions)
+- Step completion tracking (`init`, `brainstorming`, `spec-func`, then the dev steps)
 - Status flow visualization
 - Promote from experimentation to development
 - Move between Epics
@@ -643,12 +642,12 @@ EXPERIMENTATION SPACE                DEVELOPMENT SPACE
 └─────────────────────────┘         └─────────────────────────────────────┘
 ```
 
-**Experimentation Steps:**
-1. **Brief** - Product brief describing the feature
-2. **BA Spec** - Business analysis specification
-3. **Questions** - Clarifying questions for requirements
+**Product steps (experimentation):**
+1. **init** - Initial description of the story (`init.md`)
+2. **brainstorming** - Exploratory discussion with the AI (optional)
+3. **spec-func** - Functional specification (optional)
 
-To promote a story to development, all steps must be completed or explicitly skipped.
+To promote a story to development, all steps must be completed or explicitly skipped. The dev steps are listed in [Story workflow (steps)](#story-workflow-steps).
 
 ### QA Workflow
 
@@ -712,39 +711,49 @@ GET    /api/epic-system/diagnose     # System diagnostics
 POST   /api/epic-system/migrate      # Run migrations
 ```
 
-## Feature workflow
+## Story workflow (steps)
 
-Each feature follows a fixed pipeline of 8 steps:
+Each story goes through 7 steps, split into two phases:
 
 ```
-brief -> ba-spec -> questions -> tech-spec -> challenge -> dev-plan -> implement -> review
+product:  init -> brainstorming -> spec-func
+dev:      spec-tech -> dev-plan -> implement -> review
 ```
 
-| Step | Purpose | Mode |
-|------|---------|------|
-| `brief` | Product brief from a short description | print |
-| `ba-spec` | Business analysis specification | print |
-| `questions` | Questions to clarify requirements | print |
-| `tech-spec` | Technical specification (models, APIs, architecture) | print |
-| `challenge` | Challenge the spec, find gaps and risks | print |
-| `dev-plan` | Step-by-step implementation plan | print |
-| `implement` | Write the actual code | **agent (auto)** |
-| `review` | Code review of the implementation | print |
+| Step | Phase | Purpose | Mode |
+|------|-------|---------|------|
+| `init` | product | Initial description of the story (`init.md`) | print |
+| `brainstorming` | product | Exploratory discussion with the AI (optional) | print |
+| `spec-func` | product | Functional specification (optional) | print |
+| `spec-tech` | dev | Technical specification (models, APIs, architecture) (optional) | print |
+| `dev-plan` | dev | Step-by-step implementation plan | print |
+| `implement` | dev | Write the actual code | **agent (auto)** |
+| `review` | dev | Code review of the implementation | print |
 
-`status.yaml` tracks progress:
+Every step except `init` can be skipped. A story created with `aia feature` starts in the dev phase (`brainstorming` and `spec-func` are skipped); `aia quick` runs only `dev-plan -> implement -> review`.
+
+`.aia/stories/<slug>/status.yaml` tracks progress:
 
 ```yaml
-feature: session-replay
+slug: session-replay
+name: session-replay
+epic: general
+phase: development
+type: feature
 current_step: implement
+createdFrom: product
+createdAt: 2026-09-29T10:00:00.000Z
 steps:
-  brief: done
-  ba-spec: done
-  questions: done
-  tech-spec: done
-  challenge: done
+  init: pending
+  brainstorming: pending
+  spec-func: pending
+  spec-tech: done
   dev-plan: done
   implement: pending
   review: pending
+skippedSteps:
+  - brainstorming
+  - spec-func
 knowledge:
   - backend
 ```
@@ -767,7 +776,7 @@ When you run a step, the prompt is built from up to 7 sections:
 (content of init.md -- your initial specs and requirements)
 
 === FEATURE ===
-(outputs of all prior steps for this feature)
+(outputs of all prior steps for this story)
 
 === PREVIOUS OUTPUT ===
 (if re-running -- previous version of this step, for the AI to improve)
@@ -793,13 +802,13 @@ src/
   utils.js                  # Shared filesystem helpers
   commands/
     init.js                 # aia init
-    feature.js              # aia feature <name>
-    run.js                  # aia run <step> <feature>
-    next.js                 # aia next <feature>
-    iterate.js              # aia iterate <step> <feature> <instructions>
+    feature.js              # aia feature <name> (legacy alias of story create)
+    run.js                  # aia run <step> <story>
+    next.js                 # aia next <story>
+    iterate.js              # aia iterate <step> <story> <instructions>
     quick.js                # aia quick <name> [description]
-    status.js               # aia status <feature>
-    reset.js                # aia reset <step> <feature>
+    status.js               # aia status <story>
+    reset.js                # aia reset <step> <story>
     repo.js                 # aia repo scan
     ui.js                   # aia ui
   providers/
@@ -811,7 +820,7 @@ src/
   services/
     scaffold.js             # .aia/ folder creation
     config.js               # Default config generation
-    feature.js              # Feature workspace creation + validation
+    feature.js              # Story creation (.aia/stories/<slug>/) + validation
     status.js               # status.yaml read/write/reset
     runner.js               # Step execution orchestrator
     model-call.js           # Provider dispatch
@@ -825,7 +834,7 @@ src/
     server.js               # Express server for web UI
     router.js               # API route registration
     api/
-      features.js           # Feature CRUD + step execution
+      features.js           # Story CRUD + step execution
       config.js             # Config read/write endpoints
       worktrunk.js          # Worktree management endpoints
       logs.js               # Log streaming
@@ -833,8 +842,8 @@ src/
       index.html            # SPA entry point
       main.js               # App initialization
       components/
-        dashboard.js        # Feature list + status overview
-        feature-detail.js   # Step execution + outputs
+        dashboard.js        # Story list + status overview
+        story-view.js       # Step execution + outputs
         config-view.js      # Config editor
         terminal.js         # Integrated xterm terminal
         worktrunk-panel.js  # Worktree management UI
@@ -986,13 +995,13 @@ You can also mix providers per step — for example, use Claude for implementati
 
 ## Worktrunk Integration
 
-AIA integrates with [Worktrunk](https://github.com/bamptee/worktrunk) (`wt`) to create isolated development environments for each feature using git worktrees.
+AIA integrates with [Worktrunk](https://github.com/bamptee/worktrunk) (`wt`) to create isolated development environments for each story using git worktrees.
 
 ### Why Worktrunk?
 
-- **Isolation**: Each feature gets its own directory and branch, no stashing needed
-- **Services**: Run separate Docker containers per feature (database, cache, etc.)
-- **Parallel work**: Work on multiple features simultaneously without conflicts
+- **Isolation**: Each story gets its own directory and branch, no stashing needed
+- **Services**: Run separate Docker containers per story (database, cache, etc.)
+- **Parallel work**: Work on multiple stories simultaneously without conflicts
 - **Clean state**: Delete the worktree when done, main branch stays untouched
 
 ### Installation
@@ -1008,7 +1017,7 @@ wt --version
 ### Quick Start
 
 ```bash
-# In the AIA UI, click "Create Worktree" on any feature
+# In the AIA UI, click "Create Worktree" on any story
 # Or via CLI:
 wt switch -c feature/my-feature
 ```
@@ -1025,7 +1034,7 @@ Create `wt.toml` at the root of your project:
 # Default: "../<repo-name>-wt"
 base_path = "../my-project-wt"
 
-# Branch prefix for feature worktrees
+# Branch prefix for story worktrees
 # AIA uses "feature/" by default
 branch_prefix = "feature/"
 
@@ -1046,7 +1055,7 @@ pre_remove = [
 ]
 ```
 
-### Docker Services per Feature
+### Docker Services per Story
 
 Create `docker-compose.wt.yml` for services that should run in each worktree:
 
@@ -1098,7 +1107,7 @@ To avoid port conflicts between worktrees, use a `.env` file with dynamic ports:
 # .env.example - Copy to .env in each worktree
 
 # Each worktree should use different ports
-# Tip: Use feature hash or manual assignment
+# Tip: Use story hash or manual assignment
 DB_PORT=5432
 REDIS_PORT=6379
 MAIL_UI_PORT=8025
@@ -1137,7 +1146,7 @@ my-project/
 ├── scripts/
 │   └── setup-worktree.sh      # Custom setup script
 └── .aia/
-    └── features/
+    └── stories/
         └── my-feature/
 ```
 
@@ -1244,8 +1253,8 @@ volumes:
 
 ### Using Worktrunk in AIA UI
 
-1. **Create a feature**: `aia feature my-feature` or via UI
-2. **Open the feature** in the UI
+1. **Create a story**: `aia feature my-feature` or via UI
+2. **Open the story** in the UI
 3. **Click "Create Worktree"** in the Worktrunk panel
    - Runs `wt switch -c feature/my-feature`
    - Executes `post_create` hooks (Docker services, npm install, etc.)

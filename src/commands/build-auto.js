@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { checkBmadInstall, printReport } from '../services/bmad-check.js';
@@ -81,8 +81,24 @@ function createWorktree(root, label) {
 function syncUntracked(root, wt, extra = []) {
   for (const rel of ['_bmad', '.claude/skills', '.claude/settings.local.json', ...extra]) {
     const src = join(root, rel);
-    if (existsSync(src)) cpSync(src, join(wt, rel), { recursive: true, force: false, errorOnExist: false });
+    if (existsSync(src)) {
+      cpSync(src, join(wt, rel), {
+        recursive: true,
+        force: false,
+        errorOnExist: false,
+        // Liens relatifs (ex. .claude/skills/x -> ../../.agents/skills/x) gardés tels quels.
+        verbatimSymlinks: true,
+        filter: (s, d) => !isLinkConflict(s, d),
+      });
+    }
   }
+}
+
+/** Un symlink déjà présent côté worktree (versionné) ou à la source fait planter cpSync : on le saute. */
+function isLinkConflict(src, dest) {
+  let destStat;
+  try { destStat = lstatSync(dest); } catch { return false; }
+  return destStat.isSymbolicLink() || lstatSync(src).isSymbolicLink();
 }
 
 function runClaude(prompt, cwd, onEvent) {

@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'fs-extra';
@@ -120,9 +120,33 @@ export function createWorktree(branch, cwd) {
  * @returns {string|null} Worktree path or null if not found
  */
 export function getWorktreePath(branch, cwd) {
-  const list = listWorktrees(cwd);
-  const wt = list.find(w => w.branch === branch || w.branch === `refs/heads/${branch}`);
-  return wt?.path || null;
+  return listWorktreeBranches(cwd).get(branch) || null;
+}
+
+/**
+ * Map of branch name -> worktree path, read from git metadata.
+ * Uses `git worktree list --porcelain` rather than `wt list`, which computes
+ * per-worktree git status and can take seconds on repos with many worktrees.
+ * @param {string} cwd - Repository root directory
+ * @returns {Map<string, string>}
+ */
+export function listWorktreeBranches(cwd) {
+  const branches = new Map();
+  let output;
+  try {
+    output = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return branches;
+  }
+  let currentPath = null;
+  for (const line of output.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      currentPath = line.slice('worktree '.length);
+    } else if (line.startsWith('branch ') && currentPath) {
+      branches.set(line.slice('branch '.length).replace(/^refs\/heads\//, ''), currentPath);
+    }
+  }
+  return branches;
 }
 
 /**

@@ -88,7 +88,7 @@ import { getGuidance } from '../../services/suggestions.js';
 import { callModel } from '../../services/model-call.js';
 import { loadConfig } from '../../models.js';
 import { json, error } from '../router.js';
-import { isWtInstalled, hasWorktree, getFeatureBranch } from '../../services/worktrunk.js';
+import { isWtInstalled, listWorktreeBranches, getFeatureBranch } from '../../services/worktrunk.js';
 import { getSession, isRunning, addSseClient, removeSseClient, getRetryInfo, isClaimed } from '../../services/agent-sessions.js';
 
 const MAX_DESCRIPTION_LENGTH = 50000; // 50KB
@@ -129,7 +129,8 @@ export function registerFeatureRoutes(router) {
       return json(res, []);
     }
     const features = [];
-    const wtInstalled = isWtInstalled();
+    // List worktrees once per request instead of once per story
+    const worktreeBranches = isWtInstalled() ? listWorktreeBranches(root) : new Map();
 
     // Parse filter from query params (default: active, with validation)
     const validFilters = [DELETION_FILTER.ACTIVE, DELETION_FILTER.DELETED, DELETION_FILTER.ALL];
@@ -151,7 +152,7 @@ export function registerFeatureRoutes(router) {
         if (minimal) {
           // Minimal mode: return basic info + essential computed fields for fast initial render
           // Include hasWorktree and isCompleted since they're needed for filtering
-          const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+          const hasWt = worktreeBranches.has(getFeatureBranch(entry.name));
           const completed = isFeatureCompleted(status);
           features.push({
             name: entry.name,
@@ -169,7 +170,7 @@ export function registerFeatureRoutes(router) {
           });
         } else {
           // Full mode: return all data including computed states
-          const hasWt = wtInstalled && hasWorktree(getFeatureBranch(entry.name), root);
+          const hasWt = worktreeBranches.has(getFeatureBranch(entry.name));
           const running = isRunning(entry.name);
           const completed = isFeatureCompleted(status);
           features.push({
